@@ -9,15 +9,26 @@ import type {
   UnitSummary,
 } from './types.js';
 
+/**
+ * HTTP protocol layer for OnTrack API calls.
+ *
+ * Responsibilities:
+ * - build URLs from base API origin
+ * - attach auth headers from cached session
+ * - retry idempotent requests on transient failures
+ * - normalize JSON/binary response handling
+ */
 type JsonBody = Record<string, unknown> | undefined;
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const DEFAULT_RETRY_ATTEMPTS = 2;
 
+/** Normalize request method string for retry policy checks. */
 function methodOf(init: RequestInit): string {
   return (init.method || 'GET').toUpperCase();
 }
 
+/** Retry only idempotent requests and only for retryable HTTP statuses. */
 function shouldRetry(response: Response, init: RequestInit, attempt: number, maxRetries: number): boolean {
   if (attempt >= maxRetries) {
     return false;
@@ -31,6 +42,7 @@ function shouldRetry(response: Response, init: RequestInit, attempt: number, max
   return RETRYABLE_STATUSES.has(response.status);
 }
 
+/** Exponential backoff with jitter to reduce retry stampedes. */
 function retryDelayMs(attempt: number): number {
   const base = 250;
   const backoff = base * 2 ** attempt;
@@ -38,10 +50,12 @@ function retryDelayMs(attempt: number): number {
   return backoff + jitter;
 }
 
+/** Async delay primitive used by retry backoff logic. */
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Build concise, user-facing error details from HTTP response + body. */
 function buildErrorMessage(response: Response, body: unknown): string {
   let message = `${response.status} ${response.statusText}`;
   if (typeof body === 'string' && body.trim()) {
@@ -52,6 +66,7 @@ function buildErrorMessage(response: Response, body: unknown): string {
   return message;
 }
 
+/** Perform JSON request/response handling with retry support. */
 async function requestJson<T>(
   url: string,
   init: RequestInit,
@@ -77,18 +92,21 @@ async function requestJson<T>(
   return body as T;
 }
 
+/** Binary download shape returned by PDF endpoints. */
 export interface DownloadResult {
   buffer: Buffer;
   contentType: string;
   contentDisposition?: string;
 }
 
+/** Probe response payload used by `discover --probe`. */
 export interface ProbeResult {
   endpoint: string;
   status: number;
   ok: boolean;
 }
 
+/** One multipart upload file entry keyed by required server field name. */
 export interface SubmissionUploadFile {
   key: string;
   filename: string;
@@ -96,10 +114,12 @@ export interface SubmissionUploadFile {
   contentType?: string;
 }
 
+/** Optional behavior switches for upload submission endpoint. */
 export interface UploadSubmissionOptions {
   trigger?: SubmissionTrigger;
 }
 
+/** Perform binary request with retry and consistent error handling. */
 async function requestBinary(
   url: string,
   init: RequestInit,
@@ -129,10 +149,12 @@ async function requestBinary(
   };
 }
 
+/** Join path with API base URL while avoiding duplicate slashes. */
 function withApiPath(baseUrl: string, path: string): string {
   return new URL(path.replace(/^\//, ''), `${baseUrl}/`).toString();
 }
 
+/** Ensure probe paths always use leading slash for downstream join logic. */
 function normalizeProbePath(path: string): string {
   if (!path.startsWith('/')) {
     return `/${path}`;
@@ -140,6 +162,7 @@ function normalizeProbePath(path: string): string {
   return path;
 }
 
+/** Normalize probe path then join against API base safely. */
 function withFlexibleApiPath(baseUrl: string, path: string): string {
   const normalized = normalizeProbePath(path);
   if (normalized.startsWith('/api/')) {
@@ -148,6 +171,7 @@ function withFlexibleApiPath(baseUrl: string, path: string): string {
   return withApiPath(baseUrl, normalized);
 }
 
+/** Auth header contract required by OnTrack API. */
 function authHeaders(session: SessionData): HeadersInit {
   return {
     'Auth-Token': session.authToken,
@@ -162,6 +186,7 @@ export class OnTrackApiClient {
     return this.baseUrl;
   }
 
+  /** Read server-advertised authentication mode (SSO/manual metadata). */
   getAuthMethod(): Promise<AuthMethodResponse> {
     return requestJson<AuthMethodResponse>(withApiPath(this.baseUrl, 'auth/method'), {
       method: 'GET',
@@ -171,6 +196,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** Exchange captured login payload for API auth token + user profile. */
   signIn(payload: JsonBody): Promise<SignInResponse> {
     return requestJson<SignInResponse>(withApiPath(this.baseUrl, 'auth'), {
       method: 'POST',
@@ -182,6 +208,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** Revoke remote auth session (best effort). */
   signOut(session: SessionData): Promise<unknown> {
     return requestJson(withApiPath(this.baseUrl, 'auth'), {
       method: 'DELETE',
@@ -192,6 +219,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** List projects visible to the authenticated account. */
   listProjects(session: SessionData): Promise<ProjectSummary[]> {
     return requestJson<ProjectSummary[]>(withApiPath(this.baseUrl, 'projects'), {
       method: 'GET',
@@ -202,6 +230,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** Fetch one project payload, usually including task instances. */
   getProject(session: SessionData, projectId: number): Promise<ProjectSummary> {
     return requestJson<ProjectSummary>(withApiPath(this.baseUrl, `projects/${projectId}`), {
       method: 'GET',
@@ -212,6 +241,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** List units; some roles may receive 403 (handled by caller fallback). */
   listUnits(session: SessionData): Promise<UnitSummary[]> {
     return requestJson<UnitSummary[]>(withApiPath(this.baseUrl, 'units'), {
       method: 'GET',
@@ -222,6 +252,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** Fetch a single unit, often used to resolve task definition metadata. */
   getUnit(session: SessionData, unitId: number): Promise<UnitSummary> {
     return requestJson<UnitSummary>(withApiPath(this.baseUrl, `units/${unitId}`), {
       method: 'GET',
@@ -232,6 +263,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** Inbox endpoint for a specific unit. */
   listInboxTasks(session: SessionData, unitId: number): Promise<InboxTask[]> {
     return requestJson<InboxTask[]>(withApiPath(this.baseUrl, `units/${unitId}/tasks/inbox`), {
       method: 'GET',
@@ -242,6 +274,7 @@ export class OnTrackApiClient {
     });
   }
 
+  /** Read comments/events for one task definition in a project. */
   listTaskComments(session: SessionData, projectId: number, taskDefId: number): Promise<FeedbackItem[]> {
     return requestJson<FeedbackItem[]>(
       withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/comments`),
@@ -255,6 +288,7 @@ export class OnTrackApiClient {
     );
   }
 
+  /** Post a text comment into task conversation stream. */
   addTaskComment(
     session: SessionData,
     projectId: number,
@@ -275,6 +309,7 @@ export class OnTrackApiClient {
     );
   }
 
+  /** Upload submission/new-file payload using multipart form data. */
   uploadTaskSubmission(
     session: SessionData,
     projectId: number,
@@ -312,6 +347,7 @@ export class OnTrackApiClient {
     );
   }
 
+  /** Download task sheet PDF. */
   downloadTaskPdf(session: SessionData, unitId: number, taskDefId: number): Promise<DownloadResult> {
     return requestBinary(
       withApiPath(
@@ -328,6 +364,7 @@ export class OnTrackApiClient {
     );
   }
 
+  /** Download submission snapshot PDF. */
   downloadSubmissionPdf(
     session: SessionData,
     projectId: number,
@@ -348,6 +385,7 @@ export class OnTrackApiClient {
     );
   }
 
+  /** Lightweight GET probe used by discovery tooling to validate endpoint access. */
   async probeGet(session: SessionData, endpointPath: string): Promise<ProbeResult> {
     const endpoint = normalizeProbePath(endpointPath);
     const response = await fetch(withFlexibleApiPath(this.baseUrl, endpoint), {

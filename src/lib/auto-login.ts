@@ -2,12 +2,22 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Frame, Locator, Page } from 'playwright-core';
 
+/**
+ * Browser automation flow for Monash SSO / Okta handoff.
+ *
+ * Responsibilities:
+ * - drive guided username/password entry when requested
+ * - detect MFA method selection and number challenge states
+ * - capture final OnTrack credentials from URL/auth payload/cookies/storage
+ * - classify failures into explicit fallback reasons
+ */
 export interface LoginCredentials {
   authToken: string;
   username: string;
   source: 'url' | 'auth_request' | 'auth_response' | 'local_storage' | 'cookie';
 }
 
+/** Guided SSO options for username/password + MFA interaction mode. */
 export interface SsoLoginOptions {
   ssoUrl: string;
   apiBaseUrl: string;
@@ -19,14 +29,17 @@ export interface SsoLoginOptions {
   onMfaNumberChallenge?: (numbers: string[]) => void;
 }
 
+/** One CLI-presented MFA option extracted from page controls. */
 export interface MfaMethodOption {
   id: number;
   label: string;
   recommended?: boolean;
 }
 
+/** High-level guided login lifecycle steps used by terminal callbacks. */
 export type SsoStep = 'username' | 'password' | 'mfa_select' | 'mfa_wait' | 'completed' | 'fallback';
 
+/** Categorized fallback reasons surfaced to callers and users. */
 export type SsoFallbackReason =
   | 'captcha'
   | 'unsupported_mfa'
@@ -35,6 +48,7 @@ export type SsoFallbackReason =
   | 'browser_unavailable'
   | 'automation_error';
 
+/** Typed fallback error carrying reason + stage for better UX messaging. */
 export class SsoFallbackError extends Error {
   constructor(
     readonly reason: SsoFallbackReason,
@@ -46,15 +60,18 @@ export class SsoFallbackError extends Error {
   }
 }
 
+/** Browser launch strategy selected at runtime. */
 export interface BrowserLaunchPlan {
   source: 'env' | 'system' | 'bundled';
   executablePath?: string;
 }
 
+/** Type guard for non-empty string-like values. */
 function hasValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+/** Extract authToken/username directly from redirect URL query params. */
 export function extractCredentialsFromUrl(urlValue: string): LoginCredentials | null {
   try {
     const url = new URL(urlValue);
@@ -73,6 +90,7 @@ export function extractCredentialsFromUrl(urlValue: string): LoginCredentials | 
   }
 }
 
+/** Parse `/api/auth` request/response payload variants into common credential shape. */
 export function extractCredentialsFromAuthPayload(payload: unknown): LoginCredentials | null {
   if (!payload || typeof payload !== 'object') {
     return null;
@@ -97,6 +115,7 @@ export function extractCredentialsFromAuthPayload(payload: unknown): LoginCreden
   };
 }
 
+/** Extract credentials from cookies for cases where URL/network interception misses. */
 export function extractCredentialsFromCookieJar(
   cookies: Array<{ name: string; value: string }>,
 ): LoginCredentials | null {
@@ -123,6 +142,7 @@ export function extractCredentialsFromCookieJar(
   };
 }
 
+/** Candidate local browser locations by platform (used before bundled Chromium). */
 function candidateBrowserPaths(): string[] {
   const paths: string[] = [];
   if (process.env.ONTRACK_BROWSER_PATH) {
@@ -169,6 +189,7 @@ function candidateBrowserPaths(): string[] {
   return paths;
 }
 
+/** Select browser launch strategy: explicit env path > system browser > bundled. */
 export function resolveBrowserLaunchPlan(
   env: NodeJS.ProcessEnv = process.env,
   fileExists: (path: string) => boolean = existsSync,
@@ -202,6 +223,7 @@ export function resolveBrowserLaunchPlan(
   };
 }
 
+/** Human-readable remediation when no launchable browser is found. */
 function browserInstallHint(): string {
   return (
     'No browser executable found. Install Chrome/Chromium/Edge, or run "npx playwright install chromium", ' +
@@ -209,6 +231,7 @@ function browserInstallHint(): string {
   );
 }
 
+/** Map unknown automation failures to high-level fallback reasons for CLI messaging. */
 export function classifySsoFallback(error: unknown): SsoFallbackReason {
   if (error instanceof SsoFallbackError) {
     return error.reason;
@@ -233,6 +256,7 @@ export function classifySsoFallback(error: unknown): SsoFallbackReason {
   return 'automation_error';
 }
 
+/** Safe JSON parsing helper for intercepted request/response payloads. */
 function tryParseJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
@@ -241,6 +265,7 @@ function tryParseJson(raw: string): unknown {
   }
 }
 
+/** Attempt to recover credentials from OnTrack localStorage session payload. */
 async function extractCredentialsFromLocalStorage(page: {
   evaluate: (fn: () => unknown) => Promise<unknown>;
 }): Promise<LoginCredentials | null> {
@@ -283,6 +308,7 @@ async function extractCredentialsFromLocalStorage(page: {
   }
 }
 
+/** Browser-assisted capture options used by non-guided SSO mode. */
 export interface AutoLoginOptions {
   ssoUrl: string;
   apiBaseUrl: string;
@@ -290,6 +316,7 @@ export interface AutoLoginOptions {
   headless?: boolean;
 }
 
+// Username selector list spans Okta + Microsoft + generic IdP form variants.
 const USERNAME_SELECTORS = [
   'input#okta-signin-username',
   'input#username',
@@ -303,6 +330,7 @@ const USERNAME_SELECTORS = [
   'input[type="email"]',
 ];
 
+// Password selector list spans Okta + Microsoft + generic password input variants.
 const PASSWORD_SELECTORS = [
   'input#okta-signin-password',
   'input#password',
@@ -314,6 +342,7 @@ const PASSWORD_SELECTORS = [
   'input[type="password"]',
 ];
 
+// Submit controls used after filling credentials.
 const PRIMARY_SUBMIT_SELECTORS = [
   'input#okta-signin-submit',
   '#idSIButton9',
@@ -323,6 +352,7 @@ const PRIMARY_SUBMIT_SELECTORS = [
   'button[data-type="save"]',
 ];
 
+// SSO entry controls used on landing pages that require an extra click into IdP.
 const SSO_ENTRY_SELECTORS = [
   'a[href*="sso"]',
   'a[href*="monashuni.okta.com"]',
@@ -332,6 +362,7 @@ const SSO_ENTRY_SELECTORS = [
   'button[data-sso]',
 ];
 
+// Label-based fallback for SSO entry when selectors are unstable.
 const SSO_ENTRY_LABELS = [
   'monash',
   'single sign',
@@ -367,10 +398,12 @@ const BLOCKED_LINK_HOSTS = new Set([
   'www.okta.com',
 ]);
 
+/** Convert unknown thrown values into printable message text. */
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Snapshot page locations for timeout diagnostics and fallback hints. */
 function summarizePageLocations(pages: Page[]): string {
   const locations: string[] = [];
   for (const page of pages) {
@@ -416,6 +449,7 @@ interface GuidedSsoRuntimeState {
   lastMfaChallengeNumbersKey?: string;
 }
 
+// Candidate nodes that often contain Okta number-challenge UI digits.
 const MFA_CHALLENGE_NUMBER_SELECTORS = [
   '[data-se*="number-challenge"]',
   '[data-se*="numberChallenge"]',
@@ -428,10 +462,12 @@ const MFA_CHALLENGE_NUMBER_SELECTORS = [
   '[id*="challenge-number"]',
 ].join(', ');
 
+// Text signal used to decide whether nearby numbers are MFA challenge values.
 const MFA_CHALLENGE_TEXT_SIGNAL =
   /number challenge|following number|enter the number|tap the number|okta verify|approve sign in|push notification/i;
 const MFA_CHALLENGE_NUMBER_TOKEN = /\b\d{1,3}\b/g;
 
+/** Collect main page plus all child frames for resilient selector scanning. */
 function collectScopes(page: Page): ScopeRef[] {
   const refs: ScopeRef[] = [{ page, scope: page }];
   for (const frame of page.frames()) {
@@ -443,6 +479,7 @@ function collectScopes(page: Page): ScopeRef[] {
   return refs;
 }
 
+/** True when selector exists and is visibly interactable in a given scope. */
 async function canUseSelector(scope: InteractionScope, selector: string): Promise<boolean> {
   const locator = scope.locator(selector).first();
   try {
@@ -456,6 +493,7 @@ async function canUseSelector(scope: InteractionScope, selector: string): Promis
   }
 }
 
+/** Fill the first visible field among selector candidates. */
 async function fillFirstVisible(
   scopes: ScopeRef[],
   selectors: string[],
@@ -473,6 +511,7 @@ async function fillFirstVisible(
   return false;
 }
 
+/** Click button/link controls by likely action labels (next/continue/sign in). */
 async function clickLikelyActionControl(scopes: ScopeRef[], labels: string[]): Promise<boolean> {
   for (const label of labels) {
     const matcher = new RegExp(label, 'i');
@@ -507,6 +546,7 @@ async function clickLikelyActionControl(scopes: ScopeRef[], labels: string[]): P
   return false;
 }
 
+/** Guard link clicks to avoid navigation into unrelated marketing/support pages. */
 function isSafeActionLink(currentUrl: string, href: string | null): boolean {
   if (!href) {
     return false;
@@ -543,6 +583,7 @@ function isSafeActionLink(currentUrl: string, href: string | null): boolean {
   }
 }
 
+/** Click first visible selector match across all scopes. */
 async function clickFirstVisible(scopes: ScopeRef[], selectors: string[]): Promise<boolean> {
   for (const selector of selectors) {
     for (const scopeRef of scopes) {
@@ -569,6 +610,7 @@ async function clickFirstVisible(scopes: ScopeRef[], selectors: string[]): Promi
   return false;
 }
 
+/** Detect text signals (captcha, mfa prompts, etc.) across page/frame scopes. */
 async function hasTextSignal(scopes: ScopeRef[], pattern: RegExp): Promise<boolean> {
   for (const scopeRef of scopes) {
     try {
@@ -583,6 +625,7 @@ async function hasTextSignal(scopes: ScopeRef[], pattern: RegExp): Promise<boole
   return false;
 }
 
+/** Detect captcha interstitials that require immediate fallback to manual flow. */
 async function detectSsoCaptcha(scopes: ScopeRef[]): Promise<boolean> {
   return (
     (await hasTextSignal(scopes, /captcha|prove you are human|i am human|recaptcha/i)) ||
@@ -590,6 +633,7 @@ async function detectSsoCaptcha(scopes: ScopeRef[]): Promise<boolean> {
   );
 }
 
+/** Detect MFA methods intentionally unsupported in v1 guided automation. */
 async function detectUnsupportedMfa(scopes: ScopeRef[]): Promise<boolean> {
   if (await hasTextSignal(scopes, /security key|webauthn|passkey/i)) {
     return true;
@@ -613,6 +657,7 @@ async function detectUnsupportedMfa(scopes: ScopeRef[]): Promise<boolean> {
   return false;
 }
 
+/** Detect Okta Verify push/number challenge surfaces. */
 async function detectOktaVerifyChallenge(scopes: ScopeRef[]): Promise<boolean> {
   return (
     (await hasTextSignal(scopes, /okta verify|check your okta verify app|number challenge/i)) ||
@@ -623,6 +668,7 @@ async function detectOktaVerifyChallenge(scopes: ScopeRef[]): Promise<boolean> {
   );
 }
 
+/** Deduplicate values while preserving first-seen ordering. */
 function uniqueInOrder(values: string[]): string[] {
   const unique = new Set<string>();
   const out: string[] = [];
@@ -636,6 +682,7 @@ function uniqueInOrder(values: string[]): string[] {
   return out;
 }
 
+/** Extract candidate short numeric tokens from free-form challenge text. */
 function extractNumberTokens(text: string): string[] {
   const matches = text.match(MFA_CHALLENGE_NUMBER_TOKEN);
   if (!matches) {
@@ -644,10 +691,12 @@ function extractNumberTokens(text: string): string[] {
   return matches;
 }
 
+/** Detect whether a text fragment looks like MFA number-challenge instructions. */
 function hasMfaChallengeSignal(text: string): boolean {
   return MFA_CHALLENGE_TEXT_SIGNAL.test(text);
 }
 
+/** Parse 1-3 challenge numbers from mixed MFA text blocks. */
 export function extractMfaNumberChallengeFromText(text: string): string[] {
   if (!text.trim()) {
     return [];
@@ -695,6 +744,7 @@ export function extractMfaNumberChallengeFromText(text: string): string[] {
   return uniqueInOrder(found).slice(0, 3);
 }
 
+/** Aggregate challenge numbers from body text plus likely challenge DOM nodes. */
 async function extractMfaNumberChallenge(scopes: ScopeRef[]): Promise<string[]> {
   const textCandidates: string[] = [];
 
@@ -741,6 +791,7 @@ async function extractMfaNumberChallenge(scopes: ScopeRef[]): Promise<string[]> 
   return uniqueInOrder(collected).slice(0, 3);
 }
 
+/** Scope-aware selector existence check. */
 async function canUseSelectorInScopes(scopes: ScopeRef[], selector: string): Promise<boolean> {
   for (const scopeRef of scopes) {
     if (await canUseSelector(scopeRef.scope, selector)) {
@@ -750,6 +801,7 @@ async function canUseSelectorInScopes(scopes: ScopeRef[], selector: string): Pro
   return false;
 }
 
+/** True when any selector in a set can be used in any active scope. */
 async function hasAnySelectorInScopes(scopes: ScopeRef[], selectors: string[]): Promise<boolean> {
   for (const selector of selectors) {
     if (await canUseSelectorInScopes(scopes, selector)) {
@@ -759,6 +811,7 @@ async function hasAnySelectorInScopes(scopes: ScopeRef[], selectors: string[]): 
   return false;
 }
 
+/** Normalize noisy MFA labels into stable user-facing option text. */
 function normalizeMfaLabel(raw: string): string {
   const compact = raw.replace(/\s+/g, ' ').trim();
   if (!compact) {
@@ -786,10 +839,12 @@ function normalizeMfaLabel(raw: string): string {
     .trim();
 }
 
+/** Escape user-facing strings for dynamic RegExp construction. */
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Extract best-effort MFA option label from control and nearby container text. */
 async function extractMfaOptionLabel(control: Locator): Promise<string> {
   try {
     const label = await control.evaluate((element) => {
@@ -831,6 +886,7 @@ async function extractMfaOptionLabel(control: Locator): Promise<string> {
   }
 }
 
+/** Collect controls that appear to perform MFA method selection ("Select"). */
 async function collectSelectControls(scopeRef: ScopeRef): Promise<Locator[]> {
   const controls: Locator[] = [];
 
@@ -867,6 +923,7 @@ async function collectSelectControls(scopeRef: ScopeRef): Promise<Locator[]> {
   return controls;
 }
 
+/** Find first enabled/visible action control in an MFA option container row. */
 async function findVisibleActionControl(container: Locator): Promise<Locator | null> {
   const candidates = [
     container.getByRole('button'),
@@ -895,6 +952,7 @@ async function findVisibleActionControl(container: Locator): Promise<Locator | n
   return null;
 }
 
+/** Count how many known MFA method labels appear in a text block. */
 function countKnownMfaMethodMentions(text: string): number {
   let count = 0;
   for (const method of KNOWN_MFA_METHODS) {
@@ -905,6 +963,7 @@ function countKnownMfaMethodMentions(text: string): number {
   return count;
 }
 
+/** Discover MFA options by scanning known method labels and adjacent controls. */
 async function collectKnownMfaMethodOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
   const options: DetectedMfaOption[] = [];
 
@@ -955,6 +1014,7 @@ async function collectKnownMfaMethodOptions(scopes: ScopeRef[]): Promise<Detecte
   return options;
 }
 
+/** Discover selectable MFA options via generic "Select" controls + known-label fallback. */
 async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
   const options: DetectedMfaOption[] = [];
   for (const scopeRef of scopes) {
@@ -994,6 +1054,7 @@ async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedM
   return [...unique.values()];
 }
 
+/** Click a detected MFA option with layered fallback click strategies. */
 async function clickDetectedMfaOption(option: DetectedMfaOption): Promise<boolean> {
   try {
     if (await option.control.isVisible({ timeout: 300 })) {
@@ -1040,6 +1101,7 @@ async function clickDetectedMfaOption(option: DetectedMfaOption): Promise<boolea
   return false;
 }
 
+/** Detect MFA choices, ask CLI callback for selection, then click chosen option. */
 async function maybeHandleMfaMethodSelection(
   scopes: ScopeRef[],
   state: GuidedSsoRuntimeState,
@@ -1096,6 +1158,7 @@ async function maybeHandleMfaMethodSelection(
   return false;
 }
 
+/** Submit current auth step via selector, label-driven click, or Enter fallback. */
 async function submitAfterFieldFill(scopes: ScopeRef[], labels: string[]): Promise<boolean> {
   const submittedBySelector = await clickFirstVisible(scopes, PRIMARY_SUBMIT_SELECTORS);
   if (submittedBySelector) {
@@ -1125,6 +1188,12 @@ async function submitAfterFieldFill(scopes: ScopeRef[], labels: string[]): Promi
   return false;
 }
 
+/**
+ * Execute one guided-SSO progression tick:
+ * - enter username/password when fields are visible
+ * - handle MFA method selection UI
+ * - detect and emit number-challenge updates
+ */
 async function advanceGuidedSsoOnPage(
   page: Page,
   username: string,
@@ -1231,6 +1300,7 @@ async function advanceGuidedSsoOnPage(
   }
 }
 
+/** Launch playwright chromium with best-available executable resolution. */
 async function launchBrowserForCapture(options: {
   headless: boolean;
 }): Promise<{
@@ -1281,6 +1351,12 @@ async function launchBrowserForCapture(options: {
   }
 }
 
+/**
+ * Core capture loop:
+ * - optionally drives guided SSO interactions
+ * - observes pages/requests/responses for credentials
+ * - falls back with typed errors when flow cannot be automated
+ */
 async function captureSsoCredentialsInternal(
   options: AutoLoginOptions,
   guidedLogin?: {
@@ -1293,11 +1369,13 @@ async function captureSsoCredentialsInternal(
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
 
+  // Browser launch plan supports env override, system browser, then bundled Chromium.
   const launch = await launchBrowserForCapture({
     headless: options.headless ?? false,
   });
   const browser = launch.browser;
 
+  // New isolated browser context avoids leaking cookies between login attempts.
   const context = await browser.newContext();
   const page = await context.newPage();
   const seenPages = new Set<Page>();
@@ -1305,6 +1383,7 @@ async function captureSsoCredentialsInternal(
   let captured: LoginCredentials | null = null;
 
   const setCaptured = (value: LoginCredentials | null): void => {
+    // Capture first valid credential source and ignore later duplicates.
     if (!captured && value) {
       captured = value;
     }
@@ -1316,9 +1395,11 @@ async function captureSsoCredentialsInternal(
     }
     seenPages.add(currentPage);
 
+    // Immediate URL check covers flows where auth token appears in address bar.
     setCaptured(extractCredentialsFromUrl(currentPage.url()));
 
     currentPage.on('framenavigated', () => {
+      // Re-check URL after every navigation in case redirect carries token.
       setCaptured(extractCredentialsFromUrl(currentPage.url()));
     });
 
@@ -1407,6 +1488,7 @@ async function captureSsoCredentialsInternal(
         const scopes = collectScopes(openPage);
 
         if (guidedLogin && guidedState) {
+          // Guided mode actively interacts with fields/buttons every polling cycle.
           await advanceGuidedSsoOnPage(
             openPage,
             guidedLogin.username,
@@ -1449,6 +1531,7 @@ async function captureSsoCredentialsInternal(
         try {
           const pageOrigin = new URL(openPage.url()).origin;
           if (pageOrigin === targetOrigin) {
+            // Some flows only expose credentials in localStorage after landing on origin.
             setCaptured(await extractCredentialsFromLocalStorage(openPage));
           }
         } catch {
@@ -1461,6 +1544,7 @@ async function captureSsoCredentialsInternal(
       }
 
       const cookies = await context.cookies();
+      // Cookie extraction is final in-loop fallback before next polling tick.
       setCaptured(extractCredentialsFromCookieJar(cookies));
 
       if (captured) {
@@ -1499,10 +1583,12 @@ async function captureSsoCredentialsInternal(
   return captured;
 }
 
+/** Browser-only credential capture (no guided username/password actions). */
 export async function captureSsoCredentials(options: AutoLoginOptions): Promise<LoginCredentials> {
   return captureSsoCredentialsInternal(options);
 }
 
+/** Guided credential capture with step callbacks for terminal UX. */
 export async function captureSsoCredentialsWithGuidedLogin(
   options: SsoLoginOptions,
   onStep?: (step: SsoStep) => void,

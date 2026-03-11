@@ -2,6 +2,14 @@ import type { ProbeResult } from './api.js';
 import type { ProjectSummary, SessionData } from './types.js';
 import { getTaskDefinitionId } from './utils.js';
 
+/**
+ * Static frontend discovery helpers.
+ *
+ * Goal:
+ * - inspect served HTML/JS bundles
+ * - extract likely UI route literals and API templates
+ * - optionally probe those templates with a real session
+ */
 const DEFAULT_SITE_URL = 'https://ontrack.infotech.monash.edu/home';
 
 const PATH_LITERAL_PATTERN = /(["'`])(\/[A-Za-z0-9_./:-]+)\1/g;
@@ -50,6 +58,12 @@ export interface ProbeApiClient {
   probeGet(session: SessionData, endpointPath: string): Promise<ProbeResult>;
 }
 
+/**
+ * Normalize discovered path literals and drop obvious noise:
+ * - static assets
+ * - malformed regex fragments
+ * - trivial path artifacts
+ */
 function normalizePath(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed.startsWith('/')) {
@@ -89,10 +103,12 @@ function normalizePath(raw: string): string | null {
   return value;
 }
 
+/** Heuristic: classify a path as API-oriented if it contains a known API hint. */
 function isApiTemplate(path: string): boolean {
   return API_HINTS.some((hint) => path.includes(hint));
 }
 
+/** Parse JS asset paths from HTML script/link tags. */
 export function extractJavascriptAssetPaths(html: string): string[] {
   const paths = new Set<string>();
   let match: RegExpExecArray | null = JS_SCRIPT_PATTERN.exec(html);
@@ -106,6 +122,7 @@ export function extractJavascriptAssetPaths(html: string): string[] {
   return [...paths];
 }
 
+/** Extract normalized absolute-like paths from string literals inside JS sources. */
 export function extractDiscoveredPaths(source: string): string[] {
   const matches = new Set<string>();
   let match: RegExpExecArray | null = PATH_LITERAL_PATTERN.exec(source);
@@ -119,6 +136,7 @@ export function extractDiscoveredPaths(source: string): string[] {
   return [...matches];
 }
 
+/** Split discovered literals into UI routes and API templates. */
 export function classifyDiscoveredPaths(paths: string[]): {
   uiRoutes: string[];
   apiTemplates: string[];
@@ -140,6 +158,7 @@ export function classifyDiscoveredPaths(paths: string[]): {
   };
 }
 
+/** Fetch text resources with a browser-like Accept header. */
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url, {
     method: 'GET',
@@ -155,6 +174,10 @@ async function fetchText(url: string): Promise<string> {
   return response.text();
 }
 
+/**
+ * Crawl index + JS bundles to build a route/API discovery snapshot.
+ * This is read-only and does not require an authenticated session.
+ */
 export async function discoverOnTrackSurface(siteUrl: string = DEFAULT_SITE_URL): Promise<DiscoveryResult> {
   const fetchedAt = new Date().toISOString();
   const html = await fetchText(siteUrl);
@@ -202,6 +225,7 @@ export interface ProbeContext {
   taskDefId?: number;
 }
 
+/** Build best-effort probe context from the first visible project/task. */
 function toProbeContext(projects: ProjectSummary[]): ProbeContext {
   const project = projects[0];
   if (!project) {
@@ -225,6 +249,7 @@ const PARAM_RESOLVER: Record<string, keyof ProbeContext> = {
   task_definition_id: 'taskDefId',
 };
 
+/** Replace `:param` placeholders with concrete context values where possible. */
 function materializeEndpoint(template: string, context: ProbeContext): {
   endpoint?: string;
   unresolved: string[];
@@ -253,10 +278,15 @@ function materializeEndpoint(template: string, context: ProbeContext): {
   };
 }
 
+/** Standardize probe status text to keep table output compact. */
 function statusDetail(result: ProbeResult): string {
   return result.ok ? `HTTP ${result.status}` : `HTTP ${result.status} (not accessible)`;
 }
 
+/**
+ * Probe discovered API templates with a real logged-in session.
+ * Unresolved templates are explicitly reported as `skip`.
+ */
 export async function probeDiscoveredApiTemplates(
   api: ProbeApiClient,
   session: SessionData,

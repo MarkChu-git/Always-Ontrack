@@ -65,8 +65,19 @@ import type {
 import type { WelcomeMenuItem } from './lib/welcome.js';
 import type { WatchTaskState } from './lib/utils.js';
 
+/**
+ * Main CLI entry module.
+ *
+ * This file hosts:
+ * - command routing and argument validation
+ * - interactive launcher UX
+ * - high-level workflows (auth, reads, watch, pdf, upload)
+ *
+ * Lower-level HTTP/session/parsing logic lives in `src/lib/*`.
+ */
 type InboxRowTask = InboxTask & { _unitId: number };
 
+/** Print command help and high-level behavioral notes. */
 function help(): void {
   console.log(`ontrack
 
@@ -144,6 +155,7 @@ const KLEIN_BLUE_TITLE = '1;38;2;55;108;236';
 const KLEIN_BLUE_ACCENT = '1;38;2;0;47;167';
 const KLEIN_BLUE_SOFT = '38;2;38;95;224';
 
+/** Decide whether launcher/panel ANSI colors should be active. */
 function launcherColorsEnabled(): boolean {
   if (process.env.NO_COLOR !== undefined) {
     return false;
@@ -155,6 +167,7 @@ function launcherColorsEnabled(): boolean {
   return Boolean(process.stdout.isTTY);
 }
 
+/** Apply ANSI color only when terminal supports/enables color output. */
 function launcherColor(text: string, code: string): string {
   if (!launcherColorsEnabled()) {
     return text;
@@ -162,6 +175,7 @@ function launcherColor(text: string, code: string): string {
   return `\u001B[${code}m${text}\u001B[0m`;
 }
 
+/** Format one menu item as two launcher lines (title + command summary). */
 function formatWelcomeMenuRow(item: WelcomeMenuItem): string[] {
   const id = String(item.id).padStart(2, '0');
   const badge = item.recommended ? ` ${launcherColor('RECOMMENDED', '1;30;46')}` : '';
@@ -170,6 +184,7 @@ function formatWelcomeMenuRow(item: WelcomeMenuItem): string[] {
   return [primary, secondary];
 }
 
+/** Render full welcome launcher screen with logo, legend, and numbered actions. */
 function renderWelcomeScreen(items: WelcomeMenuItem[]): void {
   if (process.stdout.isTTY && process.env.TERM !== 'dumb') {
     console.clear();
@@ -197,10 +212,12 @@ function renderWelcomeScreen(items: WelcomeMenuItem[]): void {
 type TerminalPanelTone = 'info' | 'success' | 'warn';
 const PANEL_ANSI_ESCAPE_PATTERN = /\u001B\[[0-9;]*m/g;
 
+/** Visible text width helper for panel row padding. */
 function panelVisibleLength(value: string): number {
   return value.replace(PANEL_ANSI_ESCAPE_PATTERN, '').length;
 }
 
+/** Resolve border/header tone color for boxed terminal panels. */
 function panelToneCode(tone: TerminalPanelTone): string {
   if (tone === 'success') {
     return '1;32';
@@ -211,6 +228,7 @@ function panelToneCode(tone: TerminalPanelTone): string {
   return KLEIN_BLUE_ACCENT;
 }
 
+/** Resolve body-text color tone for boxed terminal panels. */
 function panelBodyCode(tone: TerminalPanelTone): string {
   if (tone === 'success') {
     return '32';
@@ -221,6 +239,7 @@ function panelBodyCode(tone: TerminalPanelTone): string {
   return KLEIN_BLUE_SOFT;
 }
 
+/** Render box-style panel used by guided flows and status banners. */
 function renderTerminalPanel(title: string, lines: string[], tone: TerminalPanelTone = 'info'): void {
   if (!process.stdout.isTTY || process.env.TERM === 'dumb') {
     console.log(`[${title}]`);
@@ -252,6 +271,7 @@ function renderTerminalPanel(title: string, lines: string[], tone: TerminalPanel
   console.log(launcherColor(bottom, accent));
 }
 
+/** Render compact bullet-style events for step-by-step guided output. */
 function renderTerminalEvent(message: string, tone: TerminalPanelTone = 'info'): void {
   if (!process.stdout.isTTY || process.env.TERM === 'dumb') {
     console.log(message);
@@ -262,12 +282,14 @@ function renderTerminalEvent(message: string, tone: TerminalPanelTone = 'info'):
   console.log(launcherColor(`  • ${message}`, color));
 }
 
+/** Highlight MFA number challenge values inline for fast visual confirmation. */
 function renderChallengeNumbersInline(numbers: string[]): string {
   return numbers
     .map((number) => launcherColor(` ${number} `, '1;30;103'))
     .join(launcherColor('  ', KLEIN_BLUE_SOFT));
 }
 
+/** Final login confirmation panel shown after successful session persistence. */
 function renderLoginSuccessPanel(session: SessionData): void {
   const fullName = `${session.user.firstName || session.user.first_name || ''} ${
     session.user.lastName || session.user.last_name || ''
@@ -316,6 +338,7 @@ function renderLoginSuccessPanel(session: SessionData): void {
   console.log('');
 }
 
+/** Build optional `--flag value` argument pair only when value is non-empty. */
 function optionalFlagArgs(flag: string, value?: string): string[] {
   const trimmed = (value ?? '').trim();
   if (!trimmed) {
@@ -324,6 +347,7 @@ function optionalFlagArgs(flag: string, value?: string): string[] {
   return [flag, trimmed];
 }
 
+/** Prompt until a non-empty value is entered (used in guided forms). */
 async function promptRequired(label: string): Promise<string> {
   while (true) {
     const value = (await prompt(label)).trim();
@@ -334,6 +358,7 @@ async function promptRequired(label: string): Promise<string> {
   }
 }
 
+/** Manual selector used as fallback when guided selection cannot resolve tasks. */
 async function promptTaskSelectorFlags(): Promise<string[]> {
   const projectId = await promptRequired('Project ID: ');
   const abbr = (await prompt('Task abbreviation (preferred, e.g. P1/D4). Leave empty to use task id: ')).trim();
@@ -345,6 +370,12 @@ async function promptTaskSelectorFlags(): Promise<string[]> {
   return ['--project-id', projectId, '--task-id', taskId];
 }
 
+/**
+ * Guided selector:
+ * 1) choose project by index
+ * 2) choose task by task code (abbr) within that project
+ * Supports `m` at either step for manual fallback.
+ */
 async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -411,7 +442,9 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
     'SELECT TASK',
     [
       `Project ${selectedProject.id} (${unitCode}) loaded.`,
-      'Pick a task by index. Type m to switch to manual selector.',
+      'Pick a task by task code (e.g. P1, D4).',
+      'If a row has no task code, enter its taskId number.',
+      'Type m to switch to manual selector.',
     ],
     'info',
   );
@@ -428,8 +461,22 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
   }));
   printTable(rows);
 
+  const tasksByAbbr = new Map<string, TaskSummary[]>();
+  const availableAbbrs: string[] = [];
+  for (const task of tasks) {
+    const abbr = getTaskAbbreviation(task)?.trim();
+    if (!abbr) {
+      continue;
+    }
+    const normalized = abbr.toLowerCase();
+    const bucket = tasksByAbbr.get(normalized) ?? [];
+    bucket.push(task);
+    tasksByAbbr.set(normalized, bucket);
+    availableAbbrs.push(abbr.toUpperCase());
+  }
+
   while (true) {
-    const raw = (await prompt('Select task index (or type m for manual): ')).trim();
+    const raw = (await prompt('Select task (e.g. P1) or taskId (or type m for manual): ')).trim();
     if (!raw) {
       continue;
     }
@@ -437,28 +484,57 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
       return null;
     }
 
-    const index = Number.parseInt(raw, 10);
-    if (!Number.isFinite(index) || index < 0 || index >= tasks.length) {
-      console.log(`[warn] Invalid index "${raw}". Choose 0-${tasks.length - 1}, or type m.`);
+    const byAbbr = tasksByAbbr.get(raw.toLowerCase());
+    if (byAbbr && byAbbr.length === 1) {
+      const task = byAbbr[0];
+      const projectId = String(selectedProject.id);
+      const abbr = getTaskAbbreviation(task);
+      if (abbr) {
+        return ['--project-id', projectId, '--abbr', abbr];
+      }
+    }
+
+    if (byAbbr && byAbbr.length > 1) {
+      console.log(
+        `[warn] Task code "${raw}" is ambiguous in this project. Use manual mode (m) and provide --task-id.`,
+      );
       continue;
     }
 
-    const task = tasks[index];
-    const projectId = String(selectedProject.id);
-    const abbr = getTaskAbbreviation(task);
-    if (abbr) {
-      return ['--project-id', projectId, '--abbr', abbr];
+    const maybeTaskId = Number.parseInt(raw, 10);
+    if (Number.isFinite(maybeTaskId)) {
+      const byTaskId = tasks.find((task) => {
+        const taskDefId = getTaskDefinitionId(task);
+        return taskDefId === maybeTaskId || task.id === maybeTaskId;
+      });
+
+      if (byTaskId) {
+        const projectId = String(selectedProject.id);
+        const abbr = getTaskAbbreviation(byTaskId);
+        if (abbr) {
+          return ['--project-id', projectId, '--abbr', abbr];
+        }
+
+        const taskId = getTaskDefinitionId(byTaskId);
+        if (taskId !== undefined) {
+          return ['--project-id', projectId, '--task-id', String(taskId)];
+        }
+      }
     }
 
-    const taskId = getTaskDefinitionId(task);
-    if (taskId !== undefined) {
-      return ['--project-id', projectId, '--task-id', String(taskId)];
+    const uniqueAbbrs = [...new Set(availableAbbrs)];
+    if (uniqueAbbrs.length > 0) {
+      console.log(
+        `[warn] Unknown task "${raw}". Try one of: ${uniqueAbbrs.join(', ')} (or type m for manual).`,
+      );
+      continue;
     }
 
-    console.log('[warn] Selected task cannot be resolved by abbr/task-id. Choose another item.');
+    console.log('[warn] Unknown task selection. Enter taskId number or type m for manual selector.');
   }
 }
 
+/** Shared guided selector wrapper used by launcher actions 11-14. */
 async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string): Promise<string[]> {
   renderTerminalPanel(
     modeTitle,
@@ -482,6 +558,7 @@ async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string):
   return promptTaskSelectorFlags();
 }
 
+/** Expand `~` path notation for cross-platform guided path input. */
 function expandHomePath(value: string): string {
   const trimmed = value.trim();
   if (trimmed === '~') {
@@ -493,6 +570,7 @@ function expandHomePath(value: string): string {
   return trimmed;
 }
 
+/** Prompt for optional output path and normalize home-directory shorthand. */
 async function promptGuidedOutputDirectory(): Promise<string | undefined> {
   const defaultDir = resolve(process.cwd(), './downloads');
   renderTerminalPanel(
@@ -514,6 +592,7 @@ async function promptGuidedOutputDirectory(): Promise<string | undefined> {
   return expandHomePath(trimmed);
 }
 
+/** Prompt one or more upload files for submission/new-file workflows. */
 async function promptUploadFiles(): Promise<string[]> {
   const files: string[] = [];
   while (true) {
@@ -527,7 +606,9 @@ async function promptUploadFiles(): Promise<string[]> {
   return files;
 }
 
+/** Execute a launcher action id by delegating to command handlers. */
 async function runWelcomeAction(actionId: number): Promise<void> {
+  // Keep menu ID -> action mapping explicit to preserve stable launcher UX.
   switch (actionId) {
     case 1:
       await handleLogin([]);
@@ -644,6 +725,7 @@ async function runWelcomeAction(actionId: number): Promise<void> {
   }
 }
 
+/** Interactive launcher loop used by `ontrack` (no command) and `ontrack welcome`. */
 async function handleWelcome(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     help();
@@ -684,6 +766,7 @@ async function handleWelcome(): Promise<void> {
   }
 }
 
+/** Enforce active login session before executing authenticated commands. */
 function requireSession(session: SessionData | null): SessionData {
   if (!session) {
     throw new Error('No saved session found. Run `ontrack login` first.');
@@ -691,6 +774,7 @@ function requireSession(session: SessionData | null): SessionData {
   return session;
 }
 
+/** Flatten project task arrays while preserving project/unit context fields for display. */
 function flattenTasks(projects: ProjectSummary[]): Array<
   TaskSummary & {
     projectId: number;
@@ -699,6 +783,7 @@ function flattenTasks(projects: ProjectSummary[]): Array<
     unitName?: string;
   }
 > {
+  // Flatten project-scoped task arrays while retaining unit/project identity for display/filtering.
   return projects.flatMap((project) =>
     (project.tasks || []).map((task) => ({
       ...task,
@@ -710,6 +795,7 @@ function flattenTasks(projects: ProjectSummary[]): Array<
   );
 }
 
+/** Parse optional integer flag; returns undefined when flag is not present. */
 function parseOptionalInteger(args: string[], flag: string): number | undefined {
   if (!hasFlag(args, flag)) {
     return undefined;
@@ -718,6 +804,7 @@ function parseOptionalInteger(args: string[], flag: string): number | undefined 
   return parseIntegerFlagValue(getFlagValue(args, flag), flag);
 }
 
+/** Parse optional non-empty string flag and validate missing/blank values. */
 function parseOptionalString(args: string[], flag: string): string | undefined {
   if (!hasFlag(args, flag)) {
     return undefined;
@@ -736,6 +823,7 @@ function parseOptionalString(args: string[], flag: string): string | undefined {
   return value;
 }
 
+/** Extract project id field from inbox payload variants. */
 function extractInboxProjectId(task: InboxTask): number | undefined {
   if (typeof task.projectId === 'number') {
     return task.projectId;
@@ -748,6 +836,7 @@ function extractInboxProjectId(task: InboxTask): number | undefined {
   return undefined;
 }
 
+/** Emit staff-scoping hint for expensive commands when no unit/project filter is set. */
 function roleScopeHint(session: SessionData, command: string, hasScopeFilter: boolean): void {
   if (!isStaffLikeRole(resolveUserRole(session)) || hasScopeFilter) {
     return;
@@ -758,6 +847,7 @@ function roleScopeHint(session: SessionData, command: string, hasScopeFilter: bo
   );
 }
 
+/** Resolve account role from user object with fallback to system_role field. */
 function resolveUserRole(session: SessionData): string | undefined {
   const user = session.user as Record<string, unknown>;
   const role = user.role;
@@ -773,15 +863,18 @@ function resolveUserRole(session: SessionData): string | undefined {
   return undefined;
 }
 
+/** Normalize unit role field across payload variants. */
 function getUnitRole(unit: UnitSummary): string | undefined {
   return unit.myRole || unit.my_role;
 }
 
+/** Detect 403-like failures based on normalized error message. */
 function isForbiddenError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /\b403\b/.test(message);
 }
 
+/** Derive a deduplicated unit list from project payloads when `/units` is forbidden. */
 function deriveUnitsFromProjects(projects: ProjectSummary[]): UnitSummary[] {
   const map = new Map<number, UnitSummary>();
   for (const project of projects) {
@@ -801,6 +894,7 @@ function deriveUnitsFromProjects(projects: ProjectSummary[]): UnitSummary[] {
   return [...map.values()];
 }
 
+/** Deduplicate inbox/fallback tasks by (project, unit, task) composite key. */
 function dedupeInboxTasks(tasks: InboxRowTask[]): InboxRowTask[] {
   const map = new Map<string, InboxRowTask>();
   for (const task of tasks) {
@@ -810,6 +904,7 @@ function dedupeInboxTasks(tasks: InboxRowTask[]): InboxRowTask[] {
   return [...map.values()];
 }
 
+/** Extract task-definition list from unit payload supporting snake/camel case keys. */
 function getUnitTaskDefinitions(unit: UnitSummary | undefined): TaskDefinitionSummary[] {
   if (!unit) {
     return [];
@@ -853,6 +948,7 @@ function getTaskUploadRequirements(task: TaskSummary): TaskUploadRequirement[] {
   return [];
 }
 
+/** Resolve upload requirement keys for task submission mapping. */
 function getUploadRequirementKeys(task: TaskSummary): string[] {
   const requirements = getTaskUploadRequirements(task);
   return requirements.map((requirement, index) => {
@@ -862,6 +958,7 @@ function getUploadRequirementKeys(task: TaskSummary): string[] {
   });
 }
 
+/** Infer default upload trigger from task status when not supplied explicitly. */
 function deriveDefaultSubmissionTrigger(task: TaskSummary): SubmissionTrigger | undefined {
   const status = (getTaskStatus(task) || '').trim().toLowerCase();
   if (status === 'working_on_it' || status === 'need_help') {
@@ -870,6 +967,7 @@ function deriveDefaultSubmissionTrigger(task: TaskSummary): SubmissionTrigger | 
   return undefined;
 }
 
+/** Parse and validate submission trigger flag. */
 function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | undefined {
   if (!raw) {
     return undefined;
@@ -883,6 +981,10 @@ function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | un
   throw new Error('--trigger must be one of: need_help, ready_for_feedback.');
 }
 
+/**
+ * Map provided upload files to required server keys.
+ * Supports explicit `fileN=path` mapping and implicit ordered assignment.
+ */
 function assignUploadFileKeys(
   inputs: UploadFileInput[],
   requirementKeys: string[],
@@ -965,6 +1067,7 @@ function assignUploadFileKeys(
   return assignments;
 }
 
+/** Read upload file bytes and annotate with key + filename metadata. */
 async function readUploadFiles(assignments: UploadFileAssignment[]): Promise<
   Array<{
     key: string;
@@ -990,6 +1093,7 @@ async function readUploadFiles(assignments: UploadFileAssignment[]): Promise<
   );
 }
 
+/** Apply optional project/unit scoping to project lists. */
 function projectMatchesScope(
   project: ProjectSummary,
   scope: { projectId?: number; unitId?: number },
@@ -1003,17 +1107,24 @@ function projectMatchesScope(
   return true;
 }
 
+/**
+ * Load projects and progressively enrich with:
+ * - project detail payloads (when accessible)
+ * - unit definition metadata (for task names/abbr/upload requirements)
+ */
 async function loadProjectsWithTaskMetadata(
   api: OnTrackApiClient,
   session: SessionData,
   scope: { projectId?: number; unitId?: number } = {},
 ): Promise<ProjectSummary[]> {
+  // Step 1: fetch project overview first (fast, broad visibility).
   const overview = await api.listProjects(session);
   const scopedOverview = overview.filter((project) => projectMatchesScope(project, scope));
   if (scopedOverview.length === 0) {
     return [];
   }
 
+  // Step 2: enrich with project details when accessible (fallback to overview on failure).
   const detailedResults = await Promise.allSettled(
     scopedOverview.map(async (project) => api.getProject(session, project.id)),
   );
@@ -1030,6 +1141,7 @@ async function loadProjectsWithTaskMetadata(
     projects.push(scopedOverview[index]);
   }
 
+  // Step 3: enrich with unit task-definition metadata to recover missing task fields.
   const unitIds = [
     ...new Set(
       projects
@@ -1107,6 +1219,7 @@ async function loadProjectsWithTaskMetadata(
   });
 }
 
+/** Build inbox fallback rows from project/task metadata when inbox endpoint is unavailable. */
 async function buildInboxFallbackTasksFromProjectDetails(
   api: OnTrackApiClient,
   session: SessionData,
@@ -1128,10 +1241,12 @@ async function buildInboxFallbackTasksFromProjectDetails(
   return tasks;
 }
 
+/** Try `/units` first, then fallback to units derived from `/projects` on 403. */
 async function listUnitsWithFallback(
   api: OnTrackApiClient,
   session: SessionData,
 ): Promise<{ units: UnitSummary[]; fallbackUsed: boolean }> {
+  // Some accounts cannot access /units directly; fallback to units derived from /projects.
   try {
     return {
       units: await api.listUnits(session),
@@ -1155,6 +1270,7 @@ async function listUnitsWithFallback(
   }
 }
 
+/** Show advertised auth method and SSO redirect endpoint metadata. */
 async function handleAuthMethod(args: string[]): Promise<void> {
   const api = new OnTrackApiClient(normalizeBaseUrl(getFlagValue(args, '--base-url')));
   const method = await api.getAuthMethod();
@@ -1170,11 +1286,21 @@ async function handleAuthMethod(args: string[]): Promise<void> {
   }
 }
 
+/**
+ * Login entrypoint.
+ *
+ * Priority:
+ * - direct token/login flags when provided
+ * - guided SSO by default
+ * - browser-assisted and manual redirect as fallback paths
+ */
 async function handleLogin(args: string[]): Promise<void> {
   const api = new OnTrackApiClient(normalizeBaseUrl(getFlagValue(args, '--base-url')));
+  // Security policy: password must never be passed on command line (history/process list leak).
   if (hasFlag(args, '--password') || hasFlag(args, '--sso-password')) {
     throw new Error('Password must be entered interactively. Command-line password flags are not supported.');
   }
+  // Parse mutually exclusive mode flags first.
   const auto = hasFlag(args, '--auto');
   const sso = hasFlag(args, '--sso');
   const showBrowserFlag = hasFlag(args, '--show-browser');
@@ -1199,14 +1325,17 @@ async function handleLogin(args: string[]): Promise<void> {
     throw new Error('Use either --auto or --sso, not both.');
   }
 
+  // Direct credential flags are accepted for advanced/manual flows.
   let authToken = getFlagValue(args, '--auth-token');
   let username = getFlagValue(args, '--username');
 
+  // Manual redirect URL can also directly provide auth token + username.
   const redirectUrl = getFlagValue(args, '--redirect-url');
   if (redirectUrl) {
     ({ authToken, username } = parseSsoRedirectUrl(redirectUrl));
   }
 
+  // Only perform SSO flow when direct credentials were not supplied.
   if (!authToken || !username) {
     const method = await api.getAuthMethod();
 
@@ -1224,6 +1353,7 @@ async function handleLogin(args: string[]): Promise<void> {
         isHeadless,
       });
 
+      // Last-resort fallback retained for edge MFA/captcha/selector issues.
       const manualRedirectCapture = async (): Promise<void> => {
         console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
         if (!hasFlag(args, '--no-open')) {
@@ -1239,6 +1369,7 @@ async function handleLogin(args: string[]): Promise<void> {
       };
 
       if (loginMode === 'auto') {
+        // Browser-assisted capture mode: user logs in in browser, CLI passively captures credentials.
         console.log('Starting auto SSO login in a controlled browser...');
         const captured = await captureSsoCredentials({
           ssoUrl: redirectTo,
@@ -1250,6 +1381,7 @@ async function handleLogin(args: string[]): Promise<void> {
         username = captured.username;
         console.log(`Auto login captured credentials from ${captured.source}.`);
       } else if (loginMode === 'sso_guided') {
+        // Guided mode asks username/password in CLI, then automates SSO form filling.
         let guidedUsername = parseOptionalString(args, '--sso-username');
         if (!guidedUsername) {
           guidedUsername = await prompt('Monash username: ');
@@ -1263,6 +1395,7 @@ async function handleLogin(args: string[]): Promise<void> {
           throw new Error('Password cannot be empty.');
         }
 
+        // Map low-level SSO step callbacks into human-readable terminal text.
         const stepLabels: Record<string, string> = {
           username: 'Submitting username...',
           password: 'Submitting password...',
@@ -1271,6 +1404,7 @@ async function handleLogin(args: string[]): Promise<void> {
           completed: 'SSO flow completed.',
         };
 
+        // Callback used by playwright flow when multiple MFA options are detected.
         const chooseMfaMethod = async (
           options: MfaMethodOption[],
         ): Promise<number> => {
@@ -1317,6 +1451,7 @@ async function handleLogin(args: string[]): Promise<void> {
         };
 
         try {
+          // Primary guided SSO flow (username/password + MFA selection/approval wait).
           renderTerminalPanel(
             'GUIDED MONASH SSO',
             [
@@ -1361,6 +1496,7 @@ async function handleLogin(args: string[]): Promise<void> {
           username = captured.username;
           renderTerminalEvent(`Guided SSO captured credentials from ${captured.source}.`, 'success');
         } catch (error) {
+          // Guided flow failed: classify and show redacted reason before fallback.
           const reason = classifySsoFallback(error);
           const detail = toRedactedError(error).message;
           if (error instanceof SsoFallbackError) {
@@ -1372,6 +1508,7 @@ async function handleLogin(args: string[]): Promise<void> {
           }
 
           try {
+            // Fallback 1: browser-assisted capture still avoids manual URL copy in many cases.
             console.log(
               '[info] Switching to browser-assisted SSO mode. Complete login in the opened browser window; credentials will be captured automatically.',
             );
@@ -1385,15 +1522,18 @@ async function handleLogin(args: string[]): Promise<void> {
             username = captured.username;
             console.log(`Browser-assisted SSO captured credentials from ${captured.source}.`);
           } catch (assistedError) {
+            // Fallback 2: last-resort manual redirect URL paste.
             const assistedDetail = toRedactedError(assistedError).message;
             console.log(`[warn] Browser-assisted SSO failed: ${assistedDetail}`);
             console.log('[info] Falling back to manual redirect URL flow (last-resort).');
             await manualRedirectCapture();
           }
         } finally {
+          // Best-effort sensitive-memory cleanup.
           password = '';
         }
       } else {
+        // Explicit manual mode.
         await manualRedirectCapture();
       }
     } else {
@@ -1405,6 +1545,7 @@ async function handleLogin(args: string[]): Promise<void> {
     throw new Error('Unable to obtain login credentials. Retry login with --sso, --auto, or --redirect-url.');
   }
 
+  // Exchange captured token/username for an authenticated API session.
   const response = await api.signIn({
     auth_token: authToken,
     username,
@@ -1419,10 +1560,12 @@ async function handleLogin(args: string[]): Promise<void> {
     savedAt: new Date().toISOString(),
   };
 
+  // Persist session for subsequent CLI commands.
   await saveSession(session);
   renderLoginSuccessPanel(session);
 }
 
+/** Clear remote/local auth state (remote sign-out failure does not block local cleanup). */
 async function handleLogout(): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1437,6 +1580,7 @@ async function handleLogout(): Promise<void> {
   console.log('Session cleared.');
 }
 
+/** Show current cached identity and role info. */
 async function handleWhoAmI(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   if (hasFlag(args, '--json')) {
@@ -1457,6 +1601,7 @@ async function handleWhoAmI(args: string[]): Promise<void> {
   ]);
 }
 
+/** List projects with readable summary fields. */
 async function handleProjects(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1480,6 +1625,7 @@ async function handleProjects(args: string[]): Promise<void> {
   );
 }
 
+/** Build compact `status:count` summary used by project detail output. */
 function countTasksByStatus(tasks: TaskSummary[]): string {
   if (tasks.length === 0) {
     return '-';
@@ -1497,6 +1643,7 @@ function countTasksByStatus(tasks: TaskSummary[]): string {
     .join(', ');
 }
 
+/** Show full project payload/summary for one project id. */
 async function handleProjectShow(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1528,6 +1675,7 @@ async function handleProjectShow(args: string[]): Promise<void> {
   ]);
 }
 
+/** List units, with role-aware hints and /projects-based fallback when needed. */
 async function handleUnits(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1553,10 +1701,12 @@ async function handleUnits(args: string[]): Promise<void> {
   );
 }
 
+/** Return array length or 0-like sentinel for non-array payload values. */
 function arrayLength(value: unknown): number {
   return Array.isArray(value) ? value.length : 0;
 }
 
+/** Show detailed unit payload for one unit id. */
 async function handleUnitShow(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1588,6 +1738,7 @@ async function handleUnitShow(args: string[]): Promise<void> {
   ]);
 }
 
+/** List tasks inside one unit, optionally filtered by status. */
 async function handleUnitTasks(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1619,6 +1770,7 @@ async function handleUnitTasks(args: string[]): Promise<void> {
   );
 }
 
+/** List tasks across accessible projects, with optional project/status filters. */
 async function handleTasks(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1659,6 +1811,7 @@ type DoctorCheck = {
   detail: string;
 };
 
+/** Parse status code from free-form error text for doctor diagnostics output. */
 function parseStatusCodeFromError(error: unknown): number | undefined {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(/\b(\d{3})\b/);
@@ -1669,11 +1822,13 @@ function parseStatusCodeFromError(error: unknown): number | undefined {
   return Number.isFinite(code) ? code : undefined;
 }
 
+/** Trim long error strings to keep doctor table readable. */
 function shortError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.length > 140 ? `${message.slice(0, 137)}...` : message;
 }
 
+/** Run one doctor probe step and normalize it into tabular check output. */
 async function runDoctorCheck(
   key: string,
   endpoint: string,
@@ -1698,11 +1853,14 @@ async function runDoctorCheck(
   }
 }
 
+/** Run quick health checks for auth/session visibility across core endpoints. */
 async function handleDoctor(args: string[]): Promise<void> {
+  // Lightweight connectivity/auth diagnostics against high-value endpoints.
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
 
   const checks: DoctorCheck[] = [];
+  // Public auth metadata check (no session mutation).
   checks.push(
     await runDoctorCheck('auth_method', 'GET /auth/method', async () => {
       await api.getAuthMethod();
@@ -1710,6 +1868,7 @@ async function handleDoctor(args: string[]): Promise<void> {
   );
 
   let projects: ProjectSummary[] = [];
+  // Core visibility check: projects endpoint.
   const projectsCheck = await runDoctorCheck('projects', 'GET /projects', async () => {
     projects = await api.listProjects(session);
   });
@@ -1733,6 +1892,7 @@ async function handleDoctor(args: string[]): Promise<void> {
   }
 
   let firstUnitId = firstProject?.unit?.id;
+  // Units endpoint may be forbidden for some roles; still useful as a health signal.
   const unitsCheck = await runDoctorCheck('units', 'GET /units', async () => {
     const units = await api.listUnits(session);
     if (!firstUnitId) {
@@ -1771,6 +1931,7 @@ async function handleDoctor(args: string[]): Promise<void> {
     ? getTaskDefinitionId(firstProject.tasks[0])
     : undefined;
   const projectId = firstProject?.id;
+  // Task-scoped probes run only when we can resolve both project and taskDef ids.
   if (!projectId || !firstTaskDefId) {
     checks.push({
       key: 'feedback',
@@ -1844,11 +2005,13 @@ async function handleDoctor(args: string[]): Promise<void> {
   );
 }
 
+/** Convert API base URL to browser site `/home` URL for discovery scraping. */
 function defaultSiteUrlFromBase(baseUrl: string): string {
   const parsed = new URL(baseUrl);
   return new URL('/home', `${parsed.origin}/`).toString();
 }
 
+/** Optional truncation helper for discovery output lists. */
 function applyLimit<T>(items: T[], limit?: number): T[] {
   if (limit === undefined) {
     return items;
@@ -1856,6 +2019,7 @@ function applyLimit<T>(items: T[], limit?: number): T[] {
   return items.slice(0, limit);
 }
 
+/** Frontend route/API discovery helper with optional real-session probe mode. */
 async function handleDiscover(args: string[]): Promise<void> {
   const probe = hasFlag(args, '--probe');
   const limit = hasFlag(args, '--limit')
@@ -1867,6 +2031,7 @@ async function handleDiscover(args: string[]): Promise<void> {
   }
 
   if (probe) {
+    // Probe mode requires authenticated session and checks endpoint accessibility.
     const session = requireSession(await loadSession());
     const api = new OnTrackApiClient(session.baseUrl);
     const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(session.baseUrl);
@@ -1874,6 +2039,7 @@ async function handleDiscover(args: string[]): Promise<void> {
     const apiTemplates = applyLimit(discovery.apiTemplates, limit);
     const projects = await loadProjectsWithTaskMetadata(api, session);
     const firstProject = projects[0];
+    // Seed param placeholders (:projectId/:unitId/:taskDefId) from first accessible project.
     const probeContext = firstProject
       ? {
           projectId: firstProject.id,
@@ -1915,6 +2081,7 @@ async function handleDiscover(args: string[]): Promise<void> {
     return;
   }
 
+  // Non-probe mode is fully public/static: scrape route/api literals from web assets only.
   const baseUrl = normalizeBaseUrl(getFlagValue(args, '--base-url'));
   const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(baseUrl);
   const discovery = await discoverOnTrackSurface(siteUrl);
@@ -1942,6 +2109,7 @@ async function handleDiscover(args: string[]): Promise<void> {
   printTable(apiTemplates.map((template) => ({ apiTemplate: template })));
 }
 
+/** Inbox loader with endpoint fallback for role-restricted accounts. */
 async function handleInbox(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1961,6 +2129,7 @@ async function handleInbox(args: string[]): Promise<void> {
   }
 
   const targetUnitIds = unitId !== undefined ? [unitId] : units.map((unit) => unit.id);
+  // Query inbox per unit concurrently; collect failures for fallback.
   const settled = await Promise.allSettled(
     targetUnitIds.map(async (id): Promise<InboxRowTask[]> => {
       const inbox = await api.listInboxTasks(session, id);
@@ -1982,6 +2151,7 @@ async function handleInbox(args: string[]): Promise<void> {
     }
   }
 
+  // For units where inbox endpoint is unavailable, recover tasks via project-detail metadata.
   if (failedUnitIds.length > 0) {
     const fallbackTasks = await buildInboxFallbackTasksFromProjectDetails(
       api,
@@ -1997,6 +2167,7 @@ async function handleInbox(args: string[]): Promise<void> {
     }
   }
 
+  // Remove duplicates caused by mixing inbox + fallback sources.
   const dedupedTasks = dedupeInboxTasks(allTasks);
   if (dedupedTasks.length === 0 && failedUnitIds.length > 0) {
     throw new Error(
@@ -2030,6 +2201,7 @@ async function handleInbox(args: string[]): Promise<void> {
   );
 }
 
+/** Resolve and display one task in detail (abbr/task-id selector). */
 async function handleTaskShow(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -2078,6 +2250,7 @@ async function handleTaskShow(args: string[]): Promise<void> {
   ]);
 }
 
+/** Route subcommands under `ontrack project ...`. */
 async function handleProjectCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
@@ -2088,6 +2261,7 @@ async function handleProjectCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown project subcommand: ${subcommand || '(missing)'}`);
 }
 
+/** Route subcommands under `ontrack unit ...`. */
 async function handleUnitCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
@@ -2102,6 +2276,7 @@ async function handleUnitCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown unit subcommand: ${subcommand || '(missing)'}`);
 }
 
+/** Render feedback author name with username fallback. */
 function feedbackAuthor(comment: FeedbackItem): string {
   if (!comment.author) {
     return '-';
@@ -2113,6 +2288,7 @@ function feedbackAuthor(comment: FeedbackItem): string {
   return full || comment.author.username || '-';
 }
 
+/** Format timestamp into compact UTC string used by feedback table. */
 function formatDateTime(value?: string): string {
   if (!value) {
     return '-';
@@ -2126,6 +2302,7 @@ function formatDateTime(value?: string): string {
   return date.toISOString().replace('T', ' ').slice(0, 16);
 }
 
+/** Return first non-empty string value among candidate keys in a record. */
 function firstString(record: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
     const value = record[key];
@@ -2136,6 +2313,7 @@ function firstString(record: Record<string, unknown>, keys: string[]): string | 
   return undefined;
 }
 
+/** Build readable feedback message from comment text or status-transition fields. */
 function feedbackMessage(comment: FeedbackItem): string {
   const text = getFeedbackText(comment).trim();
   if (text) {
@@ -2159,6 +2337,7 @@ function feedbackMessage(comment: FeedbackItem): string {
   return '-';
 }
 
+/** Classify feedback row into message/event subtype for display. */
 function feedbackKind(comment: FeedbackItem): string {
   const type = typeof comment.type === 'string' ? comment.type.trim() : '';
   if (type) {
@@ -2167,6 +2346,7 @@ function feedbackKind(comment: FeedbackItem): string {
   return getFeedbackText(comment).trim() ? 'message' : 'event';
 }
 
+/** Build compact feedback table rows with bounded message previews. */
 function presentFeedbackRows(comments: FeedbackItem[]): Array<Record<string, unknown>> {
   return comments.map((comment) => {
     const message = feedbackMessage(comment);
@@ -2182,6 +2362,7 @@ function presentFeedbackRows(comments: FeedbackItem[]): Array<Record<string, unk
   });
 }
 
+/** List task feedback/comments in chronological order. */
 async function handleFeedbackList(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -2206,6 +2387,7 @@ async function handleFeedbackList(args: string[]): Promise<void> {
   );
 }
 
+/** Real-time feedback watcher for a single task conversation stream. */
 async function handleFeedbackWatch(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -2234,6 +2416,7 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
     await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
   );
   const baselineComments = history === 0 ? [] : initialComments.slice(-history);
+  // Track seen comment identities so each newly observed comment is emitted once.
   const seen = new Set(initialComments.map((comment) => feedbackIdentity(comment)));
   const startedAt = new Date().toISOString();
 
@@ -2270,6 +2453,7 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
 
   try {
     while (!stopped) {
+      // Interruptible sleep so Ctrl+C exits quickly.
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
           interruptWait = undefined;
@@ -2305,6 +2489,7 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
         continue;
       }
 
+      // Diff against seen set to emit only incremental updates.
       const fresh = comments.filter((comment) => {
         const key = feedbackIdentity(comment);
         if (seen.has(key)) {
@@ -2338,6 +2523,7 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
   }
 }
 
+/** Download task/submission PDF with normalized filename and output path. */
 async function handlePdfDownload(args: string[], type: 'task' | 'submission'): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -2348,6 +2534,7 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
   const resolved = resolveTaskSelector(projects, selector);
   const outDir = getFlagValue(args, '--out-dir');
 
+  // Call type-specific endpoint but normalize naming/output behavior downstream.
   const download =
     type === 'task'
       ? await api.downloadTaskPdf(
@@ -2360,11 +2547,13 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
         )
       : await api.downloadSubmissionPdf(session, resolved.project.id, resolved.taskDefId);
 
+  // Persist with deterministic filename format for easy scripting and lookup.
   const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
   const filePath = await writePdfFile(download.buffer, filename, outDir);
   console.log(`Saved ${type} PDF to ${filePath}`);
 }
 
+/** Upload submission/new-files flow with requirement-aware file key mapping. */
 async function handleSubmissionUpload(
   args: string[],
   mode: 'upload' | 'upload-new-files',
@@ -2384,9 +2573,11 @@ async function handleSubmissionUpload(
   const comment = parseOptionalString(args, '--comment');
 
   const requirementKeys = getUploadRequirementKeys(resolved.task);
+  // Validate + map user file inputs onto server-required multipart keys.
   const assignments = assignUploadFileKeys(fileInputs, requirementKeys);
   const files = await readUploadFiles(assignments);
 
+  // Upload files first; optional comment is posted only after successful upload.
   const upload = await api.uploadTaskSubmission(
     session,
     resolved.project.id,
@@ -2399,6 +2590,7 @@ async function handleSubmissionUpload(
 
   let commentResult: FeedbackItem | undefined;
   if (comment) {
+    // Keep comment as separate API call to match current OnTrack behavior.
     commentResult = await api.addTaskComment(
       session,
       resolved.project.id,
@@ -2436,6 +2628,7 @@ async function handleSubmissionUpload(
   }
 }
 
+/** Apply optional project/unit filters to watch snapshot candidate projects. */
 function filterProjectsForWatch(
   projects: ProjectSummary[],
   projectId?: number,
@@ -2451,6 +2644,7 @@ function filterProjectsForWatch(
   return scoped;
 }
 
+/** Build current watch snapshot by combining task metadata and feedback counts. */
 async function buildWatchSnapshot(
   api: OnTrackApiClient,
   session: SessionData,
@@ -2495,6 +2689,7 @@ async function buildWatchSnapshot(
   return states.filter((state): state is WatchTaskState => state !== null);
 }
 
+/** Render watch event into single-line human-readable terminal message. */
 function describeWatchEvent(event: {
   type: string;
   at: string;
@@ -2515,6 +2710,7 @@ function describeWatchEvent(event: {
   return `[${event.at}] new_feedback ${target}: +${event.deltaComments ?? 0} comment(s), latest=${event.current || '-'}`;
 }
 
+/** Cross-task watcher for status/due-date/new-feedback deltas. */
 async function handleWatch(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -2531,6 +2727,7 @@ async function handleWatch(args: string[]): Promise<void> {
 
   roleScopeHint(session, 'watch', unitId !== undefined || projectId !== undefined);
 
+  // Baseline snapshot printed once; subsequent loops emit deltas only.
   let baseline = await buildWatchSnapshot(api, session, projectId, unitId);
   const startedAt = new Date().toISOString();
 
@@ -2569,6 +2766,7 @@ async function handleWatch(args: string[]): Promise<void> {
 
   try {
     while (!stopped) {
+      // Interruptible sleep so watch loop exits promptly on Ctrl+C.
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
           interruptWait = undefined;
@@ -2604,6 +2802,7 @@ async function handleWatch(args: string[]): Promise<void> {
 
       const now = new Date().toISOString();
       const current = toWatchStateMap(currentSnapshot);
+      // Compute high-level change events between snapshots.
       const events = diffWatchStates(previous, current, now);
 
       if (events.length > 0) {
@@ -2631,6 +2830,7 @@ async function handleWatch(args: string[]): Promise<void> {
   }
 }
 
+/** Route subcommands under `ontrack task ...`. */
 async function handleTaskCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
@@ -2641,6 +2841,7 @@ async function handleTaskCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown task subcommand: ${subcommand || '(missing)'}`);
 }
 
+/** Route subcommands under `ontrack feedback ...`. */
 async function handleFeedbackCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
@@ -2655,6 +2856,7 @@ async function handleFeedbackCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown feedback subcommand: ${subcommand || '(missing)'}`);
 }
 
+/** Route subcommands under `ontrack pdf ...`. */
 async function handlePdfCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
@@ -2669,6 +2871,7 @@ async function handlePdfCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown pdf subcommand: ${subcommand || '(missing)'}`);
 }
 
+/** Route subcommands under `ontrack submission ...`. */
 async function handleSubmissionCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
@@ -2683,6 +2886,7 @@ async function handleSubmissionCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown submission subcommand: ${subcommand || '(missing)'}`);
 }
 
+/** Top-level command dispatcher. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];

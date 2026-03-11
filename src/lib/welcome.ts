@@ -1,3 +1,4 @@
+/** Menu item model used by the interactive launcher (`ontrack` with no args). */
 export interface WelcomeMenuItem {
   id: number;
   title: string;
@@ -6,6 +7,10 @@ export interface WelcomeMenuItem {
   recommended?: boolean;
 }
 
+/**
+ * Stable launcher menu ordering.
+ * IDs are intentionally fixed because users refer to them by number.
+ */
 const BASE_WELCOME_MENU: WelcomeMenuItem[] = [
   {
     id: 1,
@@ -106,10 +111,18 @@ const BASE_WELCOME_MENU: WelcomeMenuItem[] = [
   },
 ];
 
+/** Return a copy so callers can safely mutate labels/order locally if needed. */
 export function getWelcomeMenuItems(): WelcomeMenuItem[] {
   return BASE_WELCOME_MENU.map((item) => ({ ...item }));
 }
 
+/**
+ * Parse and validate launcher input.
+ * Returns:
+ * - `0` for exit aliases
+ * - a valid action id
+ * - `null` for invalid input
+ */
 export function parseWelcomeSelection(raw: string, allowedIds: number[]): number | null {
   const trimmed = raw.trim();
   if (!trimmed) {

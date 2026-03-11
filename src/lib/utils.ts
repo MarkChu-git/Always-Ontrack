@@ -11,8 +11,23 @@ import type {
   WatchEvent,
 } from './types.js';
 
+/**
+ * Cross-cutting CLI helpers:
+ * - prompt/input utilities
+ * - table formatting and highlighting
+ * - argument parsing and selector resolution
+ * - filename/path helpers
+ * - watch-state diffing utilities
+ */
 const DEFAULT_SITE_URL = 'https://ontrack.infotech.monash.edu';
 
+/**
+ * Normalize base URL into canonical API root:
+ * - prefer explicit CLI flag
+ * - then ONTRACK_BASE_URL env
+ * - otherwise production default
+ * Always returns a `/api` URL without query/hash.
+ */
 export function normalizeBaseUrl(raw?: string): string {
   const candidate = raw?.trim() || process.env.ONTRACK_BASE_URL?.trim() || DEFAULT_SITE_URL;
   const url = new URL(candidate);
@@ -28,6 +43,10 @@ export function normalizeBaseUrl(raw?: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
+/**
+ * Parse final SSO redirect URL and extract mandatory credentials.
+ * Throws when redirect URL is incomplete so login flow can fail loudly.
+ */
 export function parseSsoRedirectUrl(redirectUrl: string): { authToken: string; username: string } {
   const url = new URL(redirectUrl.trim());
   const authToken = url.searchParams.get('authToken');
@@ -42,6 +61,7 @@ export function parseSsoRedirectUrl(redirectUrl: string): { authToken: string; u
   return { authToken, username };
 }
 
+/** Prompt for a visible (non-sensitive) input value. */
 export async function prompt(question: string): Promise<string> {
   const rl = createInterface({ input, output });
   try {
@@ -51,6 +71,7 @@ export async function prompt(question: string): Promise<string> {
   }
 }
 
+/** Input masking is only enabled in interactive TTY terminals. */
 export function shouldMaskPromptInput(
   inputStream: Pick<NodeJS.ReadStream, 'isTTY'> = input,
   outputStream: Pick<NodeJS.WriteStream, 'isTTY'> = output,
@@ -58,6 +79,12 @@ export function shouldMaskPromptInput(
   return Boolean(inputStream.isTTY && outputStream.isTTY);
 }
 
+/**
+ * Secure password prompt:
+ * - never echoes raw characters
+ * - supports backspace editing
+ * - exits cleanly on Ctrl+C
+ */
 export async function promptHidden(question: string): Promise<string> {
   if (!shouldMaskPromptInput()) {
     return prompt(question);
@@ -122,6 +149,7 @@ export async function promptHidden(question: string): Promise<string> {
   });
 }
 
+/** Open URL in platform-default browser without blocking current process. */
 export function openExternal(url: string): boolean {
   const platform = process.platform;
   let command: string;
@@ -150,10 +178,12 @@ export function openExternal(url: string): boolean {
   }
 }
 
+/** Lightweight flag detector used by all argument parsing helpers. */
 export function isFlag(arg: string): boolean {
   return arg.startsWith('--');
 }
 
+/** Return the value immediately following a flag, or undefined if absent. */
 export function getFlagValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   if (index === -1) {
@@ -163,6 +193,10 @@ export function getFlagValue(args: string[], flag: string): string | undefined {
   return args[index + 1];
 }
 
+/**
+ * Read repeated flag values (`--file a --file b`).
+ * Throws for malformed invocations to keep command UX deterministic.
+ */
 export function getFlagValues(args: string[], flag: string): string[] {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -180,10 +214,12 @@ export function getFlagValues(args: string[], flag: string): string[] {
   return values;
 }
 
+/** True when a flag token exists anywhere in argv. */
 export function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
 
+/** Render date-like values as YYYY-MM-DD while preserving unknown text. */
 export function formatDate(value?: string): string {
   if (!value) {
     return '-';
@@ -197,10 +233,15 @@ export function formatDate(value?: string): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Stable pretty JSON printer for machine-consumable output modes. */
 export function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
+/**
+ * Convert any cell value to printable text.
+ * This keeps table rendering robust with mixed payload shapes.
+ */
 function toDisplayValue(value: unknown): string {
   if (value === null || value === undefined) {
     return '-';
@@ -227,14 +268,17 @@ function toDisplayValue(value: unknown): string {
 
 const ANSI_ESCAPE_PATTERN = /\u001B\[[0-9;]*m/g;
 
+/** Remove ANSI color escapes for accurate visible-width calculations. */
 function stripAnsi(value: string): string {
   return value.replace(ANSI_ESCAPE_PATTERN, '');
 }
 
+/** String length as seen by humans in terminal, not byte length. */
 function visibleLength(value: string): number {
   return stripAnsi(value).length;
 }
 
+/** Decide once whether table color output should be enabled. */
 function shouldUseColors(): boolean {
   if (process.env.NO_COLOR !== undefined) {
     return false;
@@ -250,6 +294,7 @@ function shouldUseColors(): boolean {
 
 const COLORS_ENABLED = shouldUseColors();
 
+/** Apply ANSI color code only when colors are enabled. */
 function colorize(code: string, value: string): string {
   if (!COLORS_ENABLED) {
     return value;
@@ -257,6 +302,7 @@ function colorize(code: string, value: string): string {
   return `\u001B[${code}m${value}\u001B[0m`;
 }
 
+/** Right-pad text while respecting ANSI escape sequences. */
 function padRight(value: string, width: number): string {
   const length = visibleLength(value);
   if (length >= width) {
@@ -265,6 +311,7 @@ function padRight(value: string, width: number): string {
   return `${value}${' '.repeat(width - length)}`;
 }
 
+/** Status-specific coloring to improve scannability in dense task tables. */
 function styleStatus(raw: string, padded: string): string {
   const value = raw.trim().toLowerCase();
   if (!value || value === '-') {
@@ -287,6 +334,7 @@ function styleStatus(raw: string, padded: string): string {
   return colorize(map[value] || '37', padded);
 }
 
+/** Due-date coloring: overdue red, near-due yellow, otherwise default. */
 function styleDue(raw: string, padded: string): string {
   const value = raw.trim();
   if (!value || value === '-') {
@@ -313,6 +361,7 @@ function styleDue(raw: string, padded: string): string {
   return padded;
 }
 
+/** Column-aware styling hook used by `printTable`. */
 function styleCell(column: string, raw: string, padded: string): string {
   switch (column) {
     case '(index)':
@@ -331,6 +380,7 @@ function styleCell(column: string, raw: string, padded: string): string {
   }
 }
 
+/** Render a compact ANSI-aware table with conditional highlighting. */
 export function printTable(rows: Array<Record<string, unknown>>): void {
   if (rows.length === 0) {
     console.log('No results.');
@@ -376,6 +426,7 @@ export function printTable(rows: Array<Record<string, unknown>>): void {
   console.log([top, header, separator, ...lines, bottom].join('\n'));
 }
 
+/** Best-effort integer normalization across numeric/string payload values. */
 function toInteger(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -391,6 +442,7 @@ function toInteger(value: unknown): number | undefined {
   return undefined;
 }
 
+/** Trim and validate string payload values, returning undefined for empty. */
 function toStringValue(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -400,6 +452,7 @@ function toStringValue(value: unknown): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/** Parse required integer flag value and produce user-facing validation errors. */
 export function parseIntegerFlagValue(raw: string | undefined, flag: string): number {
   if (!raw || isFlag(raw)) {
     throw new Error(`Missing value for ${flag}.`);
@@ -412,6 +465,10 @@ export function parseIntegerFlagValue(raw: string | undefined, flag: string): nu
   return value;
 }
 
+/**
+ * Detect whether current runtime should default to headless mode.
+ * This combines explicit env overrides with CI/SSH/display heuristics.
+ */
 export function isHeadlessServerEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   streams: {
@@ -450,6 +507,12 @@ export function isHeadlessServerEnvironment(
 
 export type LoginMode = 'manual' | 'auto' | 'sso_guided';
 
+/**
+ * Login route decision:
+ * - explicit mode flags win
+ * - direct credentials / redirect URL imply manual mode
+ * - otherwise guided SSO is default path
+ */
 export function resolveLoginMode(options: {
   auto: boolean;
   sso: boolean;
@@ -489,6 +552,7 @@ export const SENSITIVE_QUERY_KEYS = new Set([
   'access_token',
 ]);
 
+/** Redact sensitive query params in a URL while preserving non-sensitive context. */
 function redactQueryParams(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);
@@ -505,6 +569,10 @@ function redactQueryParams(rawUrl: string): string {
 
 const URL_PATTERN = /https?:\/\/[^\s)"']+/gi;
 
+/**
+ * Redact token/password fields from free-form error strings.
+ * Used before printing any external error to terminal.
+ */
 export function redactSensitiveText(value: string): string {
   let output = value;
   output = output.replace(URL_PATTERN, (match) => redactQueryParams(match));
@@ -523,6 +591,7 @@ export interface RedactedError {
   message: string;
 }
 
+/** Normalize unknown errors into safe, redacted message payloads. */
 export function toRedactedError(error: unknown): RedactedError {
   const message = error instanceof Error ? error.message : String(error);
   return {
@@ -530,6 +599,7 @@ export function toRedactedError(error: unknown): RedactedError {
   };
 }
 
+/** Resolve task definition id across schema variants and fallback fields. */
 export function getTaskDefinitionId(task: TaskSummary): number | undefined {
   return (
     toInteger(task.definition?.id) ??
@@ -539,6 +609,7 @@ export function getTaskDefinitionId(task: TaskSummary): number | undefined {
   );
 }
 
+/** Resolve task abbreviation across both normalized and raw payload forms. */
 export function getTaskAbbreviation(task: TaskSummary): string | undefined {
   return (
     toStringValue(task.definition?.abbreviation) ??
@@ -547,22 +618,27 @@ export function getTaskAbbreviation(task: TaskSummary): string | undefined {
   );
 }
 
+/** Resolve human-readable task name with fallback between definition/name fields. */
 export function getTaskName(task: TaskSummary): string | undefined {
   return toStringValue(task.definition?.name) ?? toStringValue(task.name);
 }
 
+/** Resolve due date string from mixed camelCase/snake_case payloads. */
 export function getTaskDueDate(task: TaskSummary): string | undefined {
   return toStringValue(task.dueDate) ?? toStringValue(task.due_date);
 }
 
+/** Resolve completion date string from mixed payload variants. */
 export function getTaskCompletionDate(task: TaskSummary): string | undefined {
   return toStringValue(task.completionDate) ?? toStringValue(task.completion_date);
 }
 
+/** Resolve canonical task status text. */
 export function getTaskStatus(task: TaskSummary): string | undefined {
   return toStringValue(task.status);
 }
 
+/** Compare two task payloads by task id first, then task-definition id fallback. */
 function isSameTask(left: TaskSummary, right: TaskSummary): boolean {
   const leftTaskId = toInteger(left.id);
   const rightTaskId = toInteger(right.id);
@@ -575,6 +651,7 @@ function isSameTask(left: TaskSummary, right: TaskSummary): boolean {
   return leftDefId !== undefined && rightDefId !== undefined && leftDefId === rightDefId;
 }
 
+/** Locate a task by raw task id or task definition id. */
 function findTaskById(tasks: TaskSummary[], taskId: number): TaskSummary | undefined {
   return tasks.find((task) => {
     const rawId = toInteger(task.id);
@@ -583,6 +660,7 @@ function findTaskById(tasks: TaskSummary[], taskId: number): TaskSummary | undef
   });
 }
 
+/** Locate a task by abbreviation and guard against ambiguous duplicates. */
 function findTaskByAbbr(tasks: TaskSummary[], abbr: string): TaskSummary | undefined {
   const normalized = abbr.toLowerCase();
   const matches = tasks.filter((task) => (getTaskAbbreviation(task) || '').toLowerCase() === normalized);
@@ -605,6 +683,7 @@ export interface ResolvedTaskSelector {
   unitCode?: string;
 }
 
+/** Parse `--project-id` plus task selector (`--task-id` or `--abbr`). */
 export function parseTaskSelectorArgs(args: string[]): TaskSelector {
   const projectId = parseIntegerFlagValue(getFlagValue(args, '--project-id'), '--project-id');
   const taskIdRaw = getFlagValue(args, '--task-id');
@@ -618,6 +697,7 @@ export function parseTaskSelectorArgs(args: string[]): TaskSelector {
   return { projectId, taskId, abbr };
 }
 
+/** Resolve user-provided task selector to an exact project+task pair. */
 export function resolveTaskSelector(
   projects: ProjectSummary[],
   selector: TaskSelector,
@@ -674,6 +754,7 @@ export function resolveTaskSelector(
   };
 }
 
+/** Case-insensitive status filter used by tasks/inbox/unit-task commands. */
 export function filterTasksByStatus<T extends { status?: unknown }>(
   tasks: T[],
   status?: string,
@@ -686,6 +767,7 @@ export function filterTasksByStatus<T extends { status?: unknown }>(
   return tasks.filter((task) => String(task.status || '').toLowerCase() === normalized);
 }
 
+/** Staff-like roles typically need explicit scoping hints for large datasets. */
 export function isStaffLikeRole(role?: string): boolean {
   const normalized = role?.trim().toLowerCase();
   if (!normalized) {
@@ -696,6 +778,7 @@ export function isStaffLikeRole(role?: string): boolean {
 
 export const DEFAULT_DOWNLOAD_DIR = './downloads';
 
+/** Clean path fragments into filesystem-safe filename segments. */
 export function sanitizeFilenamePart(value: string | undefined, fallback: string): string {
   const cleaned = (value || '')
     .trim()
@@ -704,6 +787,7 @@ export function sanitizeFilenamePart(value: string | undefined, fallback: string
   return cleaned || fallback;
 }
 
+/** Build consistent PDF output filename: `<unit>_<task>_<type>.pdf`. */
 export function buildPdfFilename(
   unitCode: string | undefined,
   abbr: string | undefined,
@@ -714,11 +798,13 @@ export function buildPdfFilename(
   return `${safeUnit}_${safeTask}_${type}.pdf`;
 }
 
+/** Resolve download directory from user override or default location. */
 export function resolveDownloadDir(outDir?: string, cwd: string = process.cwd()): string {
   const target = outDir?.trim() ? outDir : DEFAULT_DOWNLOAD_DIR;
   return resolve(cwd, target);
 }
 
+/** Ensure output directory exists, then persist binary PDF bytes to disk. */
 export async function writePdfFile(
   buffer: Buffer,
   filename: string,
@@ -732,10 +818,12 @@ export async function writePdfFile(
   return filePath;
 }
 
+/** Resolve feedback timestamp from known API field variants. */
 export function getFeedbackTimestamp(feedback: FeedbackItem): string | undefined {
   return toStringValue(feedback.createdAt) ?? toStringValue(feedback.created_at);
 }
 
+/** Resolve textual feedback body, preferring comment then text fallback. */
 export function getFeedbackText(feedback: FeedbackItem): string {
   return (
     toStringValue(feedback.comment) ??
@@ -744,6 +832,7 @@ export function getFeedbackText(feedback: FeedbackItem): string {
   );
 }
 
+/** Best-effort parse of numeric feedback id from mixed API payload shapes. */
 function feedbackIdValue(feedback: FeedbackItem): number | undefined {
   const rawId = feedback.id as unknown;
 
@@ -760,6 +849,7 @@ function feedbackIdValue(feedback: FeedbackItem): number | undefined {
   return undefined;
 }
 
+/** Build stable feedback identity key for dedupe/watch processing. */
 export function feedbackIdentity(feedback: FeedbackItem): string {
   const id = feedbackIdValue(feedback);
   if (id !== undefined) {
@@ -771,6 +861,7 @@ export function feedbackIdentity(feedback: FeedbackItem): string {
   return `${timestamp}:${text}`;
 }
 
+/** Stable chronological sort for mixed feedback payload quality. */
 export function sortFeedbackItems(feedback: FeedbackItem[]): FeedbackItem[] {
   return [...feedback].sort((left, right) => {
     const leftTimestamp = getFeedbackTimestamp(left);
@@ -796,6 +887,7 @@ export function sortFeedbackItems(feedback: FeedbackItem[]): FeedbackItem[] {
   });
 }
 
+/** Find newest feedback timestamp (ISO when parseable) across a comment list. */
 export function getLatestFeedbackTimestamp(feedback: FeedbackItem[]): string | undefined {
   let latestMs = -1;
   let latestRaw: string | undefined;
@@ -835,14 +927,20 @@ export interface WatchTaskState {
   lastCommentAt?: string;
 }
 
+/** Build stable map key for watch state by project + task-definition identity. */
 export function makeWatchTaskKey(projectId: number, taskId: number): string {
   return `${projectId}:${taskId}`;
 }
 
+/** Convert task-state array into key-addressable map for diffing. */
 export function toWatchStateMap(states: WatchTaskState[]): Map<string, WatchTaskState> {
   return new Map(states.map((state) => [state.taskKey, state]));
 }
 
+/**
+ * Compute watch deltas between polling snapshots.
+ * Emits events for status changes, due-date changes, and feedback growth.
+ */
 export function diffWatchStates(
   previous: Map<string, WatchTaskState>,
   current: Map<string, WatchTaskState>,
@@ -906,6 +1004,7 @@ export function diffWatchStates(
   return events;
 }
 
+/** Simple promise-based delay helper for polling loops. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
@@ -915,6 +1014,12 @@ export interface UploadFileSpec {
   path: string;
 }
 
+/**
+ * Parse upload file specs from repeated `--file` flags.
+ * Supports:
+ * - `--file ./report.pdf`
+ * - `--file file0=./report.pdf`
+ */
 export function parseUploadFileSpecs(args: string[], flag: string = '--file'): UploadFileSpec[] {
   const values = getFlagValues(args, flag);
   if (values.length === 0) {
