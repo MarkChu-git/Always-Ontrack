@@ -29,5 +29,8 @@
   ],
   "files": [
     "dist"
-  ]
+  ],
+  "dependencies": {
+    "playwright-core": "^1.58.2"
+  }
 }

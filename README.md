@@ -27,7 +27,7 @@ Default API endpoint is:
 
 ```bash
 ontrack auth-method
-ontrack login
+ontrack login --auto
 ontrack whoami
 ontrack units
 ontrack projects
@@ -39,13 +39,20 @@ ontrack pdf task --project-id 456 --abbr T1
 ontrack watch --interval 60
 ```
 
-For SSO login, the CLI opens your browser and asks you to paste the final redirected URL (`/sign_in?authToken=...&username=...`).
+For SSO login you can use:
+
+- Auto mode (recommended): `ontrack login --auto`
+- Manual mode: `ontrack login` and paste final redirect URL (`/sign_in?authToken=...&username=...`)
+
+Auto mode opens a controlled browser, then captures credentials from URL/auth request/local storage (and cookie fallback).
+If your browser is not auto-detected, set `ONTRACK_BROWSER_PATH` to the browser executable path.
 
 ## Commands
 
 - `ontrack auth-method [--base-url URL] [--json]`
 - `ontrack login [--base-url URL] [--redirect-url URL]`
 - `ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME`
+- `ontrack login [--base-url URL] --auto [--auto-timeout-sec N]`
 - `ontrack logout`
 - `ontrack whoami [--json]`
 - `ontrack projects [--json]`

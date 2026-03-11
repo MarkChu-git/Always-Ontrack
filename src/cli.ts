@@ -2,6 +2,7 @@
 
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
+import { captureSsoCredentials } from './lib/auto-login.js';
 import {
   buildPdfFilename,
   diffWatchStates,
@@ -38,6 +39,7 @@ import type {
   ProjectSummary,
   SessionData,
   TaskSummary,
+  UnitSummary,
 } from './lib/types.js';
 import type { WatchTaskState } from './lib/utils.js';
 
@@ -48,6 +50,7 @@ Usage:
   ontrack auth-method [--base-url URL] [--json]
   ontrack login [--base-url URL] [--redirect-url URL]
   ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME
+  ontrack login [--base-url URL] --auto [--auto-timeout-sec N]
   ontrack logout
   ontrack whoami [--json]
   ontrack projects [--json]
@@ -62,7 +65,8 @@ Usage:
 
 Notes:
   - Default base URL is https://ontrack.infotech.monash.edu/api
-  - This site currently reports SAML SSO, so the login flow opens your browser and asks for the final redirected URL.
+  - This site currently reports SAML SSO.
+  - Use "ontrack login --auto" for automatic credential capture, or "ontrack login" for manual redirect URL paste.
   - PDF commands save files into ./downloads by default.
 `);
 }
@@ -114,13 +118,83 @@ function extractInboxProjectId(task: InboxTask): number | undefined {
 }
 
 function roleScopeHint(session: SessionData, command: string, hasScopeFilter: boolean): void {
-  if (!isStaffLikeRole(session.user.role) || hasScopeFilter) {
+  if (!isStaffLikeRole(resolveUserRole(session)) || hasScopeFilter) {
     return;
   }
 
   console.log(
-    `[hint] Role "${session.user.role}" running ${command} without scope filters can be expensive. Consider --unit-id and/or --project-id.`,
+    `[hint] Role "${resolveUserRole(session)}" running ${command} without scope filters can be expensive. Consider --unit-id and/or --project-id.`,
   );
+}
+
+function resolveUserRole(session: SessionData): string | undefined {
+  const user = session.user as Record<string, unknown>;
+  const role = user.role;
+  if (typeof role === 'string' && role.trim()) {
+    return role;
+  }
+
+  const systemRole = user.system_role;
+  if (typeof systemRole === 'string' && systemRole.trim()) {
+    return systemRole;
+  }
+
+  return undefined;
+}
+
+function getUnitRole(unit: UnitSummary): string | undefined {
+  return unit.myRole || unit.my_role;
+}
+
+function isForbiddenError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b403\b/.test(message);
+}
+
+function deriveUnitsFromProjects(projects: ProjectSummary[]): UnitSummary[] {
+  const map = new Map<number, UnitSummary>();
+  for (const project of projects) {
+    const unit = project.unit;
+    if (!unit || typeof unit.id !== 'number' || map.has(unit.id)) {
+      continue;
+    }
+    map.set(unit.id, {
+      id: unit.id,
+      code: unit.code,
+      name: unit.name,
+      myRole: getUnitRole(unit),
+      active: unit.active,
+    });
+  }
+
+  return [...map.values()];
+}
+
+async function listUnitsWithFallback(
+  api: OnTrackApiClient,
+  session: SessionData,
+): Promise<{ units: UnitSummary[]; fallbackUsed: boolean }> {
+  try {
+    return {
+      units: await api.listUnits(session),
+      fallbackUsed: false,
+    };
+  } catch (error) {
+    if (!isForbiddenError(error)) {
+      throw error;
+    }
+
+    const projects = await api.listProjects(session);
+    const units = deriveUnitsFromProjects(projects);
+    if (units.length === 0) {
+      throw error;
+    }
+
+    return {
+      units,
+      fallbackUsed: true,
+    };
+  }
 }
 
 async function handleAuthMethod(args: string[]): Promise<void> {
@@ -140,6 +214,13 @@ async function handleAuthMethod(args: string[]): Promise<void> {
 
 async function handleLogin(args: string[]): Promise<void> {
   const api = new OnTrackApiClient(normalizeBaseUrl(getFlagValue(args, '--base-url')));
+  const auto = hasFlag(args, '--auto');
+  const autoTimeoutSec = hasFlag(args, '--auto-timeout-sec')
+    ? parseIntegerFlagValue(getFlagValue(args, '--auto-timeout-sec'), '--auto-timeout-sec')
+    : 300;
+  if (autoTimeoutSec < 10) {
+    throw new Error('--auto-timeout-sec must be >= 10 seconds.');
+  }
 
   let authToken = getFlagValue(args, '--auth-token');
   let username = getFlagValue(args, '--username');
@@ -154,20 +235,31 @@ async function handleLogin(args: string[]): Promise<void> {
 
     if (method.redirect_to) {
       console.log(`OnTrack uses ${method.method || 'SSO'} for authentication.`);
-      console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
-      console.log('Expected format: https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...');
+      console.log('Expected final redirect format: https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...');
 
-      if (!hasFlag(args, '--no-open')) {
-        const opened = openExternal(method.redirect_to);
-        if (!opened) {
+      if (auto) {
+        console.log('Starting auto SSO login in a controlled browser...');
+        const captured = await captureSsoCredentials({
+          ssoUrl: method.redirect_to,
+          apiBaseUrl: api.base,
+          timeoutMs: autoTimeoutSec * 1000,
+        });
+        authToken = captured.authToken;
+        username = captured.username;
+        console.log(`Auto login captured credentials from ${captured.source}.`);
+      } else {
+        console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
+        if (!hasFlag(args, '--no-open')) {
+          const opened = openExternal(method.redirect_to);
+          if (!opened) {
+            console.log(`Open this URL manually:\n${method.redirect_to}`);
+          }
+        } else {
           console.log(`Open this URL manually:\n${method.redirect_to}`);
         }
-      } else {
-        console.log(`Open this URL manually:\n${method.redirect_to}`);
+        const pasted = await prompt('Paste final redirect URL: ');
+        ({ authToken, username } = parseSsoRedirectUrl(pasted));
       }
-
-      const pasted = await prompt('Paste final redirect URL: ');
-      ({ authToken, username } = parseSsoRedirectUrl(pasted));
     } else {
       throw new Error('This server does not advertise SSO, and interactive username/password login is not implemented in this CLI yet.');
     }
@@ -217,9 +309,9 @@ async function handleWhoAmI(args: string[]): Promise<void> {
     {
       username: session.username,
       id: session.user.id ?? '-',
-      role: session.user.role ?? '-',
-      firstName: session.user.firstName ?? '-',
-      lastName: session.user.lastName ?? '-',
+      role: resolveUserRole(session) ?? '-',
+      firstName: session.user.firstName ?? session.user.first_name ?? '-',
+      lastName: session.user.lastName ?? session.user.last_name ?? '-',
       email: session.user.email ?? '-',
       savedAt: session.savedAt,
     },
@@ -252,11 +344,15 @@ async function handleProjects(args: string[]): Promise<void> {
 async function handleUnits(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
-  const units = await api.listUnits(session);
+  const { units, fallbackUsed } = await listUnitsWithFallback(api, session);
 
   if (hasFlag(args, '--json')) {
     printJson(units);
     return;
+  }
+
+  if (fallbackUsed) {
+    console.error('[info] /units is not accessible for this account; showing units derived from /projects.');
   }
 
   printTable(
@@ -264,7 +360,7 @@ async function handleUnits(args: string[]): Promise<void> {
       id: unit.id,
       code: unit.code ?? '-',
       name: unit.name ?? '-',
-      role: unit.myRole ?? '-',
+      role: getUnitRole(unit) ?? '-',
       active: unit.active ?? '-',
     })),
   );
@@ -314,25 +410,46 @@ async function handleInbox(args: string[]): Promise<void> {
   const unitId = parseOptionalInteger(args, '--unit-id');
   roleScopeHint(session, 'inbox', unitId !== undefined);
 
-  const units = await api.listUnits(session);
+  const { units, fallbackUsed } = await listUnitsWithFallback(api, session);
   const unitMap = new Map(units.map((unit) => [unit.id, unit]));
 
   if (unitId !== undefined && !unitMap.has(unitId)) {
     throw new Error(`Unit ${unitId} was not found in your account.`);
   }
 
+  if (fallbackUsed && !hasFlag(args, '--json')) {
+    console.error('[info] /units is not accessible for this account; using units derived from /projects.');
+  }
+
   const targetUnitIds = unitId !== undefined ? [unitId] : units.map((unit) => unit.id);
-  const allTasks = (
-    await Promise.all(
-      targetUnitIds.map(async (id) => {
-        const inbox = await api.listInboxTasks(session, id);
-        return inbox.map((task) => ({
-          ...task,
-          _unitId: id,
-        }));
-      }),
-    )
-  ).flat();
+  type ScopedInboxTask = InboxTask & { _unitId: number };
+  const settled = await Promise.allSettled(
+    targetUnitIds.map(async (id): Promise<ScopedInboxTask[]> => {
+      const inbox = await api.listInboxTasks(session, id);
+      return inbox.map((task) => ({
+        ...task,
+        _unitId: id,
+      }));
+    }),
+  );
+
+  const allTasks: ScopedInboxTask[] = [];
+  let failedUnits = 0;
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      allTasks.push(...result.value);
+    } else {
+      failedUnits += 1;
+    }
+  }
+
+  if (allTasks.length === 0 && failedUnits > 0) {
+    throw new Error('Unable to load inbox tasks for selected units (permission denied or endpoint unavailable).');
+  }
+
+  if (failedUnits > 0 && !hasFlag(args, '--json')) {
+    console.error(`[info] Skipped ${failedUnits} unit(s) that could not load inbox tasks.`);
+  }
 
   const filtered = filterTasksByStatus(allTasks, status);
   if (hasFlag(args, '--json')) {

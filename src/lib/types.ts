@@ -8,8 +8,11 @@ export interface OnTrackUser {
   username?: string;
   email?: string;
   firstName?: string;
+  first_name?: string;
   lastName?: string;
+  last_name?: string;
   role?: string;
+  system_role?: string;
   [key: string]: unknown;
 }
 
@@ -31,6 +34,7 @@ export interface UnitSummary {
   code?: string;
   name?: string;
   myRole?: string;
+  my_role?: string;
   active?: boolean;
   [key: string]: unknown;
 }
