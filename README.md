@@ -58,6 +58,7 @@ If your browser is not auto-detected, set `ONTRACK_BROWSER_PATH` to the browser 
 - `ontrack projects [--json]`
 - `ontrack units [--json]`
 - `ontrack tasks [--project-id ID] [--status STATUS] [--json]`
+- `ontrack doctor [--json]`
 - `ontrack inbox [--unit-id ID] [--status STATUS] [--json]`
 - `ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]`
 - `ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]`
@@ -89,4 +90,10 @@ Or run without build:
 
 ```bash
 npm run dev -- auth-method
+```
+
+Run real-account smoke verification:
+
+```bash
+npm run smoke:real -- --project-id 87 --abbr D4
 ```

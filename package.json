@@ -10,6 +10,7 @@
     "build": "npm run clean && tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "dev": "tsx src/cli.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "smoke:real": "npm run build && node scripts/smoke-real.mjs",
     "clean": "rimraf dist",
     "prepare": "npm run build"
   },

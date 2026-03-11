@@ -59,6 +59,7 @@ Usage:
   ontrack projects [--json]
   ontrack units [--json]
   ontrack tasks [--project-id ID] [--status STATUS] [--json]
+  ontrack doctor [--json]
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]
   ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]
@@ -173,26 +174,6 @@ function deriveUnitsFromProjects(projects: ProjectSummary[]): UnitSummary[] {
   return [...map.values()];
 }
 
-function deriveInboxTasksFromProjects(
-  projects: ProjectSummary[],
-  filterUnitIds?: Set<number>,
-): InboxRowTask[] {
-  const tasks = flattenTasks(projects);
-  return tasks
-    .filter((task) => {
-      if (!filterUnitIds) {
-        return true;
-      }
-      return task.unitId !== undefined && filterUnitIds.has(task.unitId);
-    })
-    .map((task) => ({
-      ...task,
-      projectId: task.projectId,
-      unitId: task.unitId,
-      _unitId: task.unitId ?? -1,
-    }));
-}
-
 function dedupeInboxTasks(tasks: InboxRowTask[]): InboxRowTask[] {
   const map = new Map<string, InboxRowTask>();
   for (const task of tasks) {
@@ -202,7 +183,10 @@ function dedupeInboxTasks(tasks: InboxRowTask[]): InboxRowTask[] {
   return [...map.values()];
 }
 
-function getUnitTaskDefinitions(unit: UnitSummary): TaskDefinitionSummary[] {
+function getUnitTaskDefinitions(unit: UnitSummary | undefined): TaskDefinitionSummary[] {
+  if (!unit) {
+    return [];
+  }
   const defs = unit.taskDefinitions ?? unit.task_definitions;
   if (!Array.isArray(defs)) {
     return [];
@@ -210,15 +194,111 @@ function getUnitTaskDefinitions(unit: UnitSummary): TaskDefinitionSummary[] {
   return defs;
 }
 
-function taskDefinitionFromUnit(
-  unitDefinitionMap: Map<number, Map<number, TaskDefinitionSummary>>,
-  unitId: number | undefined,
-  taskDefId: number | undefined,
-): TaskDefinitionSummary | undefined {
-  if (unitId === undefined || taskDefId === undefined) {
-    return undefined;
+function projectMatchesScope(
+  project: ProjectSummary,
+  scope: { projectId?: number; unitId?: number },
+): boolean {
+  if (scope.projectId !== undefined && project.id !== scope.projectId) {
+    return false;
   }
-  return unitDefinitionMap.get(unitId)?.get(taskDefId);
+  if (scope.unitId !== undefined && project.unit?.id !== scope.unitId) {
+    return false;
+  }
+  return true;
+}
+
+async function loadProjectsWithTaskMetadata(
+  api: OnTrackApiClient,
+  session: SessionData,
+  scope: { projectId?: number; unitId?: number } = {},
+): Promise<ProjectSummary[]> {
+  const overview = await api.listProjects(session);
+  const scopedOverview = overview.filter((project) => projectMatchesScope(project, scope));
+  if (scopedOverview.length === 0) {
+    return [];
+  }
+
+  const detailedResults = await Promise.allSettled(
+    scopedOverview.map(async (project) => api.getProject(session, project.id)),
+  );
+
+  const projects: ProjectSummary[] = [];
+  for (let index = 0; index < detailedResults.length; index += 1) {
+    const result = detailedResults[index];
+    if (result.status === 'fulfilled') {
+      projects.push(result.value);
+      continue;
+    }
+
+    // fallback to overview when project detail endpoint is unavailable
+    projects.push(scopedOverview[index]);
+  }
+
+  const unitIds = [
+    ...new Set(
+      projects
+        .map((project) => project.unit?.id)
+        .filter((id): id is number => typeof id === 'number'),
+    ),
+  ];
+
+  const unitResults = await Promise.allSettled(
+    unitIds.map(async (unitId) => api.getUnit(session, unitId)),
+  );
+
+  const unitMap = new Map<number, UnitSummary>();
+  const unitDefinitionMap = new Map<number, Map<number, TaskDefinitionSummary>>();
+  for (let index = 0; index < unitResults.length; index += 1) {
+    const result = unitResults[index];
+    if (result.status !== 'fulfilled') {
+      continue;
+    }
+
+    const unit = result.value;
+    unitMap.set(unit.id, unit);
+    unitDefinitionMap.set(
+      unit.id,
+      new Map(
+        getUnitTaskDefinitions(unit)
+          .filter((definition) => typeof definition.id === 'number')
+          .map((definition) => [definition.id as number, definition]),
+      ),
+    );
+  }
+
+  return projects.map((project) => {
+    const unitId = project.unit?.id;
+    const fullUnit = unitId !== undefined ? unitMap.get(unitId) : undefined;
+    const taskDefinitions = unitId !== undefined ? unitDefinitionMap.get(unitId) : undefined;
+
+    const mergedUnit = fullUnit
+      ? {
+          ...fullUnit,
+          ...project.unit,
+        }
+      : project.unit;
+
+    const mergedTasks = (project.tasks || []).map((task) => {
+      const taskDefId = getTaskDefinitionId(task);
+      const taskDefinition =
+        taskDefId !== undefined ? taskDefinitions?.get(taskDefId) : undefined;
+      return {
+        ...task,
+        definition: {
+          id: taskDefId,
+          abbreviation: task.definition?.abbreviation ?? taskDefinition?.abbreviation,
+          name: task.definition?.name ?? taskDefinition?.name,
+          targetGrade: task.definition?.targetGrade ?? taskDefinition?.targetGrade,
+        },
+      };
+    });
+
+    return {
+      ...project,
+      unit: mergedUnit,
+      tasks: mergedTasks,
+    };
+  });
 }
 
 async function buildInboxFallbackTasksFromProjectDetails(
@@ -226,63 +306,18 @@ async function buildInboxFallbackTasksFromProjectDetails(
   session: SessionData,
   candidateUnitIds: number[],
 ): Promise<InboxRowTask[]> {
-  const overview = await api.listProjects(session);
   const unitFilter = new Set(candidateUnitIds);
-  const scopedProjects = overview.filter((project) => {
-    const projectUnitId = project.unit?.id;
-    return typeof projectUnitId === 'number' && unitFilter.has(projectUnitId);
-  });
-
-  const detailedProjectResults = await Promise.allSettled(
-    scopedProjects.map(async (project) => api.getProject(session, project.id)),
-  );
-  const detailedProjects = detailedProjectResults
-    .filter((result): result is PromiseFulfilledResult<ProjectSummary> => result.status === 'fulfilled')
-    .map((result) => result.value);
-
-  const unitIds = [...new Set(detailedProjects.map((project) => project.unit?.id).filter((id): id is number => typeof id === 'number'))];
-  const unitDetailResults = await Promise.allSettled(
-    unitIds.map(async (id) => api.getUnit(session, id)),
-  );
-
-  const unitDefinitionMap = new Map<number, Map<number, TaskDefinitionSummary>>();
-  for (const result of unitDetailResults) {
-    if (result.status !== 'fulfilled') {
-      continue;
-    }
-
-    const unit = result.value;
-    const defs = getUnitTaskDefinitions(unit);
-    unitDefinitionMap.set(
-      unit.id,
-      new Map(
-        defs
-          .filter((definition) => typeof definition.id === 'number')
-          .map((definition) => [definition.id as number, definition]),
-      ),
-    );
-  }
-
-  const tasks: InboxRowTask[] = [];
-  for (const project of detailedProjects) {
-    const projectUnitId = project.unit?.id;
-    for (const task of project.tasks || []) {
-      const taskDefId = getTaskDefinitionId(task);
-      const fallbackDefinition = taskDefinitionFromUnit(unitDefinitionMap, projectUnitId, taskDefId);
-      tasks.push({
+  const projects = await loadProjectsWithTaskMetadata(api, session);
+  const tasks = flattenTasks(projects)
+    .filter((task) => task.unitId !== undefined && unitFilter.has(task.unitId))
+    .map(
+      (task): InboxRowTask => ({
         ...task,
-        projectId: project.id,
-        unitId: projectUnitId,
-        definition: {
-          id: taskDefId,
-          abbreviation: task.definition?.abbreviation ?? fallbackDefinition?.abbreviation,
-          name: task.definition?.name ?? fallbackDefinition?.name,
-          targetGrade: task.definition?.targetGrade ?? fallbackDefinition?.targetGrade,
-        },
-        _unitId: projectUnitId ?? -1,
-      });
-    }
-  }
+        projectId: task.projectId,
+        unitId: task.unitId,
+        _unitId: task.unitId ?? -1,
+      }),
+    );
 
   return tasks;
 }
@@ -397,7 +432,8 @@ async function handleLogin(args: string[]): Promise<void> {
   };
 
   await saveSession(session);
-  console.log(`Signed in as ${session.user.firstName || ''} ${session.user.lastName || ''}`.trim() || session.username);
+  const fullName = `${session.user.firstName || session.user.first_name || ''} ${session.user.lastName || session.user.last_name || ''}`.trim();
+  console.log(`Signed in as ${fullName || session.username}`);
   console.log(`Session saved to ${session.baseUrl}`);
 }
 
@@ -453,7 +489,7 @@ async function handleProjects(args: string[]): Promise<void> {
       enrolled: project.enrolled ?? '-',
       targetGrade: project.targetGrade ?? '-',
       submittedGrade: project.submittedGrade ?? '-',
-      tasks: project.tasks?.length ?? 0,
+      tasks: Array.isArray(project.tasks) ? project.tasks.length : '-',
     })),
   );
 }
@@ -486,15 +522,11 @@ async function handleUnits(args: string[]): Promise<void> {
 async function handleTasks(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
-  const projects = await api.listProjects(session);
+  const projectId = parseOptionalInteger(args, '--project-id');
+  const projects = await loadProjectsWithTaskMetadata(api, session, { projectId });
 
   let tasks = flattenTasks(projects);
-  const projectId = getFlagValue(args, '--project-id');
   const status = getFlagValue(args, '--status');
-
-  if (projectId) {
-    tasks = tasks.filter((task) => String(task.projectId) === projectId);
-  }
 
   if (status) {
     tasks = filterTasksByStatus(tasks, status);
@@ -516,6 +548,198 @@ async function handleTasks(args: string[]): Promise<void> {
       grade: task.grade ?? '-',
       due: formatDate(getTaskDueDate(task)),
       completed: formatDate(getTaskCompletionDate(task)),
+    })),
+  );
+}
+
+type DoctorCheck = {
+  key: string;
+  endpoint: string;
+  status: 'ok' | 'error' | 'skip';
+  detail: string;
+};
+
+function parseStatusCodeFromError(error: unknown): number | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/\b(\d{3})\b/);
+  if (!match) {
+    return undefined;
+  }
+  const code = Number.parseInt(match[1], 10);
+  return Number.isFinite(code) ? code : undefined;
+}
+
+function shortError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length > 140 ? `${message.slice(0, 137)}...` : message;
+}
+
+async function runDoctorCheck(
+  key: string,
+  endpoint: string,
+  fn: () => Promise<unknown>,
+): Promise<DoctorCheck> {
+  try {
+    await fn();
+    return {
+      key,
+      endpoint,
+      status: 'ok',
+      detail: 'ok',
+    };
+  } catch (error) {
+    const code = parseStatusCodeFromError(error);
+    return {
+      key,
+      endpoint,
+      status: 'error',
+      detail: code ? `${code} ${shortError(error)}` : shortError(error),
+    };
+  }
+}
+
+async function handleDoctor(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+
+  const checks: DoctorCheck[] = [];
+  checks.push(
+    await runDoctorCheck('auth_method', 'GET /auth/method', async () => {
+      await api.getAuthMethod();
+    }),
+  );
+
+  let projects: ProjectSummary[] = [];
+  const projectsCheck = await runDoctorCheck('projects', 'GET /projects', async () => {
+    projects = await api.listProjects(session);
+  });
+  checks.push(projectsCheck);
+
+  const firstProject = projects[0];
+  if (!firstProject) {
+    checks.push({
+      key: 'project_detail',
+      endpoint: 'GET /projects/:projectId',
+      status: 'skip',
+      detail: 'No project available for this account.',
+    });
+  } else {
+    checks.push(
+      await runDoctorCheck('project_detail', `GET /projects/${firstProject.id}`, async () => {
+        const detailedProject = await api.getProject(session, firstProject.id);
+        firstProject.tasks = detailedProject.tasks;
+      }),
+    );
+  }
+
+  let firstUnitId = firstProject?.unit?.id;
+  const unitsCheck = await runDoctorCheck('units', 'GET /units', async () => {
+    const units = await api.listUnits(session);
+    if (!firstUnitId) {
+      firstUnitId = units[0]?.id;
+    }
+  });
+  checks.push(unitsCheck);
+
+  if (!firstUnitId) {
+    checks.push({
+      key: 'unit_detail',
+      endpoint: 'GET /units/:unitId',
+      status: 'skip',
+      detail: 'No unit id available.',
+    });
+    checks.push({
+      key: 'inbox',
+      endpoint: 'GET /units/:unitId/tasks/inbox',
+      status: 'skip',
+      detail: 'No unit id available.',
+    });
+  } else {
+    checks.push(
+      await runDoctorCheck('unit_detail', `GET /units/${firstUnitId}`, async () => {
+        await api.getUnit(session, firstUnitId as number);
+      }),
+    );
+    checks.push(
+      await runDoctorCheck('inbox', `GET /units/${firstUnitId}/tasks/inbox`, async () => {
+        await api.listInboxTasks(session, firstUnitId as number);
+      }),
+    );
+  }
+
+  const firstTaskDefId = firstProject?.tasks?.[0]
+    ? getTaskDefinitionId(firstProject.tasks[0])
+    : undefined;
+  const projectId = firstProject?.id;
+  if (!projectId || !firstTaskDefId) {
+    checks.push({
+      key: 'feedback',
+      endpoint: 'GET /projects/:projectId/task_def_id/:taskDefId/comments',
+      status: 'skip',
+      detail: 'No project/task available.',
+    });
+    checks.push({
+      key: 'task_pdf',
+      endpoint: 'GET /units/:unitId/task_definitions/:taskDefId/task_pdf.json',
+      status: 'skip',
+      detail: 'No project/task available.',
+    });
+    checks.push({
+      key: 'submission_pdf',
+      endpoint: 'GET /projects/:projectId/task_def_id/:taskDefId/submission',
+      status: 'skip',
+      detail: 'No project/task available.',
+    });
+  } else {
+    checks.push(
+      await runDoctorCheck(
+        'feedback',
+        `GET /projects/${projectId}/task_def_id/${firstTaskDefId}/comments`,
+        async () => {
+          await api.listTaskComments(session, projectId, firstTaskDefId);
+        },
+      ),
+    );
+    if (firstUnitId) {
+      checks.push(
+        await runDoctorCheck(
+          'task_pdf',
+          `GET /units/${firstUnitId}/task_definitions/${firstTaskDefId}/task_pdf.json`,
+          async () => {
+            await api.downloadTaskPdf(session, firstUnitId as number, firstTaskDefId);
+          },
+        ),
+      );
+    } else {
+      checks.push({
+        key: 'task_pdf',
+        endpoint: 'GET /units/:unitId/task_definitions/:taskDefId/task_pdf.json',
+        status: 'skip',
+        detail: 'No unit id available.',
+      });
+    }
+    checks.push(
+      await runDoctorCheck(
+        'submission_pdf',
+        `GET /projects/${projectId}/task_def_id/${firstTaskDefId}/submission`,
+        async () => {
+          await api.downloadSubmissionPdf(session, projectId, firstTaskDefId);
+        },
+      ),
+    );
+  }
+
+  if (hasFlag(args, '--json')) {
+    printJson(checks);
+    return;
+  }
+
+  printTable(
+    checks.map((check) => ({
+      check: check.key,
+      status: check.status,
+      endpoint: check.endpoint,
+      detail: check.detail,
     })),
   );
 }
@@ -612,7 +836,9 @@ async function handleTaskShow(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
   const selector = parseTaskSelectorArgs(args);
-  const projects = await api.listProjects(session);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
   const resolved = resolveTaskSelector(projects, selector);
 
   const payload = {
@@ -668,7 +894,9 @@ async function handleFeedbackList(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
   const selector = parseTaskSelectorArgs(args);
-  const projects = await api.listProjects(session);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
   const resolved = resolveTaskSelector(projects, selector);
   const comments = await api.listTaskComments(session, resolved.project.id, resolved.taskDefId);
 
@@ -697,7 +925,9 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
   const selector = parseTaskSelectorArgs(args);
-  const projects = await api.listProjects(session);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
   const resolved = resolveTaskSelector(projects, selector);
   const outDir = getFlagValue(args, '--out-dir');
 
@@ -739,7 +969,11 @@ async function buildWatchSnapshot(
   projectId?: number,
   unitId?: number,
 ): Promise<WatchTaskState[]> {
-  const projects = filterProjectsForWatch(await api.listProjects(session), projectId, unitId);
+  const projects = filterProjectsForWatch(
+    await loadProjectsWithTaskMetadata(api, session, { projectId, unitId }),
+    projectId,
+    unitId,
+  );
   const tasks = flattenTasks(projects);
 
   const states: Array<WatchTaskState | null> = await Promise.all(
@@ -974,6 +1208,9 @@ async function main(): Promise<void> {
       return;
     case 'tasks':
       await handleTasks(rest);
+      return;
+    case 'doctor':
+      await handleDoctor(rest);
       return;
     case 'inbox':
       await handleInbox(rest);

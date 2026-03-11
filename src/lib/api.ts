@@ -10,6 +10,37 @@ import type {
 
 type JsonBody = Record<string, unknown> | undefined;
 
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+const DEFAULT_RETRY_ATTEMPTS = 2;
+
+function methodOf(init: RequestInit): string {
+  return (init.method || 'GET').toUpperCase();
+}
+
+function shouldRetry(response: Response, init: RequestInit, attempt: number, maxRetries: number): boolean {
+  if (attempt >= maxRetries) {
+    return false;
+  }
+
+  const method = methodOf(init);
+  if (method !== 'GET' && method !== 'HEAD') {
+    return false;
+  }
+
+  return RETRYABLE_STATUSES.has(response.status);
+}
+
+function retryDelayMs(attempt: number): number {
+  const base = 250;
+  const backoff = base * 2 ** attempt;
+  const jitter = Math.floor(Math.random() * 120);
+  return backoff + jitter;
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function buildErrorMessage(response: Response, body: unknown): string {
   let message = `${response.status} ${response.statusText}`;
   if (typeof body === 'string' && body.trim()) {
@@ -23,8 +54,16 @@ function buildErrorMessage(response: Response, body: unknown): string {
 async function requestJson<T>(
   url: string,
   init: RequestInit,
+  attempt: number = 0,
+  maxRetries: number = DEFAULT_RETRY_ATTEMPTS,
 ): Promise<T> {
   const response = await fetch(url, init);
+
+  if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
+    await wait(retryDelayMs(attempt));
+    return requestJson<T>(url, init, attempt + 1, maxRetries);
+  }
+
   const contentType = response.headers.get('content-type') || '';
   const body = contentType.includes('application/json')
     ? await response.json()
@@ -46,8 +85,15 @@ export interface DownloadResult {
 async function requestBinary(
   url: string,
   init: RequestInit,
+  attempt: number = 0,
+  maxRetries: number = DEFAULT_RETRY_ATTEMPTS,
 ): Promise<DownloadResult> {
   const response = await fetch(url, init);
+
+  if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
+    await wait(retryDelayMs(attempt));
+    return requestBinary(url, init, attempt + 1, maxRetries);
+  }
 
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
