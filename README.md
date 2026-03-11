@@ -78,7 +78,7 @@ It is designed to work out of the box, with no mandatory base URL setup and a co
 
 - Node.js `22+`
 - macOS, Linux, or Windows
-- A Chromium-based browser is recommended for `ontrack login --sso` or `ontrack login --auto`
+- A Chromium-based browser is recommended for `ontrack login` (default guided SSO) or `ontrack login --auto`
 
 ### Global install
 
@@ -143,10 +143,10 @@ Recommended:
 ontrack login
 ```
 
-Force guided SSO (equivalent explicit mode):
+Server/no-GUI override (headless):
 
 ```bash
-ontrack login --sso
+ontrack login --hide-browser
 ```
 
 ### 3. Confirm the cached account
@@ -240,14 +240,16 @@ ontrack login
 This flow:
 
 1. prompts for Monash username/password in CLI (password is hidden)
-2. launches controlled SSO automation
-3. waits for Okta Verify push/number approval
-4. captures credentials and signs in through `/api/auth`
-5. stores a local session cache
+2. launches guided SSO automation in a visible browser by default
+3. shows structured login progress in terminal panels
+4. prompts MFA method selection in CLI when multiple methods are available
+5. highlights Okta Verify number challenge values in terminal output
+6. captures credentials and signs in through `/api/auth`
+7. stores a local session cache
 
 `ontrack login` now opens a visible browser by default for guided SSO.  
 Use `ontrack login --hide-browser` to force headless mode (for server/no-GUI environments).  
-You can still use `ontrack login --sso` to force guided SSO explicitly.
+You can still use `ontrack login --sso` as an explicit guided alias.
 
 ### Browser-only capture mode: `ontrack login --auto`
 
@@ -311,7 +313,8 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
 | `ontrack login` | Run guided Monash SSO with Okta Verify push/number (default path) | Primary login command |
-| `ontrack login --sso` | Run guided Monash SSO with Okta Verify push/number | Recommended login path |
+| `ontrack login --sso` | Run guided Monash SSO with Okta Verify push/number | Explicit guided alias |
+| `ontrack login --hide-browser` | Force headless guided SSO | Recommended for server/no-GUI environments |
 | `ontrack login --auto` | Run browser-only capture mode | Use when you only need passive capture |
 | `ontrack logout` | Clear the local session | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
@@ -359,7 +362,7 @@ ontrack logout
 ### Workflow 1: sign in and find your tasks
 
 ```bash
-ontrack login --sso
+ontrack login
 ontrack whoami
 ontrack projects
 ontrack tasks
@@ -519,6 +522,15 @@ The default output mode is a colored terminal table. Important fields are highli
 - `unit`: cyan
 - `status`: color-coded by status
 - `due`: highlighted when a deadline is close or overdue
+
+### Login flow output
+
+`ontrack login` now renders guided SSO status with styled terminal panels and event lines:
+
+- guided SSO start panel
+- MFA method selection panel (plus a plain-text fallback list)
+- Okta Verify number challenge panel with highlighted numbers
+- login success panel with account, role, and suggested next commands
 
 ### Force colors on or off
 
@@ -737,7 +749,7 @@ Typical reasons:
 Set the browser path explicitly:
 
 ```bash
-ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login --sso
+ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
 ```
 
 Or install bundled Chromium support:
@@ -752,7 +764,7 @@ The cached session has expired. Re-authenticate:
 
 ```bash
 ontrack logout
-ontrack login --sso
+ontrack login
 ```
 
 ### `Task abbreviation "... " is ambiguous`
