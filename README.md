@@ -36,7 +36,9 @@ ontrack discover --limit 20
 ontrack inbox --unit-id 123
 ontrack task show --project-id 456 --abbr T1
 ontrack feedback list --project-id 456 --abbr T1
+ontrack feedback watch --project-id 456 --abbr T1 --interval 10
 ontrack pdf task --project-id 456 --abbr T1
+ontrack submission upload --project-id 456 --abbr T1 --file ./report.pdf
 ontrack watch --interval 60
 ```
 
@@ -67,9 +69,18 @@ If your browser is not auto-detected, set `ONTRACK_BROWSER_PATH` to the browser 
 - `ontrack inbox [--unit-id ID] [--status STATUS] [--json]`
 - `ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]`
 - `ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]`
+- `ontrack feedback watch --project-id ID (--task-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]`
 - `ontrack pdf task --project-id ID (--task-id ID | --abbr ABBR) [--out-dir PATH]`
 - `ontrack pdf submission --project-id ID (--task-id ID | --abbr ABBR) [--out-dir PATH]`
+- `ontrack submission upload --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger need_help|ready_for_feedback] [--comment TEXT] [--json]`
+- `ontrack submission upload-new-files --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger need_help|ready_for_feedback] [--comment TEXT] [--json]`
 - `ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]`
+
+### Live Chat Feed
+
+- `ontrack feedback watch` continuously reads task conversation/comments.
+- Baseline output shows recent history (default `30` items), then only new messages.
+- Use `--history 0` to skip baseline and watch new incoming messages only.
 
 ### Selector Rules
 
@@ -82,6 +93,14 @@ If your browser is not auto-detected, set `ONTRACK_BROWSER_PATH` to the browser 
 - Default output directory: `./downloads`
 - Override with: `--out-dir <path>`
 - Filename format: `<unitCode>_<abbr>_<type>.pdf` (`type`: `task` or `submission`)
+
+### Submission Upload
+
+- Use repeated `--file` flags to upload required task files.
+- If the task expects exact upload keys (`file0`, `file1`, ...), the CLI auto-maps by task definition order.
+- You can map manually with key syntax: `--file file0=./report.pdf --file file1=./demo.mp4`.
+- `submission upload` defaults trigger from current task status (`working_on_it/need_help` -> `need_help`; otherwise server default).
+- `submission upload-new-files` uploads evidence without forcing a default trigger.
 
 ### Surface Discovery
 

@@ -1,14 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import type { ProjectSummary } from '../src/lib/types.js';
+import type { FeedbackItem, ProjectSummary } from '../src/lib/types.js';
 import {
   buildPdfFilename,
   diffWatchStates,
+  feedbackIdentity,
+  getFlagValues,
+  getFeedbackTimestamp,
   makeWatchTaskKey,
   parseTaskSelectorArgs,
+  parseUploadFileSpecs,
   resolveDownloadDir,
   resolveTaskSelector,
+  sortFeedbackItems,
   toWatchStateMap,
 } from '../src/lib/utils.js';
 
@@ -162,4 +167,68 @@ test('diffWatchStates emits no events when nothing changed', () => {
 
   const events = diffWatchStates(previous, current);
   assert.equal(events.length, 0);
+});
+
+test('sortFeedbackItems sorts by timestamp then id', () => {
+  const items: FeedbackItem[] = [
+    { id: 3, createdAt: '2026-03-11T00:03:00.000Z', comment: 'c' },
+    { id: 1, createdAt: '2026-03-11T00:01:00.000Z', comment: 'a' },
+    { id: 2, createdAt: '2026-03-11T00:01:00.000Z', comment: 'b' },
+  ];
+
+  const sorted = sortFeedbackItems(items);
+  assert.deepEqual(
+    sorted.map((item) => [item.id, getFeedbackTimestamp(item)]),
+    [
+      [1, '2026-03-11T00:01:00.000Z'],
+      [2, '2026-03-11T00:01:00.000Z'],
+      [3, '2026-03-11T00:03:00.000Z'],
+    ],
+  );
+});
+
+test('feedbackIdentity prefers id and falls back to timestamp+text', () => {
+  const withId = feedbackIdentity({
+    id: 88,
+    createdAt: '2026-03-11T00:00:00.000Z',
+    comment: 'hello',
+  } as FeedbackItem);
+  assert.equal(withId, 'id:88');
+
+  const noId = feedbackIdentity({
+    id: Number.NaN as unknown as number,
+    createdAt: '2026-03-11T00:00:00.000Z',
+    comment: 'hello',
+  } as FeedbackItem);
+  assert.equal(noId, '2026-03-11T00:00:00.000Z:hello');
+});
+
+test('getFlagValues supports repeated flags and validates value presence', () => {
+  const values = getFlagValues(['--file', 'a.txt', '--file', 'b.txt'], '--file');
+  assert.deepEqual(values, ['a.txt', 'b.txt']);
+
+  assert.throws(
+    () => getFlagValues(['--file', '--json'], '--file'),
+    /Missing value for --file/,
+  );
+});
+
+test('parseUploadFileSpecs supports plain paths and explicit file keys', () => {
+  const specs = parseUploadFileSpecs([
+    '--file',
+    './report.pdf',
+    '--file',
+    'file1=./demo.mp4',
+  ]);
+  assert.deepEqual(specs, [
+    { path: './report.pdf' },
+    { key: 'file1', path: './demo.mp4' },
+  ]);
+});
+
+test('parseUploadFileSpecs requires at least one --file', () => {
+  assert.throws(
+    () => parseUploadFileSpecs(['--project-id', '101']),
+    /Provide at least one --file <path>/,
+  );
 });

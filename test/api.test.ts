@@ -113,3 +113,67 @@ test('downloadSubmissionPdf surfaces non-200 responses', async () => {
     /404 Not Found: not found/,
   );
 });
+
+test('uploadTaskSubmission sends multipart form with file keys and trigger', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async (_input, init) => {
+    const headers = new Headers(init?.headers);
+    assert.equal(init?.method, 'POST');
+    assert.equal(headers.get('Auth-Token'), 'token-123');
+    assert.equal(headers.get('Username'), 'student1');
+
+    const body = init?.body;
+    assert.ok(body instanceof FormData);
+    assert.equal(body.get('trigger'), 'need_help');
+
+    const uploaded = body.get('file0');
+    assert.ok(uploaded instanceof File);
+    assert.equal(uploaded.name, 'report.pdf');
+    assert.equal(uploaded.size, 3);
+
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  const result = await client.uploadTaskSubmission(
+    session,
+    101,
+    501,
+    [
+      {
+        key: 'file0',
+        filename: 'report.pdf',
+        content: Buffer.from('abc'),
+      },
+    ],
+    { trigger: 'need_help' },
+  );
+
+  assert.deepEqual(result, { ok: true });
+});
+
+test('addTaskComment posts json payload', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async (_input, init) => {
+    const headers = new Headers(init?.headers);
+    assert.equal(init?.method, 'POST');
+    assert.equal(headers.get('content-type'), 'application/json');
+    assert.equal(headers.get('Auth-Token'), 'token-123');
+
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.comment, 'Please review this update.');
+
+    return new Response(
+      JSON.stringify({ id: 44, comment: 'Please review this update.' }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
+  });
+
+  const comment = await client.addTaskComment(session, 101, 501, 'Please review this update.');
+  assert.equal(comment.id, 44);
+});

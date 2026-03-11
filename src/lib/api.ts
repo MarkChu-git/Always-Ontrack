@@ -4,6 +4,7 @@ import type {
   InboxTask,
   ProjectSummary,
   SessionData,
+  SubmissionTrigger,
   SignInResponse,
   UnitSummary,
 } from './types.js';
@@ -86,6 +87,17 @@ export interface ProbeResult {
   endpoint: string;
   status: number;
   ok: boolean;
+}
+
+export interface SubmissionUploadFile {
+  key: string;
+  filename: string;
+  content: Uint8Array;
+  contentType?: string;
+}
+
+export interface UploadSubmissionOptions {
+  trigger?: SubmissionTrigger;
 }
 
 async function requestBinary(
@@ -239,6 +251,63 @@ export class OnTrackApiClient {
           Accept: 'application/json',
           ...authHeaders(session),
         },
+      },
+    );
+  }
+
+  addTaskComment(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    comment: string,
+  ): Promise<FeedbackItem> {
+    return requestJson<FeedbackItem>(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/comments`),
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...authHeaders(session),
+        },
+        body: JSON.stringify({ comment }),
+      },
+    );
+  }
+
+  uploadTaskSubmission(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    files: SubmissionUploadFile[],
+    options?: UploadSubmissionOptions,
+  ): Promise<unknown> {
+    if (files.length === 0) {
+      throw new Error('At least one upload file is required.');
+    }
+
+    const form = new FormData();
+    for (const file of files) {
+      const bytes = new Uint8Array(file.content);
+      const blob = new Blob([bytes], {
+        type: file.contentType || 'application/octet-stream',
+      });
+      form.append(file.key, blob, file.filename);
+    }
+
+    if (options?.trigger) {
+      form.append('trigger', options.trigger);
+    }
+
+    return requestJson(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/submission`),
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(session),
+        },
+        body: form,
       },
     );
   }

@@ -102,6 +102,66 @@ function runWatch(projectId, intervalSec) {
   });
 }
 
+function runFeedbackWatch(projectId, abbr, intervalSec) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [
+      'dist/cli.js',
+      'feedback',
+      'watch',
+      '--project-id',
+      String(projectId),
+      '--abbr',
+      String(abbr),
+      '--history',
+      '0',
+      '--interval',
+      String(intervalSec),
+      '--json',
+    ]);
+
+    let stdout = '';
+    let stderr = '';
+    let baselineSeen = false;
+    let stopRequested = false;
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+      if (!baselineSeen && stdout.includes('"type": "baseline"')) {
+        baselineSeen = true;
+        if (!stopRequested) {
+          stopRequested = true;
+          setTimeout(() => child.kill('SIGINT'), 400);
+        }
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    const timer = setTimeout(() => {
+      if (!stopRequested) {
+        stopRequested = true;
+        child.kill('SIGINT');
+      }
+    }, 60000);
+
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      const hasBaseline = stdout.includes('"type": "baseline"');
+      if (!hasBaseline) {
+        reject(new Error(`feedback watch did not produce baseline output.\n${stdout}\n${stderr}`));
+        return;
+      }
+
+      const interruptedByUs = signal === 'SIGINT' || signal === 'SIGTERM';
+      if (code !== 0 && !interruptedByUs) {
+        reject(new Error(`feedback watch failed with exit code ${code}.\n${stdout}\n${stderr}`));
+        return;
+      }
+      resolvePromise(stdout);
+    });
+  });
+}
+
 function pickFirstTask(tasks) {
   if (!Array.isArray(tasks) || tasks.length === 0) {
     throw new Error('No tasks found for project.');
@@ -168,6 +228,7 @@ async function main() {
   );
 
   await runWatch(projectId, intervalSec);
+  await runFeedbackWatch(projectId, abbr, intervalSec);
 
   console.log('Smoke check passed.');
   console.log(`projectId=${projectId}`);

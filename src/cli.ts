@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readFile } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
 import { captureSsoCredentials } from './lib/auto-login.js';
@@ -8,6 +10,7 @@ import {
   buildPdfFilename,
   diffWatchStates,
   filterTasksByStatus,
+  feedbackIdentity,
   formatDate,
   getFeedbackText,
   getFeedbackTimestamp,
@@ -27,10 +30,12 @@ import {
   parseIntegerFlagValue,
   parseSsoRedirectUrl,
   parseTaskSelectorArgs,
+  parseUploadFileSpecs,
   printJson,
   printTable,
   prompt,
   resolveTaskSelector,
+  sortFeedbackItems,
   toWatchStateMap,
   writePdfFile,
 } from './lib/utils.js';
@@ -39,7 +44,9 @@ import type {
   InboxTask,
   ProjectSummary,
   SessionData,
+  SubmissionTrigger,
   TaskDefinitionSummary,
+  TaskUploadRequirement,
   TaskSummary,
   UnitSummary,
 } from './lib/types.js';
@@ -68,8 +75,11 @@ Usage:
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]
   ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]
+  ontrack feedback watch --project-id ID (--task-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]
   ontrack pdf task --project-id ID (--task-id ID | --abbr ABBR) [--out-dir PATH]
   ontrack pdf submission --project-id ID (--task-id ID | --abbr ABBR) [--out-dir PATH]
+  ontrack submission upload --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--json]
+  ontrack submission upload-new-files --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--json]
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
 
 Notes:
@@ -77,6 +87,7 @@ Notes:
   - This site currently reports SAML SSO.
   - Use "ontrack login --auto" for automatic credential capture, or "ontrack login" for manual redirect URL paste.
   - PDF commands save files into ./downloads by default.
+  - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
 `);
 }
 
@@ -112,6 +123,24 @@ function parseOptionalInteger(args: string[], flag: string): number | undefined 
   }
 
   return parseIntegerFlagValue(getFlagValue(args, flag), flag);
+}
+
+function parseOptionalString(args: string[], flag: string): string | undefined {
+  if (!hasFlag(args, flag)) {
+    return undefined;
+  }
+
+  const raw = getFlagValue(args, flag);
+  if (!raw || raw.startsWith('--')) {
+    throw new Error(`Missing value for ${flag}.`);
+  }
+
+  const value = raw.trim();
+  if (!value) {
+    throw new Error(`Missing value for ${flag}.`);
+  }
+
+  return value;
 }
 
 function extractInboxProjectId(task: InboxTask): number | undefined {
@@ -197,6 +226,175 @@ function getUnitTaskDefinitions(unit: UnitSummary | undefined): TaskDefinitionSu
     return [];
   }
   return defs;
+}
+
+type UploadFileInput = {
+  key?: string;
+  path: string;
+};
+
+type UploadFileAssignment = {
+  key: string;
+  path: string;
+};
+
+function getTaskUploadRequirements(task: TaskSummary): TaskUploadRequirement[] {
+  const definition = task.definition as Record<string, unknown> | undefined;
+  const candidates = [
+    definition?.uploadRequirements,
+    definition?.upload_requirements,
+    task.uploadRequirements,
+    task.upload_requirements,
+  ];
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+
+    return candidate.filter(
+      (item): item is TaskUploadRequirement => typeof item === 'object' && item !== null,
+    );
+  }
+
+  return [];
+}
+
+function getUploadRequirementKeys(task: TaskSummary): string[] {
+  const requirements = getTaskUploadRequirements(task);
+  return requirements.map((requirement, index) => {
+    const key =
+      typeof requirement.key === 'string' ? requirement.key.trim() : '';
+    return key || `file${index}`;
+  });
+}
+
+function deriveDefaultSubmissionTrigger(task: TaskSummary): SubmissionTrigger | undefined {
+  const status = (getTaskStatus(task) || '').trim().toLowerCase();
+  if (status === 'working_on_it' || status === 'need_help') {
+    return 'need_help';
+  }
+  return undefined;
+}
+
+function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  const value = raw.trim().toLowerCase();
+  if (value === 'need_help' || value === 'ready_for_feedback') {
+    return value;
+  }
+
+  throw new Error('--trigger must be one of: need_help, ready_for_feedback.');
+}
+
+function assignUploadFileKeys(
+  inputs: UploadFileInput[],
+  requirementKeys: string[],
+): UploadFileAssignment[] {
+  const explicit = new Map<string, string>();
+  const queuedPaths: string[] = [];
+
+  for (const input of inputs) {
+    if (!input.path.trim()) {
+      throw new Error('Upload file path cannot be empty.');
+    }
+
+    if (!input.key) {
+      queuedPaths.push(input.path);
+      continue;
+    }
+
+    if (explicit.has(input.key)) {
+      throw new Error(`Duplicate upload key "${input.key}".`);
+    }
+    explicit.set(input.key, input.path);
+  }
+
+  if (requirementKeys.length > 0) {
+    if (inputs.length !== requirementKeys.length) {
+      throw new Error(
+        `This task expects ${requirementKeys.length} file(s) (${requirementKeys.join(', ')}), but received ${inputs.length}.`,
+      );
+    }
+
+    for (const key of explicit.keys()) {
+      if (!requirementKeys.includes(key)) {
+        throw new Error(
+          `Upload key "${key}" is not valid for this task. Expected keys: ${requirementKeys.join(', ')}.`,
+        );
+      }
+    }
+
+    const remainingKeys = requirementKeys.filter((key) => !explicit.has(key));
+    if (queuedPaths.length !== remainingKeys.length) {
+      throw new Error(
+        `Unable to map files to required keys (${requirementKeys.join(', ')}). Use --file fileN=PATH to map explicitly.`,
+      );
+    }
+
+    const assignments: UploadFileAssignment[] = [];
+    let queueIndex = 0;
+    for (const key of requirementKeys) {
+      const path = explicit.get(key) ?? queuedPaths[queueIndex++];
+      assignments.push({ key, path });
+    }
+    return assignments;
+  }
+
+  const assignments: UploadFileAssignment[] = [];
+  const used = new Set(explicit.keys());
+  let autoIndex = 0;
+  for (const input of inputs) {
+    if (input.key) {
+      assignments.push({
+        key: input.key,
+        path: input.path,
+      });
+      continue;
+    }
+
+    let key = `file${autoIndex}`;
+    while (used.has(key)) {
+      autoIndex += 1;
+      key = `file${autoIndex}`;
+    }
+    autoIndex += 1;
+    used.add(key);
+    assignments.push({
+      key,
+      path: input.path,
+    });
+  }
+
+  return assignments;
+}
+
+async function readUploadFiles(assignments: UploadFileAssignment[]): Promise<
+  Array<{
+    key: string;
+    filename: string;
+    content: Buffer;
+  }>
+> {
+  return Promise.all(
+    assignments.map(async (assignment) => {
+      const absolutePath = resolve(process.cwd(), assignment.path);
+      try {
+        const content = await readFile(absolutePath);
+        return {
+          key: assignment.key,
+          filename: basename(absolutePath),
+          content,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to read upload file "${assignment.path}": ${message}`);
+      }
+    }),
+  );
 }
 
 function projectMatchesScope(
@@ -294,6 +492,16 @@ async function loadProjectsWithTaskMetadata(
           abbreviation: task.definition?.abbreviation ?? taskDefinition?.abbreviation,
           name: task.definition?.name ?? taskDefinition?.name,
           targetGrade: task.definition?.targetGrade ?? taskDefinition?.targetGrade,
+          uploadRequirements:
+            task.definition?.uploadRequirements ??
+            task.definition?.upload_requirements ??
+            taskDefinition?.uploadRequirements ??
+            taskDefinition?.upload_requirements,
+          upload_requirements:
+            task.definition?.upload_requirements ??
+            task.definition?.uploadRequirements ??
+            taskDefinition?.upload_requirements ??
+            taskDefinition?.uploadRequirements,
         },
       };
     });
@@ -626,14 +834,14 @@ async function handleUnitTasks(args: string[]): Promise<void> {
 
   printTable(
     tasks.map((task) => ({
-      id: task.id,
-      projectId: task.projectId,
-      unitCode: task.unitCode ?? '-',
-      abbr: getTaskAbbreviation(task) ?? '-',
-      name: getTaskName(task) ?? '-',
+      unit: task.unitCode ?? '-',
+      task: getTaskAbbreviation(task) ?? '-',
+      title: getTaskName(task) ?? '-',
       status: getTaskStatus(task) ?? '-',
       due: formatDate(getTaskDueDate(task)),
       completed: formatDate(getTaskCompletionDate(task)),
+      taskId: task.id,
+      projectId: task.projectId,
     })),
   );
 }
@@ -658,15 +866,15 @@ async function handleTasks(args: string[]): Promise<void> {
 
   printTable(
     tasks.map((task) => ({
-      id: task.id,
-      projectId: task.projectId,
-      unitCode: task.unitCode ?? '-',
-      abbr: getTaskAbbreviation(task) ?? '-',
-      name: getTaskName(task) ?? '-',
+      unit: task.unitCode ?? '-',
+      task: getTaskAbbreviation(task) ?? '-',
+      title: getTaskName(task) ?? '-',
       status: getTaskStatus(task) ?? '-',
       grade: task.grade ?? '-',
       due: formatDate(getTaskDueDate(task)),
       completed: formatDate(getTaskCompletionDate(task)),
+      taskId: task.id,
+      projectId: task.projectId,
     })),
   );
 }
@@ -1037,14 +1245,14 @@ async function handleInbox(args: string[]): Promise<void> {
 
   printTable(
     filtered.map((task) => ({
-      id: task.id,
-      projectId: extractInboxProjectId(task) ?? '-',
-      unitId: task._unitId,
-      unitCode: unitMap.get(task._unitId)?.code ?? (task as { unitCode?: string }).unitCode ?? '-',
-      abbr: getTaskAbbreviation(task) ?? '-',
-      name: getTaskName(task) ?? '-',
+      unit: unitMap.get(task._unitId)?.code ?? (task as { unitCode?: string }).unitCode ?? '-',
+      task: getTaskAbbreviation(task) ?? '-',
+      title: getTaskName(task) ?? '-',
       status: getTaskStatus(task) ?? '-',
       due: formatDate(getTaskDueDate(task)),
+      taskId: task.id,
+      projectId: extractInboxProjectId(task) ?? '-',
+      unitId: task._unitId,
     })),
   );
 }
@@ -1081,17 +1289,18 @@ async function handleTaskShow(args: string[]): Promise<void> {
 
   printTable([
     {
-      projectId: payload.projectId,
-      unitCode: payload.unitCode ?? '-',
-      taskId: payload.taskId,
-      taskDefId: payload.taskDefId,
-      abbr: payload.abbr,
-      name: payload.name ?? '-',
+      task: payload.abbr,
+      title: payload.name ?? '-',
       status: payload.status ?? '-',
       due: formatDate(payload.dueDate),
       completed: formatDate(payload.completionDate),
       grade: payload.grade ?? '-',
       qualityPts: payload.qualityPts ?? '-',
+      unit: payload.unitCode ?? '-',
+      taskId: payload.taskId,
+      taskDefId: payload.taskDefId,
+      projectId: payload.projectId,
+      unitId: payload.unitId ?? '-',
     },
   ]);
 }
@@ -1131,6 +1340,75 @@ function feedbackAuthor(comment: FeedbackItem): string {
   return full || comment.author.username || '-';
 }
 
+function formatDateTime(value?: string): string {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+
+  return date.toISOString().replace('T', ' ').slice(0, 16);
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function feedbackMessage(comment: FeedbackItem): string {
+  const text = getFeedbackText(comment).trim();
+  if (text) {
+    return text;
+  }
+
+  const record = comment as Record<string, unknown>;
+  const fromStatus = firstString(record, ['from_status', 'previous_status', 'old_status']);
+  const toStatus = firstString(record, ['to_status', 'new_status', 'status']);
+  if (fromStatus && toStatus) {
+    return `Status: ${fromStatus} -> ${toStatus}`;
+  }
+  if (toStatus) {
+    return `Status: ${toStatus}`;
+  }
+
+  if (typeof comment.type === 'string' && comment.type.trim()) {
+    return `[${comment.type.trim()}]`;
+  }
+
+  return '-';
+}
+
+function feedbackKind(comment: FeedbackItem): string {
+  const type = typeof comment.type === 'string' ? comment.type.trim() : '';
+  if (type) {
+    return type;
+  }
+  return getFeedbackText(comment).trim() ? 'message' : 'event';
+}
+
+function presentFeedbackRows(comments: FeedbackItem[]): Array<Record<string, unknown>> {
+  return comments.map((comment) => {
+    const message = feedbackMessage(comment);
+    const preview = message.length > 160 ? `${message.slice(0, 157)}...` : message;
+
+    return {
+      at: formatDateTime(getFeedbackTimestamp(comment)),
+      author: feedbackAuthor(comment),
+      kind: feedbackKind(comment),
+      message: preview,
+      commentId: comment.id ?? '-',
+    };
+  });
+}
+
 async function handleFeedbackList(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -1146,20 +1424,145 @@ async function handleFeedbackList(args: string[]): Promise<void> {
     return;
   }
 
+  const sortedComments = sortFeedbackItems(comments);
   printTable(
-    comments.map((comment) => {
-      const text = getFeedbackText(comment);
-      const preview = text.length > 120 ? `${text.slice(0, 117)}...` : text || '-';
-      return {
-        id: comment.id,
-        type: comment.type ?? '-',
-        author: feedbackAuthor(comment),
-        createdAt: formatDate(getFeedbackTimestamp(comment)),
-        isNew: comment.isNew ?? comment.is_new ?? '-',
-        preview,
-      };
-    }),
+    presentFeedbackRows(sortedComments).map((row, index) => ({
+      ...row,
+      isNew: sortedComments[index]?.isNew ?? sortedComments[index]?.is_new ?? '-',
+    })),
   );
+}
+
+async function handleFeedbackWatch(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const selector = parseTaskSelectorArgs(args);
+  const interval = hasFlag(args, '--interval')
+    ? parseIntegerFlagValue(getFlagValue(args, '--interval'), '--interval')
+    : 15;
+  const history = hasFlag(args, '--history')
+    ? parseIntegerFlagValue(getFlagValue(args, '--history'), '--history')
+    : 30;
+  const asJson = hasFlag(args, '--json');
+
+  if (interval < 1) {
+    throw new Error('--interval must be at least 1 second.');
+  }
+  if (history < 0) {
+    throw new Error('--history must be >= 0.');
+  }
+
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
+  const resolved = resolveTaskSelector(projects, selector);
+
+  const initialComments = sortFeedbackItems(
+    await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
+  );
+  const baselineComments = history === 0 ? [] : initialComments.slice(-history);
+  const seen = new Set(initialComments.map((comment) => feedbackIdentity(comment)));
+  const startedAt = new Date().toISOString();
+
+  if (asJson) {
+    printJson({
+      type: 'baseline',
+      at: startedAt,
+      projectId: resolved.project.id,
+      task: resolved.abbr,
+      intervalSec: interval,
+      totalComments: initialComments.length,
+      comments: baselineComments,
+    });
+  } else {
+    console.log(
+      `Feedback watch started for ${resolved.unitCode ?? '-'} ${resolved.abbr} (project ${resolved.project.id}). Polling every ${interval}s. Press Ctrl+C to stop.`,
+    );
+    if (baselineComments.length === 0) {
+      console.log('No baseline comments.');
+    } else {
+      printTable(presentFeedbackRows(baselineComments));
+    }
+  }
+
+  let stopped = false;
+  let interruptWait: (() => void) | undefined;
+  const onSigint = (): void => {
+    stopped = true;
+    if (interruptWait) {
+      interruptWait();
+    }
+  };
+  process.once('SIGINT', onSigint);
+
+  try {
+    while (!stopped) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          interruptWait = undefined;
+          resolve();
+        }, interval * 1000);
+
+        interruptWait = () => {
+          clearTimeout(timer);
+          interruptWait = undefined;
+          resolve();
+        };
+      });
+
+      if (stopped) {
+        break;
+      }
+
+      let comments: FeedbackItem[];
+      try {
+        comments = sortFeedbackItems(
+          await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
+        );
+      } catch (error) {
+        if (asJson) {
+          printJson({
+            type: 'error',
+            at: new Date().toISOString(),
+            message: (error as Error).message,
+          });
+        } else {
+          console.error(`[feedback-watch] ${(error as Error).message}`);
+        }
+        continue;
+      }
+
+      const fresh = comments.filter((comment) => {
+        const key = feedbackIdentity(comment);
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+
+      if (fresh.length === 0) {
+        continue;
+      }
+
+      if (asJson) {
+        printJson({
+          type: 'comments',
+          at: new Date().toISOString(),
+          projectId: resolved.project.id,
+          task: resolved.abbr,
+          comments: fresh,
+        });
+      } else {
+        printTable(presentFeedbackRows(fresh));
+      }
+    }
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+    if (!asJson) {
+      console.log('Feedback watch stopped.');
+    }
+  }
 }
 
 async function handlePdfDownload(args: string[], type: 'task' | 'submission'): Promise<void> {
@@ -1187,6 +1590,77 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
   const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
   const filePath = await writePdfFile(download.buffer, filename, outDir);
   console.log(`Saved ${type} PDF to ${filePath}`);
+}
+
+async function handleSubmissionUpload(
+  args: string[],
+  mode: 'upload' | 'upload-new-files',
+): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const selector = parseTaskSelectorArgs(args);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
+  const resolved = resolveTaskSelector(projects, selector);
+  const fileInputs = parseUploadFileSpecs(args) as UploadFileInput[];
+  const explicitTrigger = parseSubmissionTrigger(parseOptionalString(args, '--trigger'));
+  const trigger =
+    explicitTrigger ??
+    (mode === 'upload' ? deriveDefaultSubmissionTrigger(resolved.task) : undefined);
+  const comment = parseOptionalString(args, '--comment');
+
+  const requirementKeys = getUploadRequirementKeys(resolved.task);
+  const assignments = assignUploadFileKeys(fileInputs, requirementKeys);
+  const files = await readUploadFiles(assignments);
+
+  const upload = await api.uploadTaskSubmission(
+    session,
+    resolved.project.id,
+    resolved.taskDefId,
+    files,
+    {
+      trigger,
+    },
+  );
+
+  let commentResult: FeedbackItem | undefined;
+  if (comment) {
+    commentResult = await api.addTaskComment(
+      session,
+      resolved.project.id,
+      resolved.taskDefId,
+      comment,
+    );
+  }
+
+  if (hasFlag(args, '--json')) {
+    printJson({
+      command: `submission ${mode}`,
+      projectId: resolved.project.id,
+      unitCode: resolved.unitCode,
+      task: resolved.abbr,
+      taskDefId: resolved.taskDefId,
+      trigger: trigger ?? null,
+      files: files.map((file) => ({
+        key: file.key,
+        filename: file.filename,
+        bytes: file.content.length,
+      })),
+      upload,
+      comment: commentResult ?? null,
+    });
+    return;
+  }
+
+  console.log(
+    `Uploaded ${files.length} file(s) for ${resolved.unitCode ?? '-'} ${resolved.abbr} (project ${resolved.project.id}).`,
+  );
+  console.log(`File keys: ${assignments.map((item) => `${item.key}=${item.path}`).join(', ')}`);
+  console.log(`Trigger: ${trigger ?? 'ready_for_feedback (server default)'}`);
+  if (commentResult) {
+    console.log(`Comment posted: ${commentResult.id ?? 'ok'}`);
+  }
 }
 
 function filterProjectsForWatch(
@@ -1298,13 +1772,13 @@ async function handleWatch(args: string[]): Promise<void> {
     console.log(`Watch started at ${startedAt}. Polling every ${interval}s. Press Ctrl+C to stop.`);
     printTable(
       baseline.map((task) => ({
-        projectId: task.projectId,
-        unitCode: task.unitCode ?? '-',
-        abbr: task.abbr ?? '-',
+        task: task.abbr ?? '-',
         status: task.status ?? '-',
         due: formatDate(task.dueDate),
         comments: task.commentCount,
         lastCommentAt: task.lastCommentAt ? formatDate(task.lastCommentAt) : '-',
+        unit: task.unitCode ?? '-',
+        projectId: task.projectId,
       })),
     );
   }
@@ -1401,6 +1875,10 @@ async function handleFeedbackCommand(args: string[]): Promise<void> {
     await handleFeedbackList(rest);
     return;
   }
+  if (subcommand === 'watch') {
+    await handleFeedbackWatch(rest);
+    return;
+  }
   throw new Error(`Unknown feedback subcommand: ${subcommand || '(missing)'}`);
 }
 
@@ -1416,6 +1894,20 @@ async function handlePdfCommand(args: string[]): Promise<void> {
     return;
   }
   throw new Error(`Unknown pdf subcommand: ${subcommand || '(missing)'}`);
+}
+
+async function handleSubmissionCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+  const rest = args.slice(1);
+  if (subcommand === 'upload') {
+    await handleSubmissionUpload(rest, 'upload');
+    return;
+  }
+  if (subcommand === 'upload-new-files') {
+    await handleSubmissionUpload(rest, 'upload-new-files');
+    return;
+  }
+  throw new Error(`Unknown submission subcommand: ${subcommand || '(missing)'}`);
 }
 
 async function main(): Promise<void> {
@@ -1473,6 +1965,9 @@ async function main(): Promise<void> {
       return;
     case 'pdf':
       await handlePdfCommand(rest);
+      return;
+    case 'submission':
+      await handleSubmissionCommand(rest);
       return;
     case 'watch':
       await handleWatch(rest);

@@ -41,11 +41,20 @@ export interface UnitSummary {
   [key: string]: unknown;
 }
 
+export interface TaskUploadRequirement {
+  key?: string;
+  label?: string;
+  max_size?: number;
+  [key: string]: unknown;
+}
+
 export interface TaskDefinitionSummary {
   id?: number;
   abbreviation?: string;
   name?: string;
   targetGrade?: number;
+  uploadRequirements?: TaskUploadRequirement[];
+  upload_requirements?: TaskUploadRequirement[];
   [key: string]: unknown;
 }
 
@@ -64,11 +73,16 @@ export interface TaskSummary {
   num_new_comments?: number;
   taskDefinitionId?: number;
   task_definition_id?: number;
+  uploadRequirements?: TaskUploadRequirement[];
+  upload_requirements?: TaskUploadRequirement[];
   definition?: {
     id?: number;
     abbreviation?: string;
     name?: string;
     targetGrade?: number;
+    uploadRequirements?: TaskUploadRequirement[];
+    upload_requirements?: TaskUploadRequirement[];
+    [key: string]: unknown;
   };
   [key: string]: unknown;
 }
@@ -114,6 +128,8 @@ export interface FeedbackItem {
   recipient?: OnTrackUser;
   [key: string]: unknown;
 }
+
+export type SubmissionTrigger = 'need_help' | 'ready_for_feedback';
 
 export type WatchEventType = 'status_changed' | 'due_changed' | 'new_feedback';
 

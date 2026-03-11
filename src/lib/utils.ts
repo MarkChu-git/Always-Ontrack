@@ -92,6 +92,23 @@ export function getFlagValue(args: string[], flag: string): string | undefined {
   return args[index + 1];
 }
 
+export function getFlagValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== flag) {
+      continue;
+    }
+
+    const value = args[index + 1];
+    if (!value || isFlag(value)) {
+      throw new Error(`Missing value for ${flag}.`);
+    }
+    values.push(value);
+    index += 1;
+  }
+  return values;
+}
+
 export function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
@@ -113,13 +130,77 @@ export function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function toDisplayValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '-';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function padRight(value: string, width: number): string {
+  if (value.length >= width) {
+    return value;
+  }
+  return `${value}${' '.repeat(width - value.length)}`;
+}
+
 export function printTable(rows: Array<Record<string, unknown>>): void {
   if (rows.length === 0) {
     console.log('No results.');
     return;
   }
 
-  console.table(rows);
+  const indexedRows: Array<Record<string, unknown>> = rows.map((row, index) => ({
+    '(index)': index,
+    ...row,
+  }));
+
+  const columns: string[] = [];
+  for (const row of indexedRows) {
+    for (const key of Object.keys(row)) {
+      if (!columns.includes(key)) {
+        columns.push(key);
+      }
+    }
+  }
+
+  const matrix = indexedRows.map((row) => columns.map((column) => toDisplayValue(row[column])));
+  const widths = columns.map((column, columnIndex) =>
+    Math.max(column.length, ...matrix.map((cells) => cells[columnIndex].length)),
+  );
+
+  const top = `┌${widths.map((width) => '─'.repeat(width + 2)).join('┬')}┐`;
+  const separator = `├${widths.map((width) => '─'.repeat(width + 2)).join('┼')}┤`;
+  const bottom = `└${widths.map((width) => '─'.repeat(width + 2)).join('┴')}┘`;
+
+  const header = `│ ${columns
+    .map((column, index) => padRight(column, widths[index]))
+    .join(' │ ')} │`;
+  const lines = matrix.map(
+    (cells) =>
+      `│ ${cells
+        .map((cell, index) => padRight(cell, widths[index]))
+        .join(' │ ')} │`,
+  );
+
+  console.log([top, header, separator, ...lines, bottom].join('\n'));
 }
 
 function toInteger(value: unknown): number | undefined {
@@ -372,6 +453,58 @@ export function getFeedbackText(feedback: FeedbackItem): string {
   );
 }
 
+function feedbackIdValue(feedback: FeedbackItem): number | undefined {
+  const rawId = feedback.id as unknown;
+
+  if (typeof rawId === 'number' && Number.isFinite(rawId)) {
+    return rawId;
+  }
+
+  if (typeof rawId === 'string' && rawId.trim()) {
+    const parsed = Number.parseInt(rawId, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+export function feedbackIdentity(feedback: FeedbackItem): string {
+  const id = feedbackIdValue(feedback);
+  if (id !== undefined) {
+    return `id:${id}`;
+  }
+
+  const timestamp = getFeedbackTimestamp(feedback) || '-';
+  const text = getFeedbackText(feedback) || '-';
+  return `${timestamp}:${text}`;
+}
+
+export function sortFeedbackItems(feedback: FeedbackItem[]): FeedbackItem[] {
+  return [...feedback].sort((left, right) => {
+    const leftTimestamp = getFeedbackTimestamp(left);
+    const rightTimestamp = getFeedbackTimestamp(right);
+    const leftMs = leftTimestamp ? Date.parse(leftTimestamp) : Number.NaN;
+    const rightMs = rightTimestamp ? Date.parse(rightTimestamp) : Number.NaN;
+
+    if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) {
+      return leftMs - rightMs;
+    }
+
+    if (leftTimestamp && rightTimestamp && leftTimestamp !== rightTimestamp) {
+      return leftTimestamp.localeCompare(rightTimestamp);
+    }
+
+    const leftId = feedbackIdValue(left);
+    const rightId = feedbackIdValue(right);
+    if (leftId !== undefined && rightId !== undefined && leftId !== rightId) {
+      return leftId - rightId;
+    }
+
+    return feedbackIdentity(left).localeCompare(feedbackIdentity(right));
+  });
+}
+
 export function getLatestFeedbackTimestamp(feedback: FeedbackItem[]): string | undefined {
   let latestMs = -1;
   let latestRaw: string | undefined;
@@ -484,4 +617,34 @@ export function diffWatchStates(
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+export interface UploadFileSpec {
+  key?: string;
+  path: string;
+}
+
+export function parseUploadFileSpecs(args: string[], flag: string = '--file'): UploadFileSpec[] {
+  const values = getFlagValues(args, flag);
+  if (values.length === 0) {
+    throw new Error(`Provide at least one ${flag} <path>.`);
+  }
+
+  return values.map((value) => {
+    const equalIndex = value.indexOf('=');
+    if (equalIndex > 0) {
+      const maybeKey = value.slice(0, equalIndex).trim();
+      const path = value.slice(equalIndex + 1).trim();
+      if (/^file\d+$/.test(maybeKey) && path) {
+        return {
+          key: maybeKey,
+          path,
+        };
+      }
+    }
+
+    return {
+      path: value.trim(),
+    };
+  });
 }
