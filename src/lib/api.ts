@@ -1,5 +1,7 @@
 import type {
   AuthMethodResponse,
+  FeedbackItem,
+  InboxTask,
   ProjectSummary,
   SessionData,
   SignInResponse,
@@ -7,6 +9,16 @@ import type {
 } from './types.js';
 
 type JsonBody = Record<string, unknown> | undefined;
+
+function buildErrorMessage(response: Response, body: unknown): string {
+  let message = `${response.status} ${response.statusText}`;
+  if (typeof body === 'string' && body.trim()) {
+    message = `${message}: ${body.trim()}`;
+  } else if (body && typeof body === 'object' && 'error' in body) {
+    message = `${message}: ${String(body.error)}`;
+  }
+  return message;
+}
 
 async function requestJson<T>(
   url: string,
@@ -19,16 +31,38 @@ async function requestJson<T>(
     : await response.text();
 
   if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    if (typeof body === 'string' && body.trim()) {
-      message = `${message}: ${body.trim()}`;
-    } else if (body && typeof body === 'object' && 'error' in body) {
-      message = `${message}: ${String(body.error)}`;
-    }
-    throw new Error(message);
+    throw new Error(buildErrorMessage(response, body));
   }
 
   return body as T;
+}
+
+export interface DownloadResult {
+  buffer: Buffer;
+  contentType: string;
+  contentDisposition?: string;
+}
+
+async function requestBinary(
+  url: string,
+  init: RequestInit,
+): Promise<DownloadResult> {
+  const response = await fetch(url, init);
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    const body = contentType.includes('application/json')
+      ? await response.json()
+      : await response.text();
+    throw new Error(buildErrorMessage(response, body));
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    buffer: Buffer.from(arrayBuffer),
+    contentType: response.headers.get('content-type') || 'application/octet-stream',
+    contentDisposition: response.headers.get('content-disposition') || undefined,
+  };
 }
 
 function withApiPath(baseUrl: string, path: string): string {
@@ -98,5 +132,63 @@ export class OnTrackApiClient {
       },
     });
   }
-}
 
+  listInboxTasks(session: SessionData, unitId: number): Promise<InboxTask[]> {
+    return requestJson<InboxTask[]>(withApiPath(this.baseUrl, `units/${unitId}/tasks/inbox`), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(session),
+      },
+    });
+  }
+
+  listTaskComments(session: SessionData, projectId: number, taskDefId: number): Promise<FeedbackItem[]> {
+    return requestJson<FeedbackItem[]>(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/comments`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(session),
+        },
+      },
+    );
+  }
+
+  downloadTaskPdf(session: SessionData, unitId: number, taskDefId: number): Promise<DownloadResult> {
+    return requestBinary(
+      withApiPath(
+        this.baseUrl,
+        `units/${unitId}/task_definitions/${taskDefId}/task_pdf.json?as_attachment=true`,
+      ),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/pdf, application/octet-stream, */*',
+          ...authHeaders(session),
+        },
+      },
+    );
+  }
+
+  downloadSubmissionPdf(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return requestBinary(
+      withApiPath(
+        this.baseUrl,
+        `projects/${projectId}/task_def_id/${taskDefId}/submission?as_attachment=true`,
+      ),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/pdf, application/octet-stream, */*',
+          ...authHeaders(session),
+        },
+      },
+    );
+  }
+}
