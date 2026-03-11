@@ -10,6 +10,7 @@ import {
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
+import type { MfaMethodOption } from './lib/auto-login.js';
 import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
 import { getWelcomeMenuItems, parseWelcomeSelection } from './lib/welcome.js';
 import {
@@ -944,8 +945,42 @@ async function handleLogin(args: string[]): Promise<void> {
         const stepLabels: Record<string, string> = {
           username: 'Submitting username...',
           password: 'Submitting password...',
+          mfa_select: 'Multiple MFA options detected. Please choose one in CLI.',
           mfa_wait: 'Waiting for Okta Verify push/number approval on your phone...',
           completed: 'SSO flow completed.',
+        };
+
+        const chooseMfaMethod = async (
+          options: MfaMethodOption[],
+        ): Promise<number> => {
+          if (options.length === 0) {
+            return 1;
+          }
+
+          const recommendedOption =
+            options.find((option) => option.recommended) ?? options[0];
+
+          console.log('');
+          console.log('Select a security method:');
+          for (const option of options) {
+            const suffix = option.id === recommendedOption.id ? ' (Recommended)' : '';
+            console.log(`  ${option.id}. ${option.label}${suffix}`);
+          }
+
+          const raw = await prompt(`Choose method [${recommendedOption.id}]: `);
+          if (!raw.trim()) {
+            return recommendedOption.id;
+          }
+
+          const selected = Number.parseInt(raw.trim(), 10);
+          if (Number.isFinite(selected) && options.some((option) => option.id === selected)) {
+            return selected;
+          }
+
+          console.log(
+            `[warn] Invalid selection "${raw.trim()}". Using recommended method ${recommendedOption.id}.`,
+          );
+          return recommendedOption.id;
         };
 
         try {
@@ -958,6 +993,7 @@ async function handleLogin(args: string[]): Promise<void> {
               password,
               timeoutMs: ssoTimeoutSec * 1000,
               headless: isHeadless && !showBrowser,
+              chooseMfaMethod,
             },
             (step) => {
               const message = stepLabels[step];
@@ -979,8 +1015,26 @@ async function handleLogin(args: string[]): Promise<void> {
           } else {
             console.log(`[warn] Guided SSO fallback (${reason}): ${detail}`);
           }
-          console.log('[info] Falling back to manual redirect URL flow.');
-          await manualRedirectCapture();
+
+          try {
+            console.log(
+              '[info] Switching to browser-assisted SSO mode. Complete login in the opened browser window; credentials will be captured automatically.',
+            );
+            const captured = await captureSsoCredentials({
+              ssoUrl: redirectTo,
+              apiBaseUrl: api.base,
+              timeoutMs: ssoTimeoutSec * 1000,
+              headless: false,
+            });
+            authToken = captured.authToken;
+            username = captured.username;
+            console.log(`Browser-assisted SSO captured credentials from ${captured.source}.`);
+          } catch (assistedError) {
+            const assistedDetail = toRedactedError(assistedError).message;
+            console.log(`[warn] Browser-assisted SSO failed: ${assistedDetail}`);
+            console.log('[info] Falling back to manual redirect URL flow (last-resort).');
+            await manualRedirectCapture();
+          }
         } finally {
           password = '';
         }

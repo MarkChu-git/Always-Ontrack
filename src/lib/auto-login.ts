@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Page } from 'playwright-core';
+import type { Frame, Locator, Page } from 'playwright-core';
 
 export interface LoginCredentials {
   authToken: string;
@@ -15,9 +15,16 @@ export interface SsoLoginOptions {
   password: string;
   timeoutMs?: number;
   headless?: boolean;
+  chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
 }
 
-export type SsoStep = 'username' | 'password' | 'mfa_wait' | 'completed' | 'fallback';
+export interface MfaMethodOption {
+  id: number;
+  label: string;
+  recommended?: boolean;
+}
+
+export type SsoStep = 'username' | 'password' | 'mfa_select' | 'mfa_wait' | 'completed' | 'fallback';
 
 export type SsoFallbackReason =
   | 'captcha'
@@ -284,30 +291,127 @@ export interface AutoLoginOptions {
 
 const USERNAME_SELECTORS = [
   'input#okta-signin-username',
+  'input#username',
+  'input#userNameInput',
+  'input#i0116',
   'input[name="identifier"]',
+  'input[name="loginfmt"]',
   'input[name="username"]',
+  'input[name="user"]',
+  'input[autocomplete="username"]',
   'input[type="email"]',
 ];
 
 const PASSWORD_SELECTORS = [
   'input#okta-signin-password',
+  'input#password',
+  'input#passwordInput',
+  'input#i0118',
   'input[name="password"]',
+  'input[name="passwd"]',
+  'input[autocomplete="current-password"]',
   'input[type="password"]',
 ];
 
 const PRIMARY_SUBMIT_SELECTORS = [
   'input#okta-signin-submit',
+  '#idSIButton9',
   'button[type="submit"]',
   'input[type="submit"]',
+  'button[name="action"]',
   'button[data-type="save"]',
 ];
+
+const SSO_ENTRY_SELECTORS = [
+  'a[href*="sso"]',
+  'a[href*="monashuni.okta.com"]',
+  'a[href*="saml"]',
+  'button[id*="sso"]',
+  'button[class*="sso"]',
+  'button[data-sso]',
+];
+
+const SSO_ENTRY_LABELS = [
+  'monash',
+  'single sign',
+  'sso',
+  'continue',
+  'sign in',
+  'log in',
+  'next',
+];
+
+const USERNAME_CONTINUE_LABELS = ['next', 'continue', 'sign in', 'log in', 'verify'];
+const PASSWORD_SUBMIT_LABELS = ['sign in', 'log in', 'verify', 'continue', 'next'];
+const MFA_SELECT_BUTTON_LABEL = /select/i;
+const MFA_OPTION_LABEL_CLEANUP = /\bselect\b/gi;
+
+const BLOCKED_LINK_HOSTS = new Set([
+  'okta.com',
+  'www.okta.com',
+]);
 
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function canUseSelector(page: Page, selector: string): Promise<boolean> {
-  const locator = page.locator(selector).first();
+function summarizePageLocations(pages: Page[]): string {
+  const locations: string[] = [];
+  for (const page of pages) {
+    try {
+      const url = new URL(page.url());
+      locations.push(`${url.origin}${url.pathname}`);
+    } catch {
+      // skip invalid/intermediate URL
+    }
+  }
+
+  if (locations.length === 0) {
+    return '(no stable page URL)';
+  }
+
+  return [...new Set(locations)].join(', ');
+}
+
+type InteractionScope = Page | Frame;
+
+interface ScopeRef {
+  page: Page;
+  scope: InteractionScope;
+}
+
+interface DetectedMfaOption {
+  scopeRef: ScopeRef;
+  control: Locator;
+  label: string;
+  recommended: boolean;
+}
+
+interface GuidedSsoRuntimeState {
+  usernameSubmitted: boolean;
+  passwordSubmitted: boolean;
+  sawUsernameField: boolean;
+  sawPasswordField: boolean;
+  ssoEntryClicked: boolean;
+  mfaWaitNotified: boolean;
+  sawOktaVerifyChallenge: boolean;
+  mfaSelectionDone: boolean;
+  mfaSelectionPrompted: boolean;
+}
+
+function collectScopes(page: Page): ScopeRef[] {
+  const refs: ScopeRef[] = [{ page, scope: page }];
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) {
+      continue;
+    }
+    refs.push({ page, scope: frame });
+  }
+  return refs;
+}
+
+async function canUseSelector(scope: InteractionScope, selector: string): Promise<boolean> {
+  const locator = scope.locator(selector).first();
   try {
     const count = await locator.count();
     if (count === 0) {
@@ -319,121 +423,555 @@ async function canUseSelector(page: Page, selector: string): Promise<boolean> {
   }
 }
 
-async function fillFirstVisible(page: Page, selectors: string[], value: string): Promise<boolean> {
+async function fillFirstVisible(
+  scopes: ScopeRef[],
+  selectors: string[],
+  value: string,
+): Promise<boolean> {
   for (const selector of selectors) {
-    if (!(await canUseSelector(page, selector))) {
-      continue;
-    }
-    await page.locator(selector).first().fill(value);
-    return true;
-  }
-  return false;
-}
-
-async function clickFirstVisible(page: Page, selectors: string[]): Promise<boolean> {
-  for (const selector of selectors) {
-    if (!(await canUseSelector(page, selector))) {
-      continue;
-    }
-    await page.locator(selector).first().click();
-    return true;
-  }
-  return false;
-}
-
-async function clickLikelyActionButton(page: Page, labels: string[]): Promise<boolean> {
-  for (const label of labels) {
-    const button = page.getByRole('button', { name: new RegExp(label, 'i') }).first();
-    try {
-      if (await button.isVisible({ timeout: 400 })) {
-        await button.click();
-        return true;
+    for (const scopeRef of scopes) {
+      if (!(await canUseSelector(scopeRef.scope, selector))) {
+        continue;
       }
-    } catch {
-      // keep searching
+      await scopeRef.scope.locator(selector).first().fill(value);
+      return true;
     }
   }
   return false;
 }
 
-async function hasTextSignal(page: Page, pattern: RegExp): Promise<boolean> {
+async function clickLikelyActionControl(scopes: ScopeRef[], labels: string[]): Promise<boolean> {
+  for (const label of labels) {
+    const matcher = new RegExp(label, 'i');
+    for (const scopeRef of scopes) {
+      for (const role of ['button', 'link'] as const) {
+        const controls = scopeRef.scope.getByRole(role, { name: matcher });
+        const count = await controls.count();
+        for (let index = 0; index < count; index += 1) {
+          const control = controls.nth(index);
+          try {
+            if (!(await control.isVisible({ timeout: 300 }))) {
+              continue;
+            }
+
+            if (role === 'link') {
+              const href = await control.getAttribute('href');
+              const currentUrl = scopeRef.page.url();
+              if (!isSafeActionLink(currentUrl, href)) {
+                continue;
+              }
+            }
+
+            await control.click();
+            return true;
+          } catch {
+            // continue scanning
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function isSafeActionLink(currentUrl: string, href: string | null): boolean {
+  if (!href) {
+    return false;
+  }
+
   try {
-    const node = page.getByText(pattern).first();
-    return await node.isVisible({ timeout: 200 });
+    const current = new URL(currentUrl);
+    const target = new URL(href, current);
+    const host = target.hostname.toLowerCase();
+
+    if (BLOCKED_LINK_HOSTS.has(host)) {
+      return false;
+    }
+
+    if (host === current.hostname.toLowerCase()) {
+      return true;
+    }
+
+    if (host.endsWith('.okta.com')) {
+      return true;
+    }
+
+    if (host.endsWith('.microsoftonline.com')) {
+      return true;
+    }
+
+    if (host.includes('monash')) {
+      return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
 }
 
-async function detectSsoCaptcha(page: Page): Promise<boolean> {
+async function clickFirstVisible(scopes: ScopeRef[], selectors: string[]): Promise<boolean> {
+  for (const selector of selectors) {
+    for (const scopeRef of scopes) {
+      if (!(await canUseSelector(scopeRef.scope, selector))) {
+        continue;
+      }
+
+      const control = scopeRef.scope.locator(selector).first();
+      if (selector.startsWith('a[')) {
+        try {
+          const href = await control.getAttribute('href');
+          if (!isSafeActionLink(scopeRef.page.url(), href)) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      await control.click();
+      return true;
+    }
+  }
+  return false;
+}
+
+async function hasTextSignal(scopes: ScopeRef[], pattern: RegExp): Promise<boolean> {
+  for (const scopeRef of scopes) {
+    try {
+      const node = scopeRef.scope.getByText(pattern).first();
+      if (await node.isVisible({ timeout: 150 })) {
+        return true;
+      }
+    } catch {
+      // continue
+    }
+  }
+  return false;
+}
+
+async function detectSsoCaptcha(scopes: ScopeRef[]): Promise<boolean> {
   return (
-    (await hasTextSignal(page, /captcha|prove you are human|i am human|recaptcha/i)) ||
-    (await canUseSelector(page, 'iframe[src*="recaptcha"], div.g-recaptcha'))
+    (await hasTextSignal(scopes, /captcha|prove you are human|i am human|recaptcha/i)) ||
+    (await canUseSelectorInScopes(scopes, 'iframe[src*="recaptcha"], div.g-recaptcha'))
   );
 }
 
-async function detectUnsupportedMfa(page: Page): Promise<boolean> {
+async function detectUnsupportedMfa(scopes: ScopeRef[]): Promise<boolean> {
+  if (await hasTextSignal(scopes, /security key|webauthn|passkey/i)) {
+    return true;
+  }
+  if (
+    await canUseSelectorInScopes(
+      scopes,
+      [
+        '[data-se*="webauthn"]',
+        '[data-se*="security_key"]',
+        '[data-se*="sms"]',
+        '[data-se*="email"]',
+      ].join(', '),
+    )
+  ) {
+    return true;
+  }
+  if (await hasTextSignal(scopes, /use a security key|verify with sms|verification code via sms/i)) {
+    return true;
+  }
+  return false;
+}
+
+async function detectOktaVerifyChallenge(scopes: ScopeRef[]): Promise<boolean> {
   return (
-    (await hasTextSignal(page, /security key|webauthn|passkey/i)) ||
-    (await hasTextSignal(page, /email|sms|text message/i))
+    (await hasTextSignal(scopes, /okta verify|check your okta verify app|number challenge/i)) ||
+    (await canUseSelectorInScopes(
+      scopes,
+      '[data-se*="okta_verify"], [data-se*="factor-push"], [data-se*="factor-number"]',
+    ))
   );
 }
 
-async function detectOktaVerifyChallenge(page: Page): Promise<boolean> {
-  return (
-    (await hasTextSignal(page, /okta verify|check your okta verify app|number challenge/i)) ||
-    (await canUseSelector(page, '[data-se*="okta_verify"], [data-se*="factor-push"], [data-se*="factor-number"]'))
-  );
+async function canUseSelectorInScopes(scopes: ScopeRef[], selector: string): Promise<boolean> {
+  for (const scopeRef of scopes) {
+    if (await canUseSelector(scopeRef.scope, selector)) {
+      return true;
+    }
+  }
+  return false;
 }
 
-async function performGuidedSsoLogin(
-  page: Page,
-  username: string,
-  password: string,
-  onStep?: (step: SsoStep) => void,
-): Promise<void> {
-  onStep?.('username');
-  const usernameFilled = await fillFirstVisible(page, USERNAME_SELECTORS, username);
-  if (!usernameFilled) {
-    throw new SsoFallbackError(
-      'selector_missing',
-      'fallback',
-      'Unable to locate username field on the Monash SSO page.',
-    );
+async function hasAnySelectorInScopes(scopes: ScopeRef[], selectors: string[]): Promise<boolean> {
+  for (const selector of selectors) {
+    if (await canUseSelectorInScopes(scopes, selector)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeMfaLabel(raw: string): string {
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  if (!compact) {
+    return '';
   }
 
-  const advancedAfterUsername =
-    (await clickFirstVisible(page, PRIMARY_SUBMIT_SELECTORS)) ||
-    (await clickLikelyActionButton(page, ['next', 'continue', 'sign in']));
+  const pushMatch = compact.match(/get a push notification/i);
+  if (pushMatch) {
+    return 'Get a push notification (Okta Verify)';
+  }
 
-  if (advancedAfterUsername) {
+  const codeMatch = compact.match(/enter a code/i);
+  if (codeMatch) {
+    return 'Enter a code (Okta Verify)';
+  }
+
+  const gaMatch = compact.match(/google authenticator/i);
+  if (gaMatch) {
+    return 'Google Authenticator';
+  }
+
+  return compact
+    .replace(MFA_OPTION_LABEL_CLEANUP, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function extractMfaOptionLabel(control: Locator): Promise<string> {
+  try {
+    const label = await control.evaluate((element) => {
+      const pickByPattern = (text: string): string => {
+        const patterns = [
+          /get a push notification(?:\s+okta verify)?/i,
+          /enter a code(?:\s+okta verify)?/i,
+          /google authenticator/i,
+        ];
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (match?.[0]) {
+            return match[0];
+          }
+        }
+        return '';
+      };
+
+      let node: HTMLElement | null = element as HTMLElement;
+      let best = '';
+      let depth = 0;
+      while (node && depth < 8) {
+        const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+        const patterned = pickByPattern(text);
+        if (patterned) {
+          return patterned;
+        }
+        if (text.length > best.length && text.length <= 400) {
+          best = text;
+        }
+        node = node.parentElement;
+        depth += 1;
+      }
+      return best;
+    });
+    return normalizeMfaLabel(label);
+  } catch {
+    return '';
+  }
+}
+
+async function collectSelectControls(scopeRef: ScopeRef): Promise<Locator[]> {
+  const controls: Locator[] = [];
+
+  const roleButtons = scopeRef.scope.getByRole('button', { name: MFA_SELECT_BUTTON_LABEL });
+  const roleButtonCount = await roleButtons.count();
+  for (let index = 0; index < roleButtonCount; index += 1) {
+    controls.push(roleButtons.nth(index));
+  }
+
+  const roleLinks = scopeRef.scope.getByRole('link', { name: MFA_SELECT_BUTTON_LABEL });
+  const roleLinkCount = await roleLinks.count();
+  for (let index = 0; index < roleLinkCount; index += 1) {
+    controls.push(roleLinks.nth(index));
+  }
+
+  const inputControls = scopeRef.scope.locator('input[type="submit"], input[type="button"]');
+  const inputCount = await inputControls.count();
+  for (let index = 0; index < inputCount; index += 1) {
+    const control = inputControls.nth(index);
     try {
-      await page.waitForLoadState('domcontentloaded', { timeout: 8000 });
+      const value =
+        (await control.inputValue().catch(() => '')) ||
+        (await control.getAttribute('value')) ||
+        '';
+      if (!MFA_SELECT_BUTTON_LABEL.test(value)) {
+        continue;
+      }
+      controls.push(control);
     } catch {
-      // continue scanning current page
+      // ignore inaccessible controls
     }
   }
 
-  onStep?.('password');
-  const passwordFilled = await fillFirstVisible(page, PASSWORD_SELECTORS, password);
-  if (!passwordFilled) {
-    throw new SsoFallbackError(
-      'selector_missing',
-      'fallback',
-      'Unable to locate password field on the Monash SSO page.',
-    );
+  return controls;
+}
+
+async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
+  const options: DetectedMfaOption[] = [];
+  for (const scopeRef of scopes) {
+    const controls = await collectSelectControls(scopeRef);
+    for (const control of controls) {
+      try {
+        if (!(await control.isVisible({ timeout: 150 }))) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      const label = await extractMfaOptionLabel(control);
+      if (!label) {
+        continue;
+      }
+
+      options.push({
+        scopeRef,
+        control,
+        label,
+        recommended: /push notification|okta verify push|push/i.test(label),
+      });
+    }
   }
 
-  const submitted =
-    (await clickFirstVisible(page, PRIMARY_SUBMIT_SELECTORS)) ||
-    (await clickLikelyActionButton(page, ['sign in', 'verify', 'next', 'continue']));
+  const unique = new Map<string, DetectedMfaOption>();
+  for (const option of options) {
+    const key = option.label.toLowerCase();
+    if (!unique.has(key)) {
+      unique.set(key, option);
+    }
+  }
+  return [...unique.values()];
+}
 
-  if (!submitted) {
-    throw new SsoFallbackError(
-      'selector_missing',
-      'fallback',
-      'Unable to locate the sign-in submit control on the Monash SSO page.',
+async function clickDetectedMfaOption(option: DetectedMfaOption): Promise<boolean> {
+  try {
+    if (await option.control.isVisible({ timeout: 300 })) {
+      await option.control.click({ timeout: 1500, force: true });
+      return true;
+    }
+  } catch {
+    // fallback below
+  }
+
+  try {
+    await option.control.evaluate((element) => {
+      (element as HTMLElement).click();
+    });
+    return true;
+  } catch {
+    // fallback below
+  }
+
+  const coreLabel = option.label.replace(/\s*\(.*?\)\s*$/, '').trim();
+  const labelPattern = new RegExp(escapeRegex(coreLabel), 'i');
+  const row = option.scopeRef.scope.locator('div, li, tr, section, form').filter({ hasText: labelPattern }).first();
+
+  try {
+    const rowButtons = row.getByRole('button', { name: MFA_SELECT_BUTTON_LABEL });
+    if ((await rowButtons.count()) > 0) {
+      await rowButtons.first().click({ timeout: 1500, force: true });
+      return true;
+    }
+  } catch {
+    // continue fallback
+  }
+
+  try {
+    const rowInputs = row.locator('input[type="submit"], input[type="button"]');
+    if ((await rowInputs.count()) > 0) {
+      await rowInputs.first().click({ timeout: 1500, force: true });
+      return true;
+    }
+  } catch {
+    // continue fallback
+  }
+
+  return false;
+}
+
+async function maybeHandleMfaMethodSelection(
+  scopes: ScopeRef[],
+  state: GuidedSsoRuntimeState,
+  chooseMfaMethod: ((options: MfaMethodOption[]) => Promise<number | null | undefined>) | undefined,
+  onStep?: (step: SsoStep) => void,
+): Promise<boolean> {
+  if (state.mfaSelectionDone) {
+    return false;
+  }
+
+  const detectedOptions = await collectMfaSelectionOptions(scopes);
+  if (detectedOptions.length === 0) {
+    return false;
+  }
+
+  onStep?.('mfa_select');
+
+  const presentedOptions: MfaMethodOption[] = detectedOptions.map((option, index) => ({
+    id: index + 1,
+    label: option.label,
+    recommended: option.recommended,
+  }));
+
+  const defaultOption =
+    presentedOptions.find((item) => item.recommended) ??
+    presentedOptions[0];
+  if (!defaultOption) {
+    return false;
+  }
+  let selectedId = defaultOption.id;
+
+  if (chooseMfaMethod && !state.mfaSelectionPrompted) {
+    state.mfaSelectionPrompted = true;
+    try {
+      const chosen = await chooseMfaMethod(presentedOptions);
+      if (typeof chosen === 'number' && presentedOptions.some((item) => item.id === chosen)) {
+        selectedId = chosen;
+      }
+    } catch {
+      // keep default recommended path
+    }
+  }
+
+  const selectedOption = detectedOptions[selectedId - 1];
+  if (!selectedOption) {
+    return false;
+  }
+  const clicked = await clickDetectedMfaOption(selectedOption);
+  if (clicked) {
+    state.mfaSelectionDone = true;
+    return true;
+  }
+
+  return false;
+}
+
+async function submitAfterFieldFill(scopes: ScopeRef[], labels: string[]): Promise<boolean> {
+  const submittedBySelector = await clickFirstVisible(scopes, PRIMARY_SUBMIT_SELECTORS);
+  if (submittedBySelector) {
+    return true;
+  }
+
+  const submittedByLabel = await clickLikelyActionControl(scopes, labels);
+  if (submittedByLabel) {
+    return true;
+  }
+
+  const enterTargets = [...PASSWORD_SELECTORS, ...USERNAME_SELECTORS];
+  for (const selector of enterTargets) {
+    for (const scopeRef of scopes) {
+      if (!(await canUseSelector(scopeRef.scope, selector))) {
+        continue;
+      }
+      try {
+        await scopeRef.scope.locator(selector).first().press('Enter');
+        return true;
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  return false;
+}
+
+async function advanceGuidedSsoOnPage(
+  page: Page,
+  username: string,
+  password: string,
+  state: GuidedSsoRuntimeState,
+  chooseMfaMethod: ((options: MfaMethodOption[]) => Promise<number | null | undefined>) | undefined,
+  onStep?: (step: SsoStep) => void,
+): Promise<void> {
+  const scopes = collectScopes(page);
+
+  if (!state.ssoEntryClicked) {
+    const clickedEntry =
+      (await clickFirstVisible(scopes, SSO_ENTRY_SELECTORS)) ||
+      (await clickLikelyActionControl(scopes, SSO_ENTRY_LABELS));
+    if (clickedEntry) {
+      state.ssoEntryClicked = true;
+      try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 4000 });
+      } catch {
+        // continue with current state
+      }
+      return;
+    }
+  }
+
+  if (!state.usernameSubmitted) {
+    const hasUsernameField = await hasAnySelectorInScopes(scopes, USERNAME_SELECTORS);
+    if (hasUsernameField) {
+      state.sawUsernameField = true;
+    }
+
+    const usernameFilled = await fillFirstVisible(scopes, USERNAME_SELECTORS, username);
+    if (usernameFilled) {
+      onStep?.('username');
+      state.usernameSubmitted = await submitAfterFieldFill(scopes, USERNAME_CONTINUE_LABELS);
+      if (!state.usernameSubmitted) {
+        state.usernameSubmitted = true;
+      }
+    }
+  }
+
+  if (!state.passwordSubmitted) {
+    const hasPasswordField = await hasAnySelectorInScopes(scopes, PASSWORD_SELECTORS);
+    if (hasPasswordField) {
+      state.sawPasswordField = true;
+    }
+
+    const passwordFilled = await fillFirstVisible(scopes, PASSWORD_SELECTORS, password);
+    if (passwordFilled) {
+      onStep?.('password');
+      state.passwordSubmitted = await submitAfterFieldFill(scopes, PASSWORD_SUBMIT_LABELS);
+      if (!state.passwordSubmitted) {
+        state.passwordSubmitted = true;
+      }
+    }
+  }
+
+  if (!state.mfaWaitNotified) {
+    const handledSelection = await maybeHandleMfaMethodSelection(
+      scopes,
+      state,
+      chooseMfaMethod,
+      onStep,
     );
+    if (handledSelection) {
+      try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 2000 });
+      } catch {
+        // keep polling
+      }
+      return;
+    }
+
+    const sawChallenge = await detectOktaVerifyChallenge(scopes);
+    if (sawChallenge) {
+      state.sawOktaVerifyChallenge = true;
+      state.mfaWaitNotified = true;
+      onStep?.('mfa_wait');
+      return;
+    }
+  }
+
+  if (state.usernameSubmitted || state.passwordSubmitted) {
+    try {
+      await page.waitForLoadState('domcontentloaded', { timeout: 2000 });
+    } catch {
+      // keep polling
+    }
   }
 }
 
@@ -493,6 +1031,7 @@ async function captureSsoCredentialsInternal(
     username: string;
     password: string;
     onStep?: (step: SsoStep) => void;
+    chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
   },
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
@@ -585,12 +1124,21 @@ async function captureSsoCredentialsInternal(
 
   try {
     await page.goto(options.ssoUrl, { waitUntil: 'domcontentloaded' });
-    if (guidedLogin) {
-      await performGuidedSsoLogin(page, guidedLogin.username, guidedLogin.password, guidedLogin.onStep);
-      guidedLogin.onStep?.('mfa_wait');
-    }
     const start = Date.now();
     let sawOktaVerifyChallenge = false;
+    const guidedState: GuidedSsoRuntimeState | null = guidedLogin
+      ? {
+          usernameSubmitted: false,
+          passwordSubmitted: false,
+          sawUsernameField: false,
+          sawPasswordField: false,
+          ssoEntryClicked: false,
+          mfaWaitNotified: false,
+          sawOktaVerifyChallenge: false,
+          mfaSelectionDone: false,
+          mfaSelectionPrompted: false,
+        }
+      : null;
 
     while (!captured && Date.now() - start < timeoutMs) {
       for (const openPage of context.pages()) {
@@ -598,7 +1146,20 @@ async function captureSsoCredentialsInternal(
           break;
         }
 
-        if (await detectSsoCaptcha(openPage)) {
+        const scopes = collectScopes(openPage);
+
+        if (guidedLogin && guidedState) {
+          await advanceGuidedSsoOnPage(
+            openPage,
+            guidedLogin.username,
+            guidedLogin.password,
+            guidedState,
+            guidedLogin.chooseMfaMethod,
+            guidedLogin.onStep,
+          );
+        }
+
+        if (await detectSsoCaptcha(scopes)) {
           throw new SsoFallbackError(
             'captcha',
             'fallback',
@@ -606,7 +1167,7 @@ async function captureSsoCredentialsInternal(
           );
         }
 
-        if (await detectUnsupportedMfa(openPage)) {
+        if (await detectUnsupportedMfa(scopes)) {
           throw new SsoFallbackError(
             'unsupported_mfa',
             'fallback',
@@ -614,8 +1175,11 @@ async function captureSsoCredentialsInternal(
           );
         }
 
-        if (await detectOktaVerifyChallenge(openPage)) {
+        if (await detectOktaVerifyChallenge(scopes)) {
           sawOktaVerifyChallenge = true;
+          if (guidedState) {
+            guidedState.sawOktaVerifyChallenge = true;
+          }
         }
 
         setCaptured(extractCredentialsFromUrl(openPage.url()));
@@ -649,12 +1213,20 @@ async function captureSsoCredentialsInternal(
 
     if (!captured) {
       if (guidedLogin) {
+        const pageSnapshot = summarizePageLocations(context.pages());
+        if (guidedState && !guidedState.sawUsernameField && !guidedState.sawPasswordField) {
+          throw new SsoFallbackError(
+            'selector_missing',
+            'username',
+            `Unable to locate Monash SSO username/password fields after redirects. Seen pages: ${pageSnapshot}. Run with --show-browser and retry.`,
+          );
+        }
         throw new SsoFallbackError(
           'timeout',
           'fallback',
           sawOktaVerifyChallenge
             ? 'Timed out waiting for Okta Verify approval. Please approve in the app and retry.'
-            : 'Timed out waiting for SSO completion after submitting credentials.',
+            : `Timed out waiting for SSO completion after submitting credentials. Seen pages: ${pageSnapshot}`,
         );
       }
       throw new Error(
@@ -687,6 +1259,7 @@ export async function captureSsoCredentialsWithGuidedLogin(
       username: options.username,
       password: options.password,
       onStep,
+      chooseMfaMethod: options.chooseMfaMethod,
     },
   );
   onStep?.('completed');
