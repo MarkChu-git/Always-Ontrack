@@ -121,6 +121,11 @@ npm run dev -- auth-method
 
 下面是一套最短、最稳的上手路径。
 
+欢迎页中的 `11-14`（下载 task/submission PDF、上传 submission、上传新文件）现在是引导模式：
+
+- 推荐从任务列表按序号直接选择任务
+- 也支持手动输入 `--project-id` + `--abbr/--task-id`
+
 ### 1. 检查认证方式
 
 ```bash

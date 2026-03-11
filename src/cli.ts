@@ -344,6 +344,120 @@ async function promptTaskSelectorFlags(): Promise<string[]> {
   return ['--project-id', projectId, '--task-id', taskId];
 }
 
+async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const projects = await api.listProjects(session);
+
+  let tasks = flattenTasks(projects).filter(
+    (task) => typeof task.projectId === 'number' && Boolean(getTaskAbbreviation(task) || getTaskDefinitionId(task)),
+  );
+
+  if (tasks.length === 0) {
+    console.log('[warn] No selectable tasks found in this account. Switching to manual selector.');
+    return null;
+  }
+
+  const unitFilter = (await prompt('Filter by unit code (optional): ')).trim().toLowerCase();
+  if (unitFilter) {
+    tasks = tasks.filter((task) => (task.unitCode || '').toLowerCase().includes(unitFilter));
+  }
+
+  const statusFilter = (await prompt('Filter by status (optional): ')).trim().toLowerCase();
+  if (statusFilter) {
+    tasks = tasks.filter((task) => (getTaskStatus(task) || '').toLowerCase().includes(statusFilter));
+  }
+
+  if (tasks.length === 0) {
+    console.log('[warn] No tasks match the current filter. Switching to manual selector.');
+    return null;
+  }
+
+  const rows = tasks.map((task) => ({
+    unit: task.unitCode || '-',
+    task: getTaskAbbreviation(task) || '-',
+    title: getTaskName(task) || '-',
+    status: getTaskStatus(task) || '-',
+    due: formatDate(getTaskDueDate(task)),
+    projectId: task.projectId,
+    taskId: getTaskDefinitionId(task) ?? '-',
+  }));
+  printTable(rows);
+
+  while (true) {
+    const raw = (await prompt('Select task index (or type m for manual): ')).trim();
+    if (!raw) {
+      continue;
+    }
+    if (/^m$/i.test(raw)) {
+      return null;
+    }
+
+    const index = Number.parseInt(raw, 10);
+    if (!Number.isFinite(index) || index < 0 || index >= tasks.length) {
+      console.log(`[warn] Invalid index "${raw}". Choose 0-${tasks.length - 1}, or type m.`);
+      continue;
+    }
+
+    const task = tasks[index];
+    const projectId = String(task.projectId);
+    const abbr = getTaskAbbreviation(task);
+    if (abbr) {
+      return ['--project-id', projectId, '--abbr', abbr];
+    }
+
+    const taskId = getTaskDefinitionId(task);
+    if (taskId !== undefined) {
+      return ['--project-id', projectId, '--task-id', String(taskId)];
+    }
+
+    console.log('[warn] Selected task cannot be resolved by abbr/task-id. Choose another item.');
+  }
+}
+
+async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string): Promise<string[]> {
+  renderTerminalPanel(
+    modeTitle,
+    [
+      modeSummary,
+      'Choose a task source:',
+      '1. Pick from your current task list (Recommended)',
+      '2. Enter project/task manually',
+    ],
+    'info',
+  );
+
+  const raw = (await prompt('Task selection mode [1/2, default 1]: ')).trim();
+  const manual = raw === '2';
+  if (manual) {
+    return promptTaskSelectorFlags();
+  }
+
+  try {
+    const selected = await promptTaskSelectorFromTaskList();
+    if (selected) {
+      return selected;
+    }
+  } catch (error) {
+    console.log(`[warn] Unable to load task list: ${toRedactedError(error).message}`);
+  }
+
+  return promptTaskSelectorFlags();
+}
+
+async function promptUploadFiles(): Promise<string[]> {
+  const files: string[] = [];
+  while (true) {
+    const label = files.length === 0 ? 'File path: ' : 'Additional file path: ';
+    files.push(await promptRequired(label));
+    const more = (await prompt('Add another file? [y/N]: ')).trim();
+    if (!/^(y|yes)$/i.test(more)) {
+      break;
+    }
+  }
+  return files;
+}
+
 async function runWelcomeAction(actionId: number): Promise<void> {
   switch (actionId) {
     case 1:
@@ -399,26 +513,34 @@ async function runWelcomeAction(actionId: number): Promise<void> {
       return;
     }
     case 11: {
-      const selector = await promptTaskSelectorFlags();
+      const selector = await promptGuidedTaskSelector(
+        'DOWNLOAD TASK PDF',
+        'Export a task sheet PDF for the selected task.',
+      );
       const outDir = await prompt('Output directory (default ./downloads): ');
       await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
       return;
     }
     case 12: {
-      const selector = await promptTaskSelectorFlags();
+      const selector = await promptGuidedTaskSelector(
+        'DOWNLOAD SUBMISSION PDF',
+        'Export your submission PDF copy for the selected task.',
+      );
       const outDir = await prompt('Output directory (default ./downloads): ');
       await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
       return;
     }
     case 13: {
-      const selector = await promptTaskSelectorFlags();
-      const filePath = await promptRequired('File path: ');
+      const selector = await promptGuidedTaskSelector(
+        'UPLOAD SUBMISSION',
+        'Upload required submission files for the selected task.',
+      );
+      const files = await promptUploadFiles();
       const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
       const comment = await prompt('Comment (optional): ');
       const args = [
         ...selector,
-        '--file',
-        filePath,
+        ...files.flatMap((file) => ['--file', file]),
         ...optionalFlagArgs('--trigger', trigger),
         ...optionalFlagArgs('--comment', comment),
       ];
@@ -426,14 +548,16 @@ async function runWelcomeAction(actionId: number): Promise<void> {
       return;
     }
     case 14: {
-      const selector = await promptTaskSelectorFlags();
-      const filePath = await promptRequired('File path: ');
+      const selector = await promptGuidedTaskSelector(
+        'UPLOAD NEW FILES',
+        'Attach extra files to an existing submission.',
+      );
+      const files = await promptUploadFiles();
       const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
       const comment = await prompt('Comment (optional): ');
       const args = [
         ...selector,
-        '--file',
-        filePath,
+        ...files.flatMap((file) => ['--file', file]),
         ...optionalFlagArgs('--trigger', trigger),
         ...optionalFlagArgs('--comment', comment),
       ];

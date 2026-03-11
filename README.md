@@ -129,6 +129,11 @@ ontrack
 
 The launcher displays the ALWAYS ONTRACK digital-style menu. Enter a number to run a command path directly.
 
+For launcher actions `11-14` (task/submission PDF and upload flows), the CLI now opens a guided selector:
+
+- pick a task from your live task list by index (recommended), or
+- enter `--project-id` + `--abbr/--task-id` manually
+
 ### 1. Check the authentication method
 
 ```bash
