@@ -11,6 +11,7 @@ import {
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
 import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
+import { getWelcomeMenuItems, parseWelcomeSelection } from './lib/welcome.js';
 import {
   buildPdfFilename,
   diffWatchStates,
@@ -59,6 +60,7 @@ import type {
   TaskSummary,
   UnitSummary,
 } from './lib/types.js';
+import type { WelcomeMenuItem } from './lib/welcome.js';
 import type { WatchTaskState } from './lib/utils.js';
 
 type InboxRowTask = InboxTask & { _unitId: number };
@@ -67,6 +69,8 @@ function help(): void {
   console.log(`ontrack
 
 Usage:
+  ontrack
+  ontrack welcome
   ontrack auth-method [--base-url URL] [--json]
   ontrack login [--base-url URL] [--redirect-url URL]
   ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME
@@ -93,14 +97,274 @@ Usage:
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
 
 Notes:
+  - Running "ontrack" with no command opens the interactive launcher in TTY terminals.
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
-  - In headless/server environments, "ontrack login" defaults to guided SSO (username/password + Okta Verify).
+  - "ontrack login" defaults to guided SSO (username/password + Okta Verify) on all environments.
   - Use "ontrack login --sso" to force guided SSO, or "ontrack login --auto" for browser-only capture mode.
-  - If guided SSO cannot proceed (captcha/page change/unsupported MFA), it falls back to manual redirect URL paste.
+  - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
   - PDF commands save files into ./downloads by default.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
 `);
+}
+
+const DIGITAL_LOGO_LINES = [
+  ' █████╗ ██╗     ██╗    ██╗ █████╗ ██╗   ██╗███████╗',
+  '██╔══██╗██║     ██║    ██║██╔══██╗╚██╗ ██╔╝██╔════╝',
+  '███████║██║     ██║ █╗ ██║███████║ ╚████╔╝ ███████╗',
+  '██╔══██║██║     ██║███╗██║██╔══██║  ╚██╔╝  ╚════██║',
+  '██║  ██║███████╗╚███╔███╔╝██║  ██║   ██║   ███████║',
+  '╚═╝  ╚═╝╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝',
+  ' ██████╗ ███╗   ██╗████████╗██████╗  █████╗  ██████╗██╗  ██╗',
+  '██╔═══██╗████╗  ██║╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██║ ██╔╝',
+  '██║   ██║██╔██╗ ██║   ██║   ██████╔╝███████║██║     █████╔╝ ',
+  '██║   ██║██║╚██╗██║   ██║   ██╔══██╗██╔══██║██║     ██╔═██╗ ',
+  '╚██████╔╝██║ ╚████║   ██║   ██║  ██║██║  ██║╚██████╗██║  ██╗',
+  ' ╚═════╝ ╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝',
+];
+
+const LOGO_COLOR_CODES = [
+  '38;2;0;25;110',
+  '38;2;0;35;130',
+  '38;2;0;47;167',
+  '38;2;20;63;190',
+  '38;2;35;82;212',
+  '38;2;55;108;236',
+  '38;2;55;108;236',
+  '38;2;35;82;212',
+  '38;2;20;63;190',
+  '38;2;0;47;167',
+  '38;2;0;35;130',
+  '38;2;0;25;110',
+];
+const KLEIN_BLUE_TITLE = '1;38;2;55;108;236';
+const KLEIN_BLUE_ACCENT = '1;38;2;0;47;167';
+const KLEIN_BLUE_SOFT = '38;2;38;95;224';
+
+function launcherColorsEnabled(): boolean {
+  if (process.env.NO_COLOR !== undefined) {
+    return false;
+  }
+  const forced = process.env.FORCE_COLOR;
+  if (forced && forced !== '0') {
+    return true;
+  }
+  return Boolean(process.stdout.isTTY);
+}
+
+function launcherColor(text: string, code: string): string {
+  if (!launcherColorsEnabled()) {
+    return text;
+  }
+  return `\u001B[${code}m${text}\u001B[0m`;
+}
+
+function formatWelcomeMenuRow(item: WelcomeMenuItem): string[] {
+  const id = String(item.id).padStart(2, '0');
+  const badge = item.recommended ? ` ${launcherColor('RECOMMENDED', '1;30;46')}` : '';
+  const primary = `${launcherColor(`[${id}]`, '1;30;106')} ${launcherColor(item.title, '1')}${badge}`;
+  const secondary = `     ${launcherColor(item.command, KLEIN_BLUE_SOFT)}  ${launcherColor(item.summary, '1;37')}`;
+  return [primary, secondary];
+}
+
+function renderWelcomeScreen(items: WelcomeMenuItem[]): void {
+  if (process.stdout.isTTY && process.env.TERM !== 'dumb') {
+    console.clear();
+  }
+
+  console.log('');
+  for (let index = 0; index < DIGITAL_LOGO_LINES.length; index += 1) {
+    const color = LOGO_COLOR_CODES[index % LOGO_COLOR_CODES.length];
+    console.log(launcherColor(DIGITAL_LOGO_LINES[index], color));
+  }
+  console.log(launcherColor('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', KLEIN_BLUE_ACCENT));
+  console.log(launcherColor('ALWAYS ONTRACK COMMAND DECK', KLEIN_BLUE_TITLE));
+  console.log(launcherColor('Type a number to run an action. Type 0 to exit.', KLEIN_BLUE_ACCENT));
+  console.log(launcherColor('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', KLEIN_BLUE_ACCENT));
+  console.log('');
+
+  for (const item of items) {
+    const [primary, secondary] = formatWelcomeMenuRow(item);
+    console.log(primary);
+    console.log(secondary);
+  }
+  console.log('');
+}
+
+function optionalFlagArgs(flag: string, value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+  return [flag, trimmed];
+}
+
+async function promptRequired(label: string): Promise<string> {
+  while (true) {
+    const value = (await prompt(label)).trim();
+    if (value) {
+      return value;
+    }
+    console.log('[warn] This field is required.');
+  }
+}
+
+async function promptTaskSelectorFlags(): Promise<string[]> {
+  const projectId = await promptRequired('Project ID: ');
+  const abbr = (await prompt('Task abbreviation (preferred, e.g. P1/D4). Leave empty to use task id: ')).trim();
+  if (abbr) {
+    return ['--project-id', projectId, '--abbr', abbr];
+  }
+
+  const taskId = await promptRequired('Task ID: ');
+  return ['--project-id', projectId, '--task-id', taskId];
+}
+
+async function runWelcomeAction(actionId: number): Promise<void> {
+  switch (actionId) {
+    case 1:
+      await handleLogin([]);
+      return;
+    case 2:
+      await handleWhoAmI([]);
+      return;
+    case 3:
+      await handleProjects([]);
+      return;
+    case 4:
+      await handleUnits([]);
+      return;
+    case 5:
+      await handleTasks([]);
+      return;
+    case 6:
+      await handleInbox([]);
+      return;
+    case 7: {
+      const selector = await promptTaskSelectorFlags();
+      await handleTaskShow(selector);
+      return;
+    }
+    case 8: {
+      const selector = await promptTaskSelectorFlags();
+      await handleFeedbackList(selector);
+      return;
+    }
+    case 9: {
+      const selector = await promptTaskSelectorFlags();
+      const intervalSec = await prompt('Polling interval seconds (default 15): ');
+      const historyCount = await prompt('History count on startup (default 20): ');
+      const args = [
+        ...selector,
+        ...optionalFlagArgs('--interval', intervalSec),
+        ...optionalFlagArgs('--history', historyCount),
+      ];
+      await handleFeedbackWatch(args);
+      return;
+    }
+    case 10: {
+      const unitId = await prompt('Unit ID filter (optional): ');
+      const projectId = await prompt('Project ID filter (optional): ');
+      const intervalSec = await prompt('Polling interval seconds (default 60): ');
+      const args = [
+        ...optionalFlagArgs('--unit-id', unitId),
+        ...optionalFlagArgs('--project-id', projectId),
+        ...optionalFlagArgs('--interval', intervalSec),
+      ];
+      await handleWatch(args);
+      return;
+    }
+    case 11: {
+      const selector = await promptTaskSelectorFlags();
+      const outDir = await prompt('Output directory (default ./downloads): ');
+      await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
+      return;
+    }
+    case 12: {
+      const selector = await promptTaskSelectorFlags();
+      const outDir = await prompt('Output directory (default ./downloads): ');
+      await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
+      return;
+    }
+    case 13: {
+      const selector = await promptTaskSelectorFlags();
+      const filePath = await promptRequired('File path: ');
+      const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
+      const comment = await prompt('Comment (optional): ');
+      const args = [
+        ...selector,
+        '--file',
+        filePath,
+        ...optionalFlagArgs('--trigger', trigger),
+        ...optionalFlagArgs('--comment', comment),
+      ];
+      await handleSubmissionUpload(args, 'upload');
+      return;
+    }
+    case 14: {
+      const selector = await promptTaskSelectorFlags();
+      const filePath = await promptRequired('File path: ');
+      const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
+      const comment = await prompt('Comment (optional): ');
+      const args = [
+        ...selector,
+        '--file',
+        filePath,
+        ...optionalFlagArgs('--trigger', trigger),
+        ...optionalFlagArgs('--comment', comment),
+      ];
+      await handleSubmissionUpload(args, 'upload-new-files');
+      return;
+    }
+    case 15:
+      await handleLogout();
+      return;
+    case 16:
+      help();
+      return;
+    default:
+      throw new Error(`Unknown launcher action id: ${actionId}`);
+  }
+}
+
+async function handleWelcome(): Promise<void> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    help();
+    return;
+  }
+
+  const items = getWelcomeMenuItems();
+  const allowedIds = items.map((item) => item.id);
+
+  while (true) {
+    renderWelcomeScreen(items);
+
+    const selectedRaw = await prompt('Select action number (0 to exit): ');
+    const selection = parseWelcomeSelection(selectedRaw, allowedIds);
+    if (selection === 0) {
+      console.log('Exiting Always Ontrack launcher.');
+      return;
+    }
+
+    if (selection === null) {
+      console.log('[warn] Invalid selection. Enter a valid menu number.');
+      await prompt('Press Enter to continue...');
+      continue;
+    }
+
+    try {
+      await runWelcomeAction(selection);
+    } catch (error) {
+      const redacted = toRedactedError(error);
+      console.error(`Error: ${redacted.message}`);
+    }
+
+    const next = await prompt('Press Enter to return to launcher, or type q to quit: ');
+    if (/^(q|quit|exit)$/i.test(next.trim())) {
+      console.log('Exiting Always Ontrack launcher.');
+      return;
+    }
+  }
 }
 
 function requireSession(session: SessionData | null): SessionData {
@@ -2017,12 +2281,20 @@ async function main(): Promise<void> {
   const command = args[0];
   const rest = args.slice(1);
 
-  if (!command || command === 'help' || command === '--help' || command === '-h') {
+  if (!command) {
+    await handleWelcome();
+    return;
+  }
+
+  if (command === 'help' || command === '--help' || command === '-h') {
     help();
     return;
   }
 
   switch (command) {
+    case 'welcome':
+      await handleWelcome();
+      return;
     case 'auth-method':
       await handleAuthMethod(rest);
       return;

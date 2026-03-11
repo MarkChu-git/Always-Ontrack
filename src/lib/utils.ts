@@ -447,11 +447,15 @@ export function resolveLoginMode(options: {
   }
 
   const hasDirectCredentials = options.hasAuthToken && options.hasUsername;
-  if (!hasDirectCredentials && !options.hasRedirectUrl && options.isHeadless) {
-    return 'sso_guided';
+  if (hasDirectCredentials) {
+    return 'manual';
   }
 
-  return 'manual';
+  if (options.hasRedirectUrl) {
+    return 'manual';
+  }
+
+  return 'sso_guided';
 }
 
 export const SENSITIVE_QUERY_KEYS = new Set([

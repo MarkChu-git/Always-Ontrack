@@ -60,7 +60,7 @@ test('isHeadlessServerEnvironment detects ssh and explicit overrides', () => {
   );
 });
 
-test('resolveLoginMode prefers auto, then explicit sso, then headless default sso', () => {
+test('resolveLoginMode prefers auto, then guided sso as the default path', () => {
   assert.equal(
     resolveLoginMode({
       auto: true,
@@ -77,6 +77,18 @@ test('resolveLoginMode prefers auto, then explicit sso, then headless default ss
     resolveLoginMode({
       auto: false,
       sso: true,
+      hasAuthToken: false,
+      hasUsername: false,
+      hasRedirectUrl: false,
+      isHeadless: false,
+    }),
+    'sso_guided',
+  );
+
+  assert.equal(
+    resolveLoginMode({
+      auto: false,
+      sso: false,
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: false,

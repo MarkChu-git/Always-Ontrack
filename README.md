@@ -121,6 +121,14 @@ npm run dev -- auth-method
 
 This is the shortest stable path from install to useful output.
 
+### 0. Open the interactive launcher
+
+```bash
+ontrack
+```
+
+The launcher displays the ALWAYS ONTRACK digital-style menu. Enter a number to run a command path directly.
+
 ### 1. Check the authentication method
 
 ```bash
@@ -132,13 +140,13 @@ ontrack auth-method
 Recommended:
 
 ```bash
-ontrack login --sso
+ontrack login
 ```
 
-Fallback:
+Force guided SSO (equivalent explicit mode):
 
 ```bash
-ontrack login
+ontrack login --sso
 ```
 
 ### 3. Confirm the cached account
@@ -221,12 +229,12 @@ Most read commands support `--json`. Use it when you want to pipe results into s
 
 ## Authentication and session management
 
-### Recommended login: `ontrack login --sso`
+### Recommended login: `ontrack login`
 
-This is the recommended path for local terminals and headless servers:
+This is the default recommended path on all environments:
 
 ```bash
-ontrack login --sso
+ontrack login
 ```
 
 This flow:
@@ -237,7 +245,7 @@ This flow:
 4. captures credentials and signs in through `/api/auth`
 5. stores a local session cache
 
-In headless/server environments, plain `ontrack login` defaults to this guided SSO mode.
+You can also use `ontrack login --sso` to force guided SSO explicitly.
 
 ### Browser-only capture mode: `ontrack login --auto`
 
@@ -251,12 +259,12 @@ The current implementation can capture credentials from:
 - `localStorage`
 - cookies
 
-### Manual login
+### Manual redirect import (backup only)
 
-If you want to complete login in your own browser and paste the final redirect URL:
+If you already have the final redirect URL, you can import it directly:
 
 ```bash
-ontrack login
+ontrack login --redirect-url "https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=..."
 ```
 
 The expected redirect format looks like this:
@@ -266,6 +274,7 @@ https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...
 ```
 
 Guided SSO automatically falls back to this manual redirect mode when it detects unsupported MFA, captcha, selector mismatch, or timeout.
+Treat this as a backup path rather than a daily login path.
 
 ### Direct token login
 
@@ -296,10 +305,12 @@ ontrack logout
 
 | Command | Purpose | Typical use |
 | --- | --- | --- |
+| `ontrack` | Open the interactive command launcher | Fastest way to run common workflows by number |
+| `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
+| `ontrack login` | Run guided Monash SSO with Okta Verify push/number (default path) | Primary login command |
 | `ontrack login --sso` | Run guided Monash SSO with Okta Verify push/number | Recommended login path |
 | `ontrack login --auto` | Run browser-only capture mode | Use when you only need passive capture |
-| `ontrack login` | Default guided SSO on headless servers, manual redirect on local terminals | Safe fallback entry command |
 | `ontrack logout` | Clear the local session | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
 | `ontrack doctor` | Probe key endpoints | Quickly identify session or permission issues |
