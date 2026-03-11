@@ -193,6 +193,54 @@ function renderWelcomeScreen(items: WelcomeMenuItem[]): void {
   console.log('');
 }
 
+function renderLoginSuccessPanel(session: SessionData): void {
+  const fullName = `${session.user.firstName || session.user.first_name || ''} ${
+    session.user.lastName || session.user.last_name || ''
+  }`.trim();
+  const role = resolveUserRole(session) ?? '-';
+  const displayName = fullName || session.username;
+
+  if (!process.stdout.isTTY || process.env.TERM === 'dumb') {
+    console.log(`Signed in as ${displayName}`);
+    console.log(`Role: ${role}`);
+    console.log(`Session saved to ${session.baseUrl}`);
+    return;
+  }
+
+  const width = 70;
+  const top = `┏${'━'.repeat(width - 2)}┓`;
+  const bottom = `┗${'━'.repeat(width - 2)}┛`;
+  const divider = `┣${'━'.repeat(width - 2)}┫`;
+  const row = (text: string): string => {
+    const plain = text.slice(0, width - 4);
+    const padding = ' '.repeat(Math.max(0, width - 4 - plain.length));
+    return `┃ ${plain}${padding} ┃`;
+  };
+
+  const quickActions = [
+    '1) ontrack',
+    '2) ontrack inbox',
+    '3) ontrack tasks --status ready_for_feedback',
+  ];
+
+  console.log('');
+  console.log(launcherColor(top, KLEIN_BLUE_ACCENT));
+  console.log(launcherColor(row('ALWAYS ONTRACK | LOGIN SUCCESS'), KLEIN_BLUE_TITLE));
+  console.log(launcherColor(row('Your session is active and ready.'), KLEIN_BLUE_SOFT));
+  console.log(launcherColor(divider, KLEIN_BLUE_ACCENT));
+  console.log(row(`Account : ${displayName}`));
+  console.log(row(`Username: ${session.username}`));
+  console.log(row(`Role    : ${role}`));
+  console.log(row(`API     : ${session.baseUrl}`));
+  console.log(launcherColor(divider, KLEIN_BLUE_ACCENT));
+  console.log(launcherColor(row('Quick start:'), KLEIN_BLUE_SOFT));
+  for (const action of quickActions) {
+    console.log(launcherColor(row(`  ${action}`), KLEIN_BLUE_SOFT));
+  }
+  console.log(launcherColor(bottom, KLEIN_BLUE_ACCENT));
+  console.log('');
+}
+
 function optionalFlagArgs(flag: string, value: string): string[] {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -1085,9 +1133,7 @@ async function handleLogin(args: string[]): Promise<void> {
   };
 
   await saveSession(session);
-  const fullName = `${session.user.firstName || session.user.first_name || ''} ${session.user.lastName || session.user.last_name || ''}`.trim();
-  console.log(`Signed in as ${fullName || session.username}`);
-  console.log(`Session saved to ${session.baseUrl}`);
+  renderLoginSuccessPanel(session);
 }
 
 async function handleLogout(): Promise<void> {
