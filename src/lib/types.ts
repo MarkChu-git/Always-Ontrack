@@ -36,6 +36,8 @@ export interface UnitSummary {
   myRole?: string;
   my_role?: string;
   active?: boolean;
+  taskDefinitions?: TaskDefinitionSummary[];
+  task_definitions?: TaskDefinitionSummary[];
   [key: string]: unknown;
 }
 

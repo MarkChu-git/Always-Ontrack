@@ -123,8 +123,28 @@ export class OnTrackApiClient {
     });
   }
 
+  getProject(session: SessionData, projectId: number): Promise<ProjectSummary> {
+    return requestJson<ProjectSummary>(withApiPath(this.baseUrl, `projects/${projectId}`), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(session),
+      },
+    });
+  }
+
   listUnits(session: SessionData): Promise<UnitSummary[]> {
     return requestJson<UnitSummary[]>(withApiPath(this.baseUrl, 'units'), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(session),
+      },
+    });
+  }
+
+  getUnit(session: SessionData, unitId: number): Promise<UnitSummary> {
+    return requestJson<UnitSummary>(withApiPath(this.baseUrl, `units/${unitId}`), {
       method: 'GET',
       headers: {
         Accept: 'application/json',

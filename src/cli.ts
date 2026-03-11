@@ -38,10 +38,13 @@ import type {
   InboxTask,
   ProjectSummary,
   SessionData,
+  TaskDefinitionSummary,
   TaskSummary,
   UnitSummary,
 } from './lib/types.js';
 import type { WatchTaskState } from './lib/utils.js';
+
+type InboxRowTask = InboxTask & { _unitId: number };
 
 function help(): void {
   console.log(`ontrack
@@ -168,6 +171,120 @@ function deriveUnitsFromProjects(projects: ProjectSummary[]): UnitSummary[] {
   }
 
   return [...map.values()];
+}
+
+function deriveInboxTasksFromProjects(
+  projects: ProjectSummary[],
+  filterUnitIds?: Set<number>,
+): InboxRowTask[] {
+  const tasks = flattenTasks(projects);
+  return tasks
+    .filter((task) => {
+      if (!filterUnitIds) {
+        return true;
+      }
+      return task.unitId !== undefined && filterUnitIds.has(task.unitId);
+    })
+    .map((task) => ({
+      ...task,
+      projectId: task.projectId,
+      unitId: task.unitId,
+      _unitId: task.unitId ?? -1,
+    }));
+}
+
+function dedupeInboxTasks(tasks: InboxRowTask[]): InboxRowTask[] {
+  const map = new Map<string, InboxRowTask>();
+  for (const task of tasks) {
+    const key = `${extractInboxProjectId(task) ?? '-'}:${task._unitId}:${task.id}`;
+    map.set(key, task);
+  }
+  return [...map.values()];
+}
+
+function getUnitTaskDefinitions(unit: UnitSummary): TaskDefinitionSummary[] {
+  const defs = unit.taskDefinitions ?? unit.task_definitions;
+  if (!Array.isArray(defs)) {
+    return [];
+  }
+  return defs;
+}
+
+function taskDefinitionFromUnit(
+  unitDefinitionMap: Map<number, Map<number, TaskDefinitionSummary>>,
+  unitId: number | undefined,
+  taskDefId: number | undefined,
+): TaskDefinitionSummary | undefined {
+  if (unitId === undefined || taskDefId === undefined) {
+    return undefined;
+  }
+  return unitDefinitionMap.get(unitId)?.get(taskDefId);
+}
+
+async function buildInboxFallbackTasksFromProjectDetails(
+  api: OnTrackApiClient,
+  session: SessionData,
+  candidateUnitIds: number[],
+): Promise<InboxRowTask[]> {
+  const overview = await api.listProjects(session);
+  const unitFilter = new Set(candidateUnitIds);
+  const scopedProjects = overview.filter((project) => {
+    const projectUnitId = project.unit?.id;
+    return typeof projectUnitId === 'number' && unitFilter.has(projectUnitId);
+  });
+
+  const detailedProjectResults = await Promise.allSettled(
+    scopedProjects.map(async (project) => api.getProject(session, project.id)),
+  );
+  const detailedProjects = detailedProjectResults
+    .filter((result): result is PromiseFulfilledResult<ProjectSummary> => result.status === 'fulfilled')
+    .map((result) => result.value);
+
+  const unitIds = [...new Set(detailedProjects.map((project) => project.unit?.id).filter((id): id is number => typeof id === 'number'))];
+  const unitDetailResults = await Promise.allSettled(
+    unitIds.map(async (id) => api.getUnit(session, id)),
+  );
+
+  const unitDefinitionMap = new Map<number, Map<number, TaskDefinitionSummary>>();
+  for (const result of unitDetailResults) {
+    if (result.status !== 'fulfilled') {
+      continue;
+    }
+
+    const unit = result.value;
+    const defs = getUnitTaskDefinitions(unit);
+    unitDefinitionMap.set(
+      unit.id,
+      new Map(
+        defs
+          .filter((definition) => typeof definition.id === 'number')
+          .map((definition) => [definition.id as number, definition]),
+      ),
+    );
+  }
+
+  const tasks: InboxRowTask[] = [];
+  for (const project of detailedProjects) {
+    const projectUnitId = project.unit?.id;
+    for (const task of project.tasks || []) {
+      const taskDefId = getTaskDefinitionId(task);
+      const fallbackDefinition = taskDefinitionFromUnit(unitDefinitionMap, projectUnitId, taskDefId);
+      tasks.push({
+        ...task,
+        projectId: project.id,
+        unitId: projectUnitId,
+        definition: {
+          id: taskDefId,
+          abbreviation: task.definition?.abbreviation ?? fallbackDefinition?.abbreviation,
+          name: task.definition?.name ?? fallbackDefinition?.name,
+          targetGrade: task.definition?.targetGrade ?? fallbackDefinition?.targetGrade,
+        },
+        _unitId: projectUnitId ?? -1,
+      });
+    }
+  }
+
+  return tasks;
 }
 
 async function listUnitsWithFallback(
@@ -422,9 +539,8 @@ async function handleInbox(args: string[]): Promise<void> {
   }
 
   const targetUnitIds = unitId !== undefined ? [unitId] : units.map((unit) => unit.id);
-  type ScopedInboxTask = InboxTask & { _unitId: number };
   const settled = await Promise.allSettled(
-    targetUnitIds.map(async (id): Promise<ScopedInboxTask[]> => {
+    targetUnitIds.map(async (id): Promise<InboxRowTask[]> => {
       const inbox = await api.listInboxTasks(session, id);
       return inbox.map((task) => ({
         ...task,
@@ -433,25 +549,46 @@ async function handleInbox(args: string[]): Promise<void> {
     }),
   );
 
-  const allTasks: ScopedInboxTask[] = [];
-  let failedUnits = 0;
-  for (const result of settled) {
+  const allTasks: InboxRowTask[] = [];
+  const failedUnitIds: number[] = [];
+  for (let index = 0; index < settled.length; index += 1) {
+    const result = settled[index];
     if (result.status === 'fulfilled') {
       allTasks.push(...result.value);
     } else {
-      failedUnits += 1;
+      failedUnitIds.push(targetUnitIds[index]);
     }
   }
 
-  if (allTasks.length === 0 && failedUnits > 0) {
-    throw new Error('Unable to load inbox tasks for selected units (permission denied or endpoint unavailable).');
+  if (failedUnitIds.length > 0) {
+    const fallbackTasks = await buildInboxFallbackTasksFromProjectDetails(
+      api,
+      session,
+      failedUnitIds,
+    );
+    allTasks.push(...fallbackTasks);
+
+    if (!hasFlag(args, '--json')) {
+      console.error(
+        `[info] Loaded ${fallbackTasks.length} fallback task(s) from /projects for ${failedUnitIds.length} unit(s) where inbox endpoint is unavailable.`,
+      );
+    }
   }
 
-  if (failedUnits > 0 && !hasFlag(args, '--json')) {
-    console.error(`[info] Skipped ${failedUnits} unit(s) that could not load inbox tasks.`);
+  const dedupedTasks = dedupeInboxTasks(allTasks);
+  if (dedupedTasks.length === 0 && failedUnitIds.length > 0) {
+    throw new Error(
+      'Unable to load inbox tasks for selected units (permission denied or endpoint unavailable).',
+    );
   }
 
-  const filtered = filterTasksByStatus(allTasks, status);
+  if (failedUnitIds.length > 0 && !hasFlag(args, '--json')) {
+    console.error(
+      `[info] Inbox endpoint unavailable for unit(s): ${failedUnitIds.join(', ')}. Showing fallback task list.`,
+    );
+  }
+
+  const filtered = filterTasksByStatus(dedupedTasks, status);
   if (hasFlag(args, '--json')) {
     printJson(filtered);
     return;
@@ -462,7 +599,7 @@ async function handleInbox(args: string[]): Promise<void> {
       id: task.id,
       projectId: extractInboxProjectId(task) ?? '-',
       unitId: task._unitId,
-      unitCode: unitMap.get(task._unitId)?.code ?? '-',
+      unitCode: unitMap.get(task._unitId)?.code ?? (task as { unitCode?: string }).unitCode ?? '-',
       abbr: getTaskAbbreviation(task) ?? '-',
       name: getTaskName(task) ?? '-',
       status: getTaskStatus(task) ?? '-',
