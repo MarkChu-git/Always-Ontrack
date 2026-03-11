@@ -1,0 +1,22 @@
+{
+  "name": "ontrack-cli",
+  "version": "0.1.0",
+  "description": "CLI for Monash OnTrack / Doubtfire",
+  "type": "module",
+  "bin": {
+    "ontrack": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "node --import tsx --test test/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
