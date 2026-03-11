@@ -3,7 +3,7 @@
 [简体中文](./README.zh-CN.md)
 
 <p align="center">
-  <img src="./always-ontrack-logo.png" alt="Always OnTrack logo" width="220" />
+  <img src="./always-ontrack-logo.png" alt="Always OnTrack logo" width="480" />
 </p>
 
 <p align="center">
