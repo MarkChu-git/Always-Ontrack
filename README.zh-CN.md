@@ -123,8 +123,9 @@ npm run dev -- auth-method
 
 欢迎页中的 `11-14`（下载 task/submission PDF、上传 submission、上传新文件）现在是引导模式：
 
-- 推荐从任务列表按序号直接选择任务
-- 也支持手动输入 `--project-id` + `--abbr/--task-id`
+- 先从当前 project 列表按序号选择 project
+- 再从该 project 的 tasks 列表按序号选择 task
+- 也支持切换到手动输入 `--project-id` + `--abbr/--task-id`
 
 ### 1. 检查认证方式
 

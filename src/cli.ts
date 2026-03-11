@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { readFile } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
 import {
@@ -315,8 +316,8 @@ function renderLoginSuccessPanel(session: SessionData): void {
   console.log('');
 }
 
-function optionalFlagArgs(flag: string, value: string): string[] {
-  const trimmed = value.trim();
+function optionalFlagArgs(flag: string, value?: string): string[] {
+  const trimmed = (value ?? '').trim();
   if (!trimmed) {
     return [];
   }
@@ -349,38 +350,85 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
   const api = new OnTrackApiClient(session.baseUrl);
   const projects = await api.listProjects(session);
 
-  let tasks = flattenTasks(projects).filter(
-    (task) => typeof task.projectId === 'number' && Boolean(getTaskAbbreviation(task) || getTaskDefinitionId(task)),
+  if (projects.length === 0) {
+    console.log('[warn] No projects found for this account. Switching to manual selector.');
+    return null;
+  }
+
+  renderTerminalPanel(
+    'SELECT PROJECT',
+    [
+      'Pick a project first, then choose a task inside it.',
+      'Type m to switch to manual project/task input.',
+    ],
+    'info',
   );
 
-  if (tasks.length === 0) {
-    console.log('[warn] No selectable tasks found in this account. Switching to manual selector.');
+  const projectRows = projects.map((project) => ({
+    unit: project.unit?.code ?? '-',
+    unitName: project.unit?.name ?? '-',
+    projectId: project.id,
+    targetGrade: project.targetGrade ?? project.target_grade ?? '-',
+    tasks: Array.isArray(project.tasks) ? project.tasks.length : 0,
+  }));
+  printTable(projectRows);
+
+  let selectedProject: ProjectSummary | undefined;
+  while (true) {
+    const raw = (await prompt('Select project index (or type m for manual): ')).trim();
+    if (!raw) {
+      continue;
+    }
+    if (/^m$/i.test(raw)) {
+      return null;
+    }
+
+    const index = Number.parseInt(raw, 10);
+    if (!Number.isFinite(index) || index < 0 || index >= projects.length) {
+      console.log(`[warn] Invalid index "${raw}". Choose 0-${projects.length - 1}, or type m.`);
+      continue;
+    }
+    selectedProject = projects[index];
+    break;
+  }
+
+  if (!selectedProject) {
     return null;
   }
 
-  const unitFilter = (await prompt('Filter by unit code (optional): ')).trim().toLowerCase();
-  if (unitFilter) {
-    tasks = tasks.filter((task) => (task.unitCode || '').toLowerCase().includes(unitFilter));
-  }
+  const detailedProject = await api
+    .getProject(session, selectedProject.id)
+    .catch(() => selectedProject);
 
-  const statusFilter = (await prompt('Filter by status (optional): ')).trim().toLowerCase();
-  if (statusFilter) {
-    tasks = tasks.filter((task) => (getTaskStatus(task) || '').toLowerCase().includes(statusFilter));
-  }
+  let tasks = (detailedProject.tasks || []).filter((task) =>
+    Boolean(getTaskAbbreviation(task) || getTaskDefinitionId(task)),
+  );
+  const unitCode = detailedProject.unit?.code ?? selectedProject.unit?.code ?? '-';
+  const unitId = detailedProject.unit?.id ?? selectedProject.unit?.id ?? '-';
 
   if (tasks.length === 0) {
-    console.log('[warn] No tasks match the current filter. Switching to manual selector.');
+    console.log('[warn] No selectable tasks found in this project. Switching to manual selector.');
     return null;
   }
+
+  renderTerminalPanel(
+    'SELECT TASK',
+    [
+      `Project ${selectedProject.id} (${unitCode}) loaded.`,
+      'Pick a task by index. Type m to switch to manual selector.',
+    ],
+    'info',
+  );
 
   const rows = tasks.map((task) => ({
-    unit: task.unitCode || '-',
+    unit: unitCode,
     task: getTaskAbbreviation(task) || '-',
     title: getTaskName(task) || '-',
     status: getTaskStatus(task) || '-',
     due: formatDate(getTaskDueDate(task)),
-    projectId: task.projectId,
+    projectId: selectedProject.id,
     taskId: getTaskDefinitionId(task) ?? '-',
+    unitId,
   }));
   printTable(rows);
 
@@ -400,7 +448,7 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
     }
 
     const task = tasks[index];
-    const projectId = String(task.projectId);
+    const projectId = String(selectedProject.id);
     const abbr = getTaskAbbreviation(task);
     if (abbr) {
       return ['--project-id', projectId, '--abbr', abbr];
@@ -420,18 +468,11 @@ async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string):
     modeTitle,
     [
       modeSummary,
-      'Choose a task source:',
-      '1. Pick from your current task list (Recommended)',
-      '2. Enter project/task manually',
+      'We will load your projects first, then tasks in the selected project.',
+      'Type m in selector prompts to switch to manual project/task input.',
     ],
     'info',
   );
-
-  const raw = (await prompt('Task selection mode [1/2, default 1]: ')).trim();
-  const manual = raw === '2';
-  if (manual) {
-    return promptTaskSelectorFlags();
-  }
 
   try {
     const selected = await promptTaskSelectorFromTaskList();
@@ -443,6 +484,38 @@ async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string):
   }
 
   return promptTaskSelectorFlags();
+}
+
+function expandHomePath(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '~') {
+    return homedir();
+  }
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
+
+async function promptGuidedOutputDirectory(): Promise<string | undefined> {
+  const defaultDir = resolve(process.cwd(), './downloads');
+  renderTerminalPanel(
+    'OUTPUT DIRECTORY',
+    [
+      `Press Enter to use default: ${defaultDir}`,
+      'Custom path examples:',
+      'macOS/Linux: ~/Downloads/ontrack',
+      'Windows: C:\\Users\\<you>\\Downloads\\ontrack',
+    ],
+    'info',
+  );
+
+  const raw = await prompt('Output directory [default ./downloads]: ');
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return expandHomePath(trimmed);
 }
 
 async function promptUploadFiles(): Promise<string[]> {
@@ -517,7 +590,7 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         'DOWNLOAD TASK PDF',
         'Export a task sheet PDF for the selected task.',
       );
-      const outDir = await prompt('Output directory (default ./downloads): ');
+      const outDir = await promptGuidedOutputDirectory();
       await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
       return;
     }
@@ -526,7 +599,7 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         'DOWNLOAD SUBMISSION PDF',
         'Export your submission PDF copy for the selected task.',
       );
-      const outDir = await prompt('Output directory (default ./downloads): ');
+      const outDir = await promptGuidedOutputDirectory();
       await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
       return;
     }
