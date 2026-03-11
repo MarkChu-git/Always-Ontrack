@@ -4,7 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
-import { captureSsoCredentials } from './lib/auto-login.js';
+import {
+  SsoFallbackError,
+  classifySsoFallback,
+  captureSsoCredentials,
+  captureSsoCredentialsWithGuidedLogin,
+} from './lib/auto-login.js';
 import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
 import {
   buildPdfFilename,
@@ -34,9 +39,13 @@ import {
   printJson,
   printTable,
   prompt,
+  promptHidden,
   resolveTaskSelector,
+  resolveLoginMode,
+  isHeadlessServerEnvironment,
   sortFeedbackItems,
   toWatchStateMap,
+  toRedactedError,
   writePdfFile,
 } from './lib/utils.js';
 import type {
@@ -61,7 +70,8 @@ Usage:
   ontrack auth-method [--base-url URL] [--json]
   ontrack login [--base-url URL] [--redirect-url URL]
   ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME
-  ontrack login [--base-url URL] --auto [--auto-timeout-sec N]
+  ontrack login [--base-url URL] --auto [--auto-timeout-sec N] [--show-browser]
+  ontrack login [--base-url URL] [--sso] [--sso-username USERNAME] [--sso-timeout-sec N] [--show-browser]
   ontrack logout
   ontrack whoami [--json]
   ontrack projects [--json]
@@ -85,7 +95,9 @@ Usage:
 Notes:
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
-  - Use "ontrack login --auto" for automatic credential capture, or "ontrack login" for manual redirect URL paste.
+  - In headless/server environments, "ontrack login" defaults to guided SSO (username/password + Okta Verify).
+  - Use "ontrack login --sso" to force guided SSO, or "ontrack login --auto" for browser-only capture mode.
+  - If guided SSO cannot proceed (captcha/page change/unsupported MFA), it falls back to manual redirect URL paste.
   - PDF commands save files into ./downloads by default.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
 `);
@@ -579,12 +591,26 @@ async function handleAuthMethod(args: string[]): Promise<void> {
 
 async function handleLogin(args: string[]): Promise<void> {
   const api = new OnTrackApiClient(normalizeBaseUrl(getFlagValue(args, '--base-url')));
+  if (hasFlag(args, '--password') || hasFlag(args, '--sso-password')) {
+    throw new Error('Password must be entered interactively. Command-line password flags are not supported.');
+  }
   const auto = hasFlag(args, '--auto');
+  const sso = hasFlag(args, '--sso');
+  const showBrowser = hasFlag(args, '--show-browser');
   const autoTimeoutSec = hasFlag(args, '--auto-timeout-sec')
     ? parseIntegerFlagValue(getFlagValue(args, '--auto-timeout-sec'), '--auto-timeout-sec')
     : 300;
   if (autoTimeoutSec < 10) {
     throw new Error('--auto-timeout-sec must be >= 10 seconds.');
+  }
+  const ssoTimeoutSec = hasFlag(args, '--sso-timeout-sec')
+    ? parseIntegerFlagValue(getFlagValue(args, '--sso-timeout-sec'), '--sso-timeout-sec')
+    : 420;
+  if (ssoTimeoutSec < 60) {
+    throw new Error('--sso-timeout-sec must be >= 60 seconds.');
+  }
+  if (auto && sso) {
+    throw new Error('Use either --auto or --sso, not both.');
   }
 
   let authToken = getFlagValue(args, '--auth-token');
@@ -599,35 +625,111 @@ async function handleLogin(args: string[]): Promise<void> {
     const method = await api.getAuthMethod();
 
     if (method.redirect_to) {
+      const redirectTo = method.redirect_to;
       console.log(`OnTrack uses ${method.method || 'SSO'} for authentication.`);
       console.log('Expected final redirect format: https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...');
+      const isHeadless = isHeadlessServerEnvironment();
+      const loginMode = resolveLoginMode({
+        auto,
+        sso,
+        hasAuthToken: Boolean(authToken),
+        hasUsername: Boolean(username),
+        hasRedirectUrl: Boolean(redirectUrl),
+        isHeadless,
+      });
 
-      if (auto) {
+      const manualRedirectCapture = async (): Promise<void> => {
+        console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
+        if (!hasFlag(args, '--no-open')) {
+          const opened = openExternal(redirectTo);
+          if (!opened) {
+            console.log(`Open this URL manually:\n${redirectTo}`);
+          }
+        } else {
+          console.log(`Open this URL manually:\n${redirectTo}`);
+        }
+        const pasted = await prompt('Paste final redirect URL: ');
+        ({ authToken, username } = parseSsoRedirectUrl(pasted));
+      };
+
+      if (loginMode === 'auto') {
         console.log('Starting auto SSO login in a controlled browser...');
         const captured = await captureSsoCredentials({
-          ssoUrl: method.redirect_to,
+          ssoUrl: redirectTo,
           apiBaseUrl: api.base,
           timeoutMs: autoTimeoutSec * 1000,
+          headless: isHeadless && !showBrowser,
         });
         authToken = captured.authToken;
         username = captured.username;
         console.log(`Auto login captured credentials from ${captured.source}.`);
-      } else {
-        console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
-        if (!hasFlag(args, '--no-open')) {
-          const opened = openExternal(method.redirect_to);
-          if (!opened) {
-            console.log(`Open this URL manually:\n${method.redirect_to}`);
-          }
-        } else {
-          console.log(`Open this URL manually:\n${method.redirect_to}`);
+      } else if (loginMode === 'sso_guided') {
+        let guidedUsername = parseOptionalString(args, '--sso-username');
+        if (!guidedUsername) {
+          guidedUsername = await prompt('Monash username: ');
         }
-        const pasted = await prompt('Paste final redirect URL: ');
-        ({ authToken, username } = parseSsoRedirectUrl(pasted));
+        if (!guidedUsername.trim()) {
+          throw new Error('Username cannot be empty.');
+        }
+
+        let password = await promptHidden('Monash password: ');
+        if (!password) {
+          throw new Error('Password cannot be empty.');
+        }
+
+        const stepLabels: Record<string, string> = {
+          username: 'Submitting username...',
+          password: 'Submitting password...',
+          mfa_wait: 'Waiting for Okta Verify push/number approval on your phone...',
+          completed: 'SSO flow completed.',
+        };
+
+        try {
+          console.log('Starting guided Monash SSO login...');
+          const captured = await captureSsoCredentialsWithGuidedLogin(
+            {
+              ssoUrl: redirectTo,
+              apiBaseUrl: api.base,
+              username: guidedUsername,
+              password,
+              timeoutMs: ssoTimeoutSec * 1000,
+              headless: isHeadless && !showBrowser,
+            },
+            (step) => {
+              const message = stepLabels[step];
+              if (message) {
+                console.log(message);
+              }
+            },
+          );
+          authToken = captured.authToken;
+          username = captured.username;
+          console.log(`Guided SSO captured credentials from ${captured.source}.`);
+        } catch (error) {
+          const reason = classifySsoFallback(error);
+          const detail = toRedactedError(error).message;
+          if (error instanceof SsoFallbackError) {
+            console.log(
+              `[warn] Guided SSO fallback (${error.reason}) at step ${error.step}: ${detail}`,
+            );
+          } else {
+            console.log(`[warn] Guided SSO fallback (${reason}): ${detail}`);
+          }
+          console.log('[info] Falling back to manual redirect URL flow.');
+          await manualRedirectCapture();
+        } finally {
+          password = '';
+        }
+      } else {
+        await manualRedirectCapture();
       }
     } else {
       throw new Error('This server does not advertise SSO, and interactive username/password login is not implemented in this CLI yet.');
     }
+  }
+
+  if (!authToken || !username) {
+    throw new Error('Unable to obtain login credentials. Retry login with --sso, --auto, or --redirect-url.');
   }
 
   const response = await api.signIn({
@@ -1978,6 +2080,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`Error: ${(error as Error).message}`);
+  const redacted = toRedactedError(error);
+  console.error(`Error: ${redacted.message}`);
   process.exitCode = 1;
 });

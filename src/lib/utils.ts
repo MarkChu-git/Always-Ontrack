@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline/promises';
+import { createInterface as createMaskableInterface } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -49,6 +50,57 @@ export async function prompt(question: string): Promise<string> {
   } finally {
     rl.close();
   }
+}
+
+export function shouldMaskPromptInput(
+  inputStream: Pick<NodeJS.ReadStream, 'isTTY'> = input,
+  outputStream: Pick<NodeJS.WriteStream, 'isTTY'> = output,
+): boolean {
+  return Boolean(inputStream.isTTY && outputStream.isTTY);
+}
+
+export async function promptHidden(question: string): Promise<string> {
+  if (!shouldMaskPromptInput()) {
+    return prompt(question);
+  }
+
+  return new Promise<string>((resolvePromise, reject) => {
+    const rl = createMaskableInterface({
+      input,
+      output,
+      terminal: true,
+    }) as ReturnType<typeof createMaskableInterface> & {
+      stdoutMuted?: boolean;
+      _writeToOutput?: (value: string) => void;
+    };
+
+    rl.stdoutMuted = true;
+    rl._writeToOutput = (value: string): void => {
+      if (!rl.stdoutMuted) {
+        output.write(value);
+        return;
+      }
+
+      if (value === '\n' || value === '\r\n' || value === '\r') {
+        output.write(value);
+        return;
+      }
+
+      output.write('*');
+    };
+
+    rl.on('SIGINT', () => {
+      rl.close();
+      reject(new Error('Input interrupted.'));
+    });
+
+    rl.question(question, (answer) => {
+      rl.stdoutMuted = false;
+      rl.close();
+      output.write('\n');
+      resolvePromise(answer.trim());
+    });
+  });
 }
 
 export function openExternal(url: string): boolean {
@@ -339,6 +391,120 @@ export function parseIntegerFlagValue(raw: string | undefined, flag: string): nu
     throw new Error(`Expected an integer for ${flag}, got "${raw}".`);
   }
   return value;
+}
+
+export function isHeadlessServerEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  streams: {
+    stdin: Pick<NodeJS.ReadStream, 'isTTY'>;
+    stdout: Pick<NodeJS.WriteStream, 'isTTY'>;
+  } = {
+    stdin: input,
+    stdout: output,
+  },
+): boolean {
+  if (env.ONTRACK_HEADLESS === '1' || env.ONTRACK_HEADLESS === 'true') {
+    return true;
+  }
+
+  if (env.ONTRACK_HEADLESS === '0' || env.ONTRACK_HEADLESS === 'false') {
+    return false;
+  }
+
+  if (env.CI && env.CI !== 'false') {
+    return true;
+  }
+
+  if (env.SSH_CONNECTION || env.SSH_TTY) {
+    return true;
+  }
+
+  if (process.platform === 'linux') {
+    const hasDisplay = Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
+    if (!hasDisplay) {
+      return true;
+    }
+  }
+
+  return !Boolean(streams.stdin.isTTY && streams.stdout.isTTY);
+}
+
+export type LoginMode = 'manual' | 'auto' | 'sso_guided';
+
+export function resolveLoginMode(options: {
+  auto: boolean;
+  sso: boolean;
+  hasAuthToken: boolean;
+  hasUsername: boolean;
+  hasRedirectUrl: boolean;
+  isHeadless: boolean;
+}): LoginMode {
+  if (options.auto) {
+    return 'auto';
+  }
+  if (options.sso) {
+    return 'sso_guided';
+  }
+
+  const hasDirectCredentials = options.hasAuthToken && options.hasUsername;
+  if (!hasDirectCredentials && !options.hasRedirectUrl && options.isHeadless) {
+    return 'sso_guided';
+  }
+
+  return 'manual';
+}
+
+export const SENSITIVE_QUERY_KEYS = new Set([
+  'authtoken',
+  'auth_token',
+  'password',
+  'passcode',
+  'sessiontoken',
+  'code',
+  'state',
+  'id_token',
+  'access_token',
+]);
+
+function redactQueryParams(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    for (const [key] of url.searchParams.entries()) {
+      if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+        url.searchParams.set(key, '[REDACTED]');
+      }
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+const URL_PATTERN = /https?:\/\/[^\s)"']+/gi;
+
+export function redactSensitiveText(value: string): string {
+  let output = value;
+  output = output.replace(URL_PATTERN, (match) => redactQueryParams(match));
+  output = output.replace(
+    /\b(authToken|auth_token|password|passcode|sessionToken|id_token|access_token|code|state)=([^&\s]+)/gi,
+    '$1=[REDACTED]',
+  );
+  output = output.replace(
+    /("?(?:authToken|auth_token|password|passcode|sessionToken|id_token|access_token|code|state)"?\s*[:=]\s*")([^"]*)(")/gi,
+    '$1[REDACTED]$3',
+  );
+  return output;
+}
+
+export interface RedactedError {
+  message: string;
+}
+
+export function toRedactedError(error: unknown): RedactedError {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    message: redactSensitiveText(message),
+  };
 }
 
 export function getTaskDefinitionId(task: TaskSummary): number | undefined {

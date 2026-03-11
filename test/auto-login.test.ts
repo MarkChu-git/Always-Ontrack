@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  SsoFallbackError,
+  classifySsoFallback,
   extractCredentialsFromAuthPayload,
   extractCredentialsFromCookieJar,
   extractCredentialsFromUrl,
+  resolveBrowserLaunchPlan,
 } from '../src/lib/auto-login.js';
 
 test('extractCredentialsFromUrl parses authToken and username', () => {
@@ -66,4 +69,42 @@ test('extractCredentialsFromCookieJar parses credentials when both values exist'
 test('extractCredentialsFromCookieJar returns null when cookie values are incomplete', () => {
   const parsed = extractCredentialsFromCookieJar([{ name: 'auth_token', value: 'cookie-token' }]);
   assert.equal(parsed, null);
+});
+
+test('resolveBrowserLaunchPlan uses ONTRACK_BROWSER_PATH first', () => {
+  const plan = resolveBrowserLaunchPlan(
+    { ONTRACK_BROWSER_PATH: '/custom/chrome' } as NodeJS.ProcessEnv,
+    (path) => path === '/custom/chrome',
+  );
+
+  assert.deepEqual(plan, {
+    source: 'env',
+    executablePath: '/custom/chrome',
+  });
+});
+
+test('resolveBrowserLaunchPlan falls back to bundled when no browser exists', () => {
+  const plan = resolveBrowserLaunchPlan({} as NodeJS.ProcessEnv, () => false);
+  assert.equal(plan.source, 'bundled');
+  assert.equal(plan.executablePath, undefined);
+});
+
+test('resolveBrowserLaunchPlan selects system browser when available', () => {
+  const plan = resolveBrowserLaunchPlan(
+    {} as NodeJS.ProcessEnv,
+    () => true,
+  );
+  assert.equal(plan.source, 'system');
+  assert.equal(typeof plan.executablePath, 'string');
+  assert.equal((plan.executablePath || '').length > 0, true);
+});
+
+test('classifySsoFallback maps known fallback reasons', () => {
+  assert.equal(
+    classifySsoFallback(new SsoFallbackError('captcha', 'fallback', 'captcha detected')),
+    'captcha',
+  );
+  assert.equal(classifySsoFallback(new Error('Unsupported MFA: webauthn challenge')), 'unsupported_mfa');
+  assert.equal(classifySsoFallback(new Error('Unable to locate username field selector')), 'selector_missing');
+  assert.equal(classifySsoFallback(new Error('Timeout waiting for verify')), 'timeout');
 });

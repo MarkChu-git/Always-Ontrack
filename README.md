@@ -78,7 +78,7 @@ It is designed to work out of the box, with no mandatory base URL setup and a co
 
 - Node.js `22+`
 - macOS, Linux, or Windows
-- A Chromium-based browser is recommended for `ontrack login --auto`
+- A Chromium-based browser is recommended for `ontrack login --sso` or `ontrack login --auto`
 
 ### Global install
 
@@ -132,7 +132,7 @@ ontrack auth-method
 Recommended:
 
 ```bash
-ontrack login --auto
+ontrack login --sso
 ```
 
 Fallback:
@@ -221,21 +221,27 @@ Most read commands support `--json`. Use it when you want to pipe results into s
 
 ## Authentication and session management
 
-### Recommended login: `ontrack login --auto`
+### Recommended login: `ontrack login --sso`
 
-This is the default recommended path:
+This is the recommended path for local terminals and headless servers:
 
 ```bash
-ontrack login --auto
+ontrack login --sso
 ```
 
 This flow:
 
-1. launches a controlled browser
-2. enters the OnTrack / SSO login flow
-3. attempts to capture credentials from multiple sources
-4. signs in through `/api/auth`
+1. prompts for Monash username/password in CLI (password is hidden)
+2. launches controlled SSO automation
+3. waits for Okta Verify push/number approval
+4. captures credentials and signs in through `/api/auth`
 5. stores a local session cache
+
+In headless/server environments, plain `ontrack login` defaults to this guided SSO mode.
+
+### Browser-only capture mode: `ontrack login --auto`
+
+`--auto` keeps the previous browser-driven capture behavior without guided credential entry.
 
 The current implementation can capture credentials from:
 
@@ -258,6 +264,8 @@ The expected redirect format looks like this:
 ```text
 https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...
 ```
+
+Guided SSO automatically falls back to this manual redirect mode when it detects unsupported MFA, captcha, selector mismatch, or timeout.
 
 ### Direct token login
 
@@ -289,8 +297,9 @@ ontrack logout
 | Command | Purpose | Typical use |
 | --- | --- | --- |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
-| `ontrack login --auto` | Run automatic SSO login | Recommended default login path |
-| `ontrack login` | Paste a redirect URL manually | Use when auto login is not convenient |
+| `ontrack login --sso` | Run guided Monash SSO with Okta Verify push/number | Recommended login path |
+| `ontrack login --auto` | Run browser-only capture mode | Use when you only need passive capture |
+| `ontrack login` | Default guided SSO on headless servers, manual redirect on local terminals | Safe fallback entry command |
 | `ontrack logout` | Clear the local session | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
 | `ontrack doctor` | Probe key endpoints | Quickly identify session or permission issues |
@@ -337,7 +346,7 @@ ontrack logout
 ### Workflow 1: sign in and find your tasks
 
 ```bash
-ontrack login --auto
+ontrack login --sso
 ontrack whoami
 ontrack projects
 ontrack tasks
@@ -536,7 +545,8 @@ That makes them a better fit for:
 | Variable | Purpose | Notes |
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | Override the default API base URL | Defaults to Monash OnTrack API |
-| `ONTRACK_BROWSER_PATH` | Set the browser executable path for auto login | Use when browser auto-detection fails |
+| `ONTRACK_BROWSER_PATH` | Set the browser executable path for SSO automation | Highest priority browser override |
+| `ONTRACK_HEADLESS` | Force headless detection (`true/false` or `1/0`) | Useful when runtime detection is incorrect |
 | `FORCE_COLOR` | Force colored terminal output | Example: `FORCE_COLOR=1` |
 | `NO_COLOR` | Disable colored output | Useful for plain logs or CI |
 | `XDG_CONFIG_HOME` | Override the config root on Linux and macOS | Affects session storage |
@@ -709,12 +719,18 @@ Typical reasons:
 - the endpoint is role-restricted
 - the inbox API is unavailable for that unit
 
-### `Auto login could not find a Chrome/Chromium/Edge executable`
+### `No browser executable found ...`
 
 Set the browser path explicitly:
 
 ```bash
-ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login --auto
+ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login --sso
+```
+
+Or install bundled Chromium support:
+
+```bash
+npx playwright install chromium
 ```
 
 ### `419 Authentication Timeout`
@@ -723,7 +739,7 @@ The cached session has expired. Re-authenticate:
 
 ```bash
 ontrack logout
-ontrack login --auto
+ontrack login --sso
 ```
 
 ### `Task abbreviation "... " is ambiguous`
