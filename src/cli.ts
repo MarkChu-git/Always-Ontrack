@@ -3,6 +3,7 @@
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
 import { captureSsoCredentials } from './lib/auto-login.js';
+import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
 import {
   buildPdfFilename,
   diffWatchStates,
@@ -57,9 +58,13 @@ Usage:
   ontrack logout
   ontrack whoami [--json]
   ontrack projects [--json]
+  ontrack project show --project-id ID [--json]
   ontrack units [--json]
+  ontrack unit show --unit-id ID [--json]
+  ontrack unit tasks --unit-id ID [--status STATUS] [--json]
   ontrack tasks [--project-id ID] [--status STATUS] [--json]
   ontrack doctor [--json]
+  ontrack discover [--site-url URL] [--base-url URL] [--probe] [--limit N] [--json]
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]
   ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]
@@ -494,6 +499,54 @@ async function handleProjects(args: string[]): Promise<void> {
   );
 }
 
+function countTasksByStatus(tasks: TaskSummary[]): string {
+  if (tasks.length === 0) {
+    return '-';
+  }
+
+  const counts = new Map<string, number>();
+  for (const task of tasks) {
+    const status = getTaskStatus(task) || 'unknown';
+    counts.set(status, (counts.get(status) || 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([status, count]) => `${status}:${count}`)
+    .join(', ');
+}
+
+async function handleProjectShow(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const projectId = parseIntegerFlagValue(getFlagValue(args, '--project-id'), '--project-id');
+  const projects = await loadProjectsWithTaskMetadata(api, session, { projectId });
+  const project = projects[0];
+  if (!project) {
+    throw new Error(`Project ${projectId} not found.`);
+  }
+
+  if (hasFlag(args, '--json')) {
+    printJson(project);
+    return;
+  }
+
+  const tasks = project.tasks || [];
+  printTable([
+    {
+      id: project.id,
+      unitId: project.unit?.id ?? '-',
+      unitCode: project.unit?.code ?? '-',
+      unitName: project.unit?.name ?? '-',
+      enrolled: project.enrolled ?? '-',
+      targetGrade: project.targetGrade ?? '-',
+      submittedGrade: project.submittedGrade ?? '-',
+      tasks: tasks.length,
+      byStatus: countTasksByStatus(tasks),
+    },
+  ]);
+}
+
 async function handleUnits(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -515,6 +568,72 @@ async function handleUnits(args: string[]): Promise<void> {
       name: unit.name ?? '-',
       role: getUnitRole(unit) ?? '-',
       active: unit.active ?? '-',
+    })),
+  );
+}
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+async function handleUnitShow(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const unitId = parseIntegerFlagValue(getFlagValue(args, '--unit-id'), '--unit-id');
+  const unit = await api.getUnit(session, unitId);
+
+  if (hasFlag(args, '--json')) {
+    printJson(unit);
+    return;
+  }
+
+  const rawUnit = unit as Record<string, unknown>;
+  printTable([
+    {
+      id: unit.id,
+      code: unit.code ?? '-',
+      name: unit.name ?? '-',
+      role: getUnitRole(unit) ?? '-',
+      active: unit.active ?? '-',
+      teachingPeriodId: rawUnit.teaching_period_id ?? '-',
+      startDate: rawUnit.start_date ?? '-',
+      endDate: rawUnit.end_date ?? '-',
+      taskDefinitions: getUnitTaskDefinitions(unit).length,
+      tutorials: arrayLength(rawUnit.tutorials),
+      tutorialStreams: arrayLength(rawUnit.tutorial_streams),
+      ilos: arrayLength(rawUnit.ilos),
+      groups: arrayLength(rawUnit.groups),
+    },
+  ]);
+}
+
+async function handleUnitTasks(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const unitId = parseIntegerFlagValue(getFlagValue(args, '--unit-id'), '--unit-id');
+  const status = getFlagValue(args, '--status');
+  const projects = await loadProjectsWithTaskMetadata(api, session, { unitId });
+
+  let tasks = flattenTasks(projects);
+  if (status) {
+    tasks = filterTasksByStatus(tasks, status);
+  }
+
+  if (hasFlag(args, '--json')) {
+    printJson(tasks);
+    return;
+  }
+
+  printTable(
+    tasks.map((task) => ({
+      id: task.id,
+      projectId: task.projectId,
+      unitCode: task.unitCode ?? '-',
+      abbr: getTaskAbbreviation(task) ?? '-',
+      name: getTaskName(task) ?? '-',
+      status: getTaskStatus(task) ?? '-',
+      due: formatDate(getTaskDueDate(task)),
+      completed: formatDate(getTaskCompletionDate(task)),
     })),
   );
 }
@@ -744,6 +863,104 @@ async function handleDoctor(args: string[]): Promise<void> {
   );
 }
 
+function defaultSiteUrlFromBase(baseUrl: string): string {
+  const parsed = new URL(baseUrl);
+  return new URL('/home', `${parsed.origin}/`).toString();
+}
+
+function applyLimit<T>(items: T[], limit?: number): T[] {
+  if (limit === undefined) {
+    return items;
+  }
+  return items.slice(0, limit);
+}
+
+async function handleDiscover(args: string[]): Promise<void> {
+  const probe = hasFlag(args, '--probe');
+  const limit = hasFlag(args, '--limit')
+    ? parseIntegerFlagValue(getFlagValue(args, '--limit'), '--limit')
+    : undefined;
+
+  if (limit !== undefined && limit < 1) {
+    throw new Error('--limit must be at least 1.');
+  }
+
+  if (probe) {
+    const session = requireSession(await loadSession());
+    const api = new OnTrackApiClient(session.baseUrl);
+    const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(session.baseUrl);
+    const discovery = await discoverOnTrackSurface(siteUrl);
+    const apiTemplates = applyLimit(discovery.apiTemplates, limit);
+    const projects = await loadProjectsWithTaskMetadata(api, session);
+    const firstProject = projects[0];
+    const probeContext = firstProject
+      ? {
+          projectId: firstProject.id,
+          unitId: firstProject.unit?.id,
+          taskDefId: firstProject.tasks?.length
+            ? getTaskDefinitionId(firstProject.tasks[0])
+            : undefined,
+        }
+      : undefined;
+    const probeItems = await probeDiscoveredApiTemplates(api, session, apiTemplates, probeContext);
+
+    if (hasFlag(args, '--json')) {
+      printJson({
+        ...discovery,
+        apiTemplates,
+        probe: probeItems,
+      });
+      return;
+    }
+
+    console.log(`Discovered ${discovery.uiRoutes.length} route(s) and ${discovery.apiTemplates.length} API template(s) from ${discovery.assets.length} JS asset(s).`);
+    printTable(
+      discovery.assets.map((asset) => ({
+        asset: asset.url,
+        status: asset.status,
+        detail: asset.detail ?? '-',
+      })),
+    );
+    printTable(discovery.uiRoutes.map((path) => ({ route: path })));
+    printTable(apiTemplates.map((template) => ({ apiTemplate: template })));
+    printTable(
+      probeItems.map((item) => ({
+        template: item.template,
+        endpoint: item.endpoint ?? '-',
+        status: item.status,
+        detail: item.detail,
+      })),
+    );
+    return;
+  }
+
+  const baseUrl = normalizeBaseUrl(getFlagValue(args, '--base-url'));
+  const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(baseUrl);
+  const discovery = await discoverOnTrackSurface(siteUrl);
+  const uiRoutes = applyLimit(discovery.uiRoutes, limit);
+  const apiTemplates = applyLimit(discovery.apiTemplates, limit);
+
+  if (hasFlag(args, '--json')) {
+    printJson({
+      ...discovery,
+      uiRoutes,
+      apiTemplates,
+    });
+    return;
+  }
+
+  console.log(`Discovered ${discovery.uiRoutes.length} route(s) and ${discovery.apiTemplates.length} API template(s) from ${discovery.assets.length} JS asset(s).`);
+  printTable(
+    discovery.assets.map((asset) => ({
+      asset: asset.url,
+      status: asset.status,
+      detail: asset.detail ?? '-',
+    })),
+  );
+  printTable(uiRoutes.map((path) => ({ route: path })));
+  printTable(apiTemplates.map((template) => ({ apiTemplate: template })));
+}
+
 async function handleInbox(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
@@ -877,6 +1094,30 @@ async function handleTaskShow(args: string[]): Promise<void> {
       qualityPts: payload.qualityPts ?? '-',
     },
   ]);
+}
+
+async function handleProjectCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+  const rest = args.slice(1);
+  if (subcommand === 'show') {
+    await handleProjectShow(rest);
+    return;
+  }
+  throw new Error(`Unknown project subcommand: ${subcommand || '(missing)'}`);
+}
+
+async function handleUnitCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+  const rest = args.slice(1);
+  if (subcommand === 'show') {
+    await handleUnitShow(rest);
+    return;
+  }
+  if (subcommand === 'tasks') {
+    await handleUnitTasks(rest);
+    return;
+  }
+  throw new Error(`Unknown unit subcommand: ${subcommand || '(missing)'}`);
 }
 
 function feedbackAuthor(comment: FeedbackItem): string {
@@ -1203,14 +1444,23 @@ async function main(): Promise<void> {
     case 'projects':
       await handleProjects(rest);
       return;
+    case 'project':
+      await handleProjectCommand(rest);
+      return;
     case 'units':
       await handleUnits(rest);
+      return;
+    case 'unit':
+      await handleUnitCommand(rest);
       return;
     case 'tasks':
       await handleTasks(rest);
       return;
     case 'doctor':
       await handleDoctor(rest);
+      return;
+    case 'discover':
+      await handleDiscover(rest);
       return;
     case 'inbox':
       await handleInbox(rest);

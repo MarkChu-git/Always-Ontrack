@@ -82,6 +82,12 @@ export interface DownloadResult {
   contentDisposition?: string;
 }
 
+export interface ProbeResult {
+  endpoint: string;
+  status: number;
+  ok: boolean;
+}
+
 async function requestBinary(
   url: string,
   init: RequestInit,
@@ -113,6 +119,21 @@ async function requestBinary(
 
 function withApiPath(baseUrl: string, path: string): string {
   return new URL(path.replace(/^\//, ''), `${baseUrl}/`).toString();
+}
+
+function normalizeProbePath(path: string): string {
+  if (!path.startsWith('/')) {
+    return `/${path}`;
+  }
+  return path;
+}
+
+function withFlexibleApiPath(baseUrl: string, path: string): string {
+  const normalized = normalizeProbePath(path);
+  if (normalized.startsWith('/api/')) {
+    return withApiPath(baseUrl, normalized.replace(/^\/api\//, ''));
+  }
+  return withApiPath(baseUrl, normalized);
 }
 
 function authHeaders(session: SessionData): HeadersInit {
@@ -256,5 +277,22 @@ export class OnTrackApiClient {
         },
       },
     );
+  }
+
+  async probeGet(session: SessionData, endpointPath: string): Promise<ProbeResult> {
+    const endpoint = normalizeProbePath(endpointPath);
+    const response = await fetch(withFlexibleApiPath(this.baseUrl, endpoint), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json, */*',
+        ...authHeaders(session),
+      },
+    });
+
+    return {
+      endpoint,
+      status: response.status,
+      ok: response.ok,
+    };
   }
 }

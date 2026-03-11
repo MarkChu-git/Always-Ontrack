@@ -119,6 +119,9 @@ async function main() {
 
   run(['auth-method'], 'auth-method');
   run(['whoami'], 'whoami');
+  run(['doctor'], 'doctor');
+  run(['discover', '--limit', '20'], 'discover');
+  run(['discover', '--probe', '--limit', '10'], 'discover --probe');
 
   const projects = runJson(['projects'], 'projects');
   if (!Array.isArray(projects) || projects.length === 0) {
@@ -150,6 +153,9 @@ async function main() {
   }
 
   run(['units'], 'units');
+  run(['project', 'show', '--project-id', String(projectId)], 'project show');
+  run(['unit', 'show', '--unit-id', String(unitId)], 'unit show');
+  run(['unit', 'tasks', '--unit-id', String(unitId)], 'unit tasks');
   run(['inbox', '--unit-id', String(unitId)], 'inbox');
   run(['feedback', 'list', '--project-id', String(projectId), '--abbr', abbr], 'feedback list');
   run(

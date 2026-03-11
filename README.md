@@ -32,6 +32,7 @@ ontrack whoami
 ontrack units
 ontrack projects
 ontrack tasks
+ontrack discover --limit 20
 ontrack inbox --unit-id 123
 ontrack task show --project-id 456 --abbr T1
 ontrack feedback list --project-id 456 --abbr T1
@@ -56,9 +57,13 @@ If your browser is not auto-detected, set `ONTRACK_BROWSER_PATH` to the browser 
 - `ontrack logout`
 - `ontrack whoami [--json]`
 - `ontrack projects [--json]`
+- `ontrack project show --project-id ID [--json]`
 - `ontrack units [--json]`
+- `ontrack unit show --unit-id ID [--json]`
+- `ontrack unit tasks --unit-id ID [--status STATUS] [--json]`
 - `ontrack tasks [--project-id ID] [--status STATUS] [--json]`
 - `ontrack doctor [--json]`
+- `ontrack discover [--site-url URL] [--base-url URL] [--probe] [--limit N] [--json]`
 - `ontrack inbox [--unit-id ID] [--status STATUS] [--json]`
 - `ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]`
 - `ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]`
@@ -77,6 +82,12 @@ If your browser is not auto-detected, set `ONTRACK_BROWSER_PATH` to the browser 
 - Default output directory: `./downloads`
 - Override with: `--out-dir <path>`
 - Filename format: `<unitCode>_<abbr>_<type>.pdf` (`type`: `task` or `submission`)
+
+### Surface Discovery
+
+- `ontrack discover` scans the live OnTrack frontend bundles and extracts route/API templates used by the web app.
+- Add `--probe` to check discovered API templates against your current login session.
+- Use `--limit N` to cap output volume for faster inspection.
 
 ## Local Development
 
