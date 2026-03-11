@@ -524,8 +524,13 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
 
     const uniqueAbbrs = [...new Set(availableAbbrs)];
     if (uniqueAbbrs.length > 0) {
+      const preview = uniqueAbbrs.slice(0, 12);
+      const suffix =
+        uniqueAbbrs.length > preview.length
+          ? ` ... (+${uniqueAbbrs.length - preview.length} more)`
+          : '';
       console.log(
-        `[warn] Unknown task "${raw}". Try one of: ${uniqueAbbrs.join(', ')} (or type m for manual).`,
+        `[warn] Unknown task "${raw}". Try one of: ${preview.join(', ')}${suffix} (or type m for manual).`,
       );
       continue;
     }
