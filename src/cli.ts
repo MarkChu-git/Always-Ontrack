@@ -348,7 +348,7 @@ async function promptTaskSelectorFlags(): Promise<string[]> {
 async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
-  const projects = await api.listProjects(session);
+  const projects = await loadProjectsWithTaskMetadata(api, session);
 
   if (projects.length === 0) {
     console.log('[warn] No projects found for this account. Switching to manual selector.');
@@ -396,15 +396,11 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
     return null;
   }
 
-  const detailedProject = await api
-    .getProject(session, selectedProject.id)
-    .catch(() => selectedProject);
-
-  let tasks = (detailedProject.tasks || []).filter((task) =>
+  let tasks = (selectedProject.tasks || []).filter((task) =>
     Boolean(getTaskAbbreviation(task) || getTaskDefinitionId(task)),
   );
-  const unitCode = detailedProject.unit?.code ?? selectedProject.unit?.code ?? '-';
-  const unitId = detailedProject.unit?.id ?? selectedProject.unit?.id ?? '-';
+  const unitCode = selectedProject.unit?.code ?? '-';
+  const unitId = selectedProject.unit?.id ?? '-';
 
   if (tasks.length === 0) {
     console.log('[warn] No selectable tasks found in this project. Switching to manual selector.');
@@ -422,8 +418,8 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
 
   const rows = tasks.map((task) => ({
     unit: unitCode,
-    task: getTaskAbbreviation(task) || '-',
-    title: getTaskName(task) || '-',
+    task: getTaskAbbreviation(task) || `#${getTaskDefinitionId(task) ?? task.id}`,
+    title: getTaskName(task) || `Task #${getTaskDefinitionId(task) ?? task.id}`,
     status: getTaskStatus(task) || '-',
     due: formatDate(getTaskDueDate(task)),
     projectId: selectedProject.id,
