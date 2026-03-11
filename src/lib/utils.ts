@@ -154,11 +154,110 @@ function toDisplayValue(value: unknown): string {
   }
 }
 
-function padRight(value: string, width: number): string {
-  if (value.length >= width) {
+const ANSI_ESCAPE_PATTERN = /\u001B\[[0-9;]*m/g;
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_ESCAPE_PATTERN, '');
+}
+
+function visibleLength(value: string): number {
+  return stripAnsi(value).length;
+}
+
+function shouldUseColors(): boolean {
+  if (process.env.NO_COLOR !== undefined) {
+    return false;
+  }
+
+  const forced = process.env.FORCE_COLOR;
+  if (forced && forced !== '0') {
+    return true;
+  }
+
+  return Boolean(process.stdout.isTTY);
+}
+
+const COLORS_ENABLED = shouldUseColors();
+
+function colorize(code: string, value: string): string {
+  if (!COLORS_ENABLED) {
     return value;
   }
-  return `${value}${' '.repeat(width - value.length)}`;
+  return `\u001B[${code}m${value}\u001B[0m`;
+}
+
+function padRight(value: string, width: number): string {
+  const length = visibleLength(value);
+  if (length >= width) {
+    return value;
+  }
+  return `${value}${' '.repeat(width - length)}`;
+}
+
+function styleStatus(raw: string, padded: string): string {
+  const value = raw.trim().toLowerCase();
+  if (!value || value === '-') {
+    return colorize('2', padded);
+  }
+
+  const map: Record<string, string> = {
+    complete: '32',
+    ready_for_feedback: '34',
+    not_started: '2',
+    working_on_it: '36',
+    need_help: '33',
+    fix_and_resubmit: '31',
+    discuss: '35',
+    assess_in_portfolio: '33',
+    redo: '31',
+    fail: '31',
+  };
+
+  return colorize(map[value] || '37', padded);
+}
+
+function styleDue(raw: string, padded: string): string {
+  const value = raw.trim();
+  if (!value || value === '-') {
+    return colorize('2', padded);
+  }
+
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return padded;
+  }
+
+  const due = new Date(parsed);
+  due.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const days = Math.floor((due.getTime() - today.getTime()) / 86_400_000);
+  if (days < 0) {
+    return colorize('31', padded);
+  }
+  if (days <= 3) {
+    return colorize('33', padded);
+  }
+  return padded;
+}
+
+function styleCell(column: string, raw: string, padded: string): string {
+  switch (column) {
+    case '(index)':
+      return colorize('2', padded);
+    case 'unit':
+    case 'unitCode':
+      return colorize('36', padded);
+    case 'task':
+      return colorize('1', padded);
+    case 'status':
+      return styleStatus(raw, padded);
+    case 'due':
+      return styleDue(raw, padded);
+    default:
+      return padded;
+  }
 }
 
 export function printTable(rows: Array<Record<string, unknown>>): void {
@@ -191,12 +290,15 @@ export function printTable(rows: Array<Record<string, unknown>>): void {
   const bottom = `└${widths.map((width) => '─'.repeat(width + 2)).join('┴')}┘`;
 
   const header = `│ ${columns
-    .map((column, index) => padRight(column, widths[index]))
+    .map((column, index) => colorize('1;36', padRight(column, widths[index])))
     .join(' │ ')} │`;
   const lines = matrix.map(
     (cells) =>
       `│ ${cells
-        .map((cell, index) => padRight(cell, widths[index]))
+        .map((cell, index) => {
+          const padded = padRight(cell, widths[index]);
+          return styleCell(columns[index], cell, padded);
+        })
         .join(' │ ')} │`,
   );
 
