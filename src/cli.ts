@@ -193,6 +193,80 @@ function renderWelcomeScreen(items: WelcomeMenuItem[]): void {
   console.log('');
 }
 
+type TerminalPanelTone = 'info' | 'success' | 'warn';
+const PANEL_ANSI_ESCAPE_PATTERN = /\u001B\[[0-9;]*m/g;
+
+function panelVisibleLength(value: string): number {
+  return value.replace(PANEL_ANSI_ESCAPE_PATTERN, '').length;
+}
+
+function panelToneCode(tone: TerminalPanelTone): string {
+  if (tone === 'success') {
+    return '1;32';
+  }
+  if (tone === 'warn') {
+    return '1;33';
+  }
+  return KLEIN_BLUE_ACCENT;
+}
+
+function panelBodyCode(tone: TerminalPanelTone): string {
+  if (tone === 'success') {
+    return '32';
+  }
+  if (tone === 'warn') {
+    return '33';
+  }
+  return KLEIN_BLUE_SOFT;
+}
+
+function renderTerminalPanel(title: string, lines: string[], tone: TerminalPanelTone = 'info'): void {
+  if (!process.stdout.isTTY || process.env.TERM === 'dumb') {
+    console.log(`[${title}]`);
+    for (const line of lines) {
+      console.log(`- ${line}`);
+    }
+    return;
+  }
+
+  const width = 70;
+  const top = `┏${'━'.repeat(width - 2)}┓`;
+  const divider = `┣${'━'.repeat(width - 2)}┫`;
+  const bottom = `┗${'━'.repeat(width - 2)}┛`;
+  const row = (text: string): string => {
+    const padding = ' '.repeat(Math.max(0, width - 4 - panelVisibleLength(text)));
+    return `┃ ${text}${padding} ┃`;
+  };
+
+  const accent = panelToneCode(tone);
+  const body = panelBodyCode(tone);
+
+  console.log('');
+  console.log(launcherColor(top, accent));
+  console.log(launcherColor(row(title), tone === 'info' ? KLEIN_BLUE_TITLE : accent));
+  console.log(launcherColor(divider, accent));
+  for (const line of lines) {
+    console.log(launcherColor(row(line), body));
+  }
+  console.log(launcherColor(bottom, accent));
+}
+
+function renderTerminalEvent(message: string, tone: TerminalPanelTone = 'info'): void {
+  if (!process.stdout.isTTY || process.env.TERM === 'dumb') {
+    console.log(message);
+    return;
+  }
+
+  const color = tone === 'success' ? '32' : tone === 'warn' ? '33' : KLEIN_BLUE_SOFT;
+  console.log(launcherColor(`  • ${message}`, color));
+}
+
+function renderChallengeNumbersInline(numbers: string[]): string {
+  return numbers
+    .map((number) => launcherColor(` ${number} `, '1;30;103'))
+    .join(launcherColor('  ', KLEIN_BLUE_SOFT));
+}
+
 function renderLoginSuccessPanel(session: SessionData): void {
   const fullName = `${session.user.firstName || session.user.first_name || ''} ${
     session.user.lastName || session.user.last_name || ''
@@ -1004,11 +1078,6 @@ async function handleLogin(args: string[]): Promise<void> {
           completed: 'SSO flow completed.',
         };
 
-        const renderChallengeNumbers = (numbers: string[]): string =>
-          numbers
-            .map((number) => launcherColor(` ${number} `, '1;30;103'))
-            .join(launcherColor('  ', KLEIN_BLUE_SOFT));
-
         const chooseMfaMethod = async (
           options: MfaMethodOption[],
         ): Promise<number> => {
@@ -1019,11 +1088,23 @@ async function handleLogin(args: string[]): Promise<void> {
           const recommendedOption =
             options.find((option) => option.recommended) ?? options[0];
 
+          const optionLines = options.map((option) => {
+            const suffix = option.id === recommendedOption.id ? ' (Recommended)' : '';
+            return `${option.id}. ${option.label}${suffix}`;
+          });
+          renderTerminalPanel(
+            'MFA METHOD SELECTION',
+            [
+              'Pick one method in the prompt below.',
+              ...optionLines,
+              `Default: ${recommendedOption.id}`,
+            ],
+            'info',
+          );
           console.log('');
           console.log('Select a security method:');
-          for (const option of options) {
-            const suffix = option.id === recommendedOption.id ? ' (Recommended)' : '';
-            console.log(`  ${option.id}. ${option.label}${suffix}`);
+          for (const line of optionLines) {
+            console.log(`  ${line}`);
           }
 
           const raw = await prompt(`Choose method [${recommendedOption.id}]: `);
@@ -1043,7 +1124,14 @@ async function handleLogin(args: string[]): Promise<void> {
         };
 
         try {
-          console.log('Starting guided Monash SSO login...');
+          renderTerminalPanel(
+            'GUIDED MONASH SSO',
+            [
+              'Automation started.',
+              'Follow terminal prompts and approve the request in Okta Verify.',
+            ],
+            'info',
+          );
           const captured = await captureSsoCredentialsWithGuidedLogin(
             {
               ssoUrl: redirectTo,
@@ -1057,22 +1145,28 @@ async function handleLogin(args: string[]): Promise<void> {
                 if (numbers.length === 0) {
                   return;
                 }
-                console.log(
-                  `[mfa] Number challenge on page: ${renderChallengeNumbers(numbers)}`,
+                renderTerminalPanel(
+                  'OKTA VERIFY NUMBER CHALLENGE',
+                  [
+                    `Tap this number in Okta Verify: ${renderChallengeNumbersInline(numbers)}`,
+                    'Use the same number shown in your app challenge list.',
+                  ],
+                  'success',
                 );
+                console.log(`[mfa] Number challenge on page: ${renderChallengeNumbersInline(numbers)}`);
                 console.log('[mfa] Tap the matching number in Okta Verify.');
               },
             },
             (step) => {
               const message = stepLabels[step];
               if (message) {
-                console.log(message);
+                renderTerminalEvent(message, step === 'completed' ? 'success' : 'info');
               }
             },
           );
           authToken = captured.authToken;
           username = captured.username;
-          console.log(`Guided SSO captured credentials from ${captured.source}.`);
+          renderTerminalEvent(`Guided SSO captured credentials from ${captured.source}.`, 'success');
         } catch (error) {
           const reason = classifySsoFallback(error);
           const detail = toRedactedError(error).message;
