@@ -9,9 +9,11 @@ import {
   getFlagValues,
   getFeedbackTimestamp,
   makeWatchTaskKey,
+  parseTaskBatchSelectorArgs,
   parseTaskSelectorArgs,
   parseUploadFileSpecs,
   resolveDownloadDir,
+  resolveTaskBatchSelector,
   resolveTaskSelector,
   sortFeedbackItems,
   toWatchStateMap,
@@ -71,7 +73,49 @@ test('parseTaskSelectorArgs supports --abbr', () => {
 test('parseTaskSelectorArgs requires --task-id or --abbr', () => {
   assert.throws(
     () => parseTaskSelectorArgs(['--project-id', '101']),
-    /Task-level commands require either --task-id <id> or --abbr <abbr>/,
+    /Task-level commands require --all-tasks, or at least one --task-id <id> \/ --abbr <abbr> selector/,
+  );
+});
+
+test('parseTaskSelectorArgs rejects multi-selector inputs', () => {
+  assert.throws(
+    () => parseTaskSelectorArgs(['--project-id', '101', '--abbr', 'T1', '--abbr', 'T2']),
+    /expects a single task selector set/,
+  );
+});
+
+test('parseTaskBatchSelectorArgs supports repeated and comma-separated selectors', () => {
+  const parsed = parseTaskBatchSelectorArgs([
+    '--project-id',
+    '101',
+    '--abbr',
+    'T1,T2',
+    '--abbr',
+    'T3',
+    '--task-id',
+    '501,502',
+  ]);
+
+  assert.deepEqual(parsed, {
+    projectId: 101,
+    taskIds: [501, 502],
+    abbrs: ['T1', 'T2', 'T3'],
+    allTasks: false,
+  });
+});
+
+test('parseTaskBatchSelectorArgs supports --all-tasks and validates conflicts', () => {
+  const all = parseTaskBatchSelectorArgs(['--project-id', '101', '--all-tasks']);
+  assert.deepEqual(all, {
+    projectId: 101,
+    taskIds: [],
+    abbrs: [],
+    allTasks: true,
+  });
+
+  assert.throws(
+    () => parseTaskBatchSelectorArgs(['--project-id', '101', '--all-tasks', '--abbr', 'T1']),
+    /Do not combine --all-tasks/,
   );
 });
 
@@ -87,6 +131,35 @@ test('resolveTaskSelector accepts matching --task-id and --abbr', () => {
   assert.equal(resolved.taskDefId, 501);
   assert.equal(resolved.abbr, 'T1');
   assert.equal(resolved.unitCode, 'FIT2004');
+});
+
+test('resolveTaskBatchSelector resolves all selected tasks with dedupe', () => {
+  const resolved = resolveTaskBatchSelector(sampleProjects, {
+    projectId: 101,
+    taskIds: [501],
+    abbrs: ['T1', 'T2'],
+    allTasks: false,
+  });
+
+  assert.deepEqual(
+    resolved.map((item) => item.abbr),
+    ['T1', 'T2'],
+  );
+});
+
+test('resolveTaskBatchSelector resolves --all-tasks', () => {
+  const resolved = resolveTaskBatchSelector(sampleProjects, {
+    projectId: 101,
+    taskIds: [],
+    abbrs: [],
+    allTasks: true,
+  });
+
+  assert.equal(resolved.length, 2);
+  assert.deepEqual(
+    resolved.map((item) => item.abbr),
+    ['T1', 'T2'],
+  );
 });
 
 test('buildPdfFilename and resolveDownloadDir follow defaults', () => {

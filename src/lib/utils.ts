@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import type {
   FeedbackItem,
   ProjectSummary,
+  TaskBatchSelector,
   TaskSelector,
   TaskSummary,
   WatchEvent,
@@ -683,18 +684,98 @@ export interface ResolvedTaskSelector {
   unitCode?: string;
 }
 
-/** Parse `--project-id` plus task selector (`--task-id` or `--abbr`). */
-export function parseTaskSelectorArgs(args: string[]): TaskSelector {
-  const projectId = parseIntegerFlagValue(getFlagValue(args, '--project-id'), '--project-id');
-  const taskIdRaw = getFlagValue(args, '--task-id');
-  const abbr = toStringValue(getFlagValue(args, '--abbr'));
-  const taskId = taskIdRaw ? parseIntegerFlagValue(taskIdRaw, '--task-id') : undefined;
+/** Parse one or more values from repeated/comma-separated task selector flags. */
+function parseSelectorValues(args: string[], flag: '--task-id' | '--abbr'): string[] {
+  const rawValues = getFlagValues(args, flag);
+  const values: string[] = [];
+  for (const raw of rawValues) {
+    const split = raw
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    values.push(...split);
+  }
+  return values;
+}
 
-  if (taskId === undefined && !abbr) {
-    throw new Error('Task-level commands require either --task-id <id> or --abbr <abbr>.');
+/**
+ * Parse batch task selector arguments.
+ *
+ * Supported forms:
+ * - repeated: `--abbr P1 --abbr D4`
+ * - comma list: `--abbr P1,D4`
+ * - mixed with ids: `--task-id 501 --abbr P1`
+ * - all tasks: `--all-tasks`
+ */
+export function parseTaskBatchSelectorArgs(args: string[]): TaskBatchSelector {
+  const projectId = parseIntegerFlagValue(getFlagValue(args, '--project-id'), '--project-id');
+  const allTasks = hasFlag(args, '--all-tasks');
+  const taskIdTokens = parseSelectorValues(args, '--task-id');
+  const abbrTokens = parseSelectorValues(args, '--abbr');
+
+  if (allTasks && (taskIdTokens.length > 0 || abbrTokens.length > 0)) {
+    throw new Error('Do not combine --all-tasks with --task-id/--abbr selectors.');
   }
 
-  return { projectId, taskId, abbr };
+  const taskIds = [...new Set(taskIdTokens.map((raw) => parseIntegerFlagValue(raw, '--task-id')))];
+  const abbrs = [...new Set(abbrTokens.map((abbr) => abbr.trim()).filter((abbr) => abbr.length > 0))];
+
+  if (!allTasks && taskIds.length === 0 && abbrs.length === 0) {
+    throw new Error(
+      'Task-level commands require --all-tasks, or at least one --task-id <id> / --abbr <abbr> selector.',
+    );
+  }
+
+  return {
+    projectId,
+    taskIds,
+    abbrs,
+    allTasks,
+  };
+}
+
+/** Parse strict single-task selector (`--task-id` or `--abbr`) for mutating commands. */
+export function parseTaskSelectorArgs(args: string[]): TaskSelector {
+  const parsed = parseTaskBatchSelectorArgs(args);
+  if (parsed.allTasks || parsed.taskIds.length > 1 || parsed.abbrs.length > 1) {
+    throw new Error(
+      'This command expects a single task selector set. Use one --task-id, one --abbr, or one of each referring to the same task.',
+    );
+  }
+
+  return {
+    projectId: parsed.projectId,
+    taskId: parsed.taskIds[0],
+    abbr: parsed.abbrs[0],
+  };
+}
+
+/** Build normalized resolved selector payload from project + concrete task match. */
+function toResolvedTaskSelector(
+  project: ProjectSummary,
+  task: TaskSummary,
+  selector: TaskSelector,
+): ResolvedTaskSelector {
+  const taskDefId = getTaskDefinitionId(task);
+  if (taskDefId === undefined) {
+    throw new Error('Resolved task does not contain a task definition id.');
+  }
+
+  const taskId = toInteger(task.id);
+  if (taskId === undefined) {
+    throw new Error('Resolved task does not contain a task id.');
+  }
+
+  return {
+    selector,
+    project,
+    task,
+    taskDefId,
+    taskId,
+    abbr: getTaskAbbreviation(task) || selector.abbr || String(taskDefId),
+    unitId: toInteger(project.unit?.id),
+    unitCode: toStringValue(project.unit?.code),
+  };
 }
 
 /** Resolve user-provided task selector to an exact project+task pair. */
@@ -732,26 +813,64 @@ export function resolveTaskSelector(
     throw new Error(`Unable to resolve task for project ${selector.projectId}.`);
   }
 
-  const taskDefId = getTaskDefinitionId(task);
-  if (taskDefId === undefined) {
-    throw new Error('Resolved task does not contain a task definition id.');
+  return toResolvedTaskSelector(project, task, selector);
+}
+
+/** Resolve batch selector to a deduplicated list of concrete project tasks. */
+export function resolveTaskBatchSelector(
+  projects: ProjectSummary[],
+  selector: TaskBatchSelector,
+): ResolvedTaskSelector[] {
+  const project = projects.find((item) => toInteger(item.id) === selector.projectId);
+  if (!project) {
+    throw new Error(`Project ${selector.projectId} not found.`);
   }
 
-  const taskId = toInteger(task.id);
-  if (taskId === undefined) {
-    throw new Error('Resolved task does not contain a task id.');
+  const tasks = project.tasks || [];
+  if (tasks.length === 0) {
+    throw new Error(`Project ${selector.projectId} has no tasks.`);
   }
 
-  return {
-    selector,
-    project,
-    task,
-    taskDefId,
-    taskId,
-    abbr: getTaskAbbreviation(task) || selector.abbr || String(taskDefId),
-    unitId: toInteger(project.unit?.id),
-    unitCode: toStringValue(project.unit?.code),
+  const resolved: ResolvedTaskSelector[] = [];
+  const seen = new Set<string>();
+  const pushResolved = (task: TaskSummary, taskSelector: TaskSelector): void => {
+    const item = toResolvedTaskSelector(project, task, taskSelector);
+    const key = `${item.taskId}:${item.taskDefId}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    resolved.push(item);
   };
+
+  if (selector.allTasks) {
+    for (const task of tasks) {
+      pushResolved(task, { projectId: selector.projectId, taskId: getTaskDefinitionId(task) });
+    }
+    return resolved;
+  }
+
+  for (const taskId of selector.taskIds) {
+    const matched = findTaskById(tasks, taskId);
+    if (!matched) {
+      throw new Error(`Task id ${taskId} was not found in project ${selector.projectId}.`);
+    }
+    pushResolved(matched, { projectId: selector.projectId, taskId });
+  }
+
+  for (const abbr of selector.abbrs) {
+    const matched = findTaskByAbbr(tasks, abbr);
+    if (!matched) {
+      throw new Error(`Task abbreviation "${abbr}" was not found in project ${selector.projectId}.`);
+    }
+    pushResolved(matched, { projectId: selector.projectId, abbr });
+  }
+
+  if (resolved.length === 0) {
+    throw new Error(`Unable to resolve tasks for project ${selector.projectId}.`);
+  }
+
+  return resolved;
 }
 
 /** Case-insensitive status filter used by tasks/inbox/unit-task commands. */

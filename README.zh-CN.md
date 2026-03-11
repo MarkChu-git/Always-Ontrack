@@ -121,11 +121,13 @@ npm run dev -- auth-method
 
 下面是一套最短、最稳的上手路径。
 
-欢迎页中的 `11-14`（下载 task/submission PDF、上传 submission、上传新文件）现在是引导模式：
+欢迎页动作现在支持引导选择任务：
 
-- 先从当前 project 列表按序号选择 project
-- 再从该 project 的 tasks 列表按序号选择 task
-- 也支持切换到手动输入 `--project-id` + `--abbr/--task-id`
+- `7/8/11/12` 支持引导单任务与批量任务选择
+- 可以选 `single`、`multiple`（逗号分隔）或 `all tasks`
+- 任务输入支持 task 代号（如 `P1`、`D4`）或数字 task id
+- 也支持切换到手动输入 `--project-id` + selector
+- 上传动作 `13/14` 仍保持单任务引导，避免误上传
 
 ### 1. 检查认证方式
 
@@ -167,6 +169,13 @@ ontrack tasks
 ontrack task show --project-id 87 --abbr D4
 ```
 
+批量示例：
+
+```bash
+ontrack task show --project-id 87 --abbr P1,D4
+ontrack task show --project-id 87 --all-tasks
+```
+
 ### 6. 查看反馈与实时消息
 
 ```bash
@@ -174,11 +183,23 @@ ontrack feedback list --project-id 87 --abbr D4
 ontrack feedback watch --project-id 87 --abbr D4
 ```
 
+批量读取示例：
+
+```bash
+ontrack feedback list --project-id 87 --abbr P1,D4
+```
+
 ### 7. 下载 PDF
 
 ```bash
 ontrack pdf task --project-id 87 --abbr D4
 ontrack pdf submission --project-id 87 --abbr D4
+```
+
+批量下载示例：
+
+```bash
+ontrack pdf task --project-id 87 --all-tasks
 ```
 
 ### 8. 上传 submission 或补充文件
@@ -220,6 +241,15 @@ ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.
 ### `taskId`
 
 CLI 支持 `--task-id`，但实际使用里更推荐优先用 `--abbr`，因为更稳定、更易读。
+
+### 批量任务选择器
+
+支持批量选择的命令（`task show`、`feedback list`、`pdf task`、`pdf submission`）可使用：
+
+- 重复参数：`--abbr P1 --abbr D4`
+- 逗号参数：`--abbr P1,D4`
+- 混合参数：`--task-id 501 --abbr D4`
+- 整个项目：`--all-tasks`
 
 ### `--json`
 
@@ -328,13 +358,13 @@ ontrack logout
 | `ontrack tasks` | 列出任务 | 可按 `--project-id`、`--status` 过滤 |
 | `ontrack unit tasks --unit-id <id>` | 查看某门课的任务 | 按 unit 聚合 |
 | `ontrack inbox` | 读取 inbox / fallback task list | 优先走 `/units/:id/tasks/inbox`，失败时回退 |
-| `ontrack task show --project-id <id> --abbr <abbr>` | 查看单个任务 | 最适合做精确查询 |
+| `ontrack task show --project-id <id> --abbr <abbr>` | 查看单个或多个任务 | 支持重复/逗号 selector 与 `--all-tasks` |
 
 ### 反馈与实时跟踪
 
 | 命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `ontrack feedback list --project-id <id> --abbr <abbr>` | 拉取任务评论与事件 | 查看 task conversation |
+| `ontrack feedback list --project-id <id> --abbr <abbr>` | 拉取一个或多个任务的评论与事件 | 支持重复/逗号 selector 与 `--all-tasks` |
 | `ontrack feedback watch --project-id <id> --abbr <abbr>` | 实时轮询任务聊天/反馈 | 默认 `15s` 轮询 |
 | `ontrack watch` | 监控任务状态、due、最新评论变化 | 默认 `60s` 轮询 |
 
@@ -342,8 +372,8 @@ ontrack logout
 
 | 命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载 task PDF | 默认保存到 `./downloads` |
-| `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载 submission PDF | 默认保存到 `./downloads` |
+| `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
+| `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
 | `ontrack submission upload ...` | 上传 submission | 可选 `--trigger`、`--comment` |
 | `ontrack submission upload-new-files ...` | 追加/补充 evidence 文件 | 不强制默认 trigger |
 

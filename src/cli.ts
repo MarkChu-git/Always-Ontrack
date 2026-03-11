@@ -37,6 +37,7 @@ import {
   openExternal,
   parseIntegerFlagValue,
   parseSsoRedirectUrl,
+  parseTaskBatchSelectorArgs,
   parseTaskSelectorArgs,
   parseUploadFileSpecs,
   printJson,
@@ -44,6 +45,7 @@ import {
   prompt,
   promptHidden,
   resolveTaskSelector,
+  resolveTaskBatchSelector,
   resolveLoginMode,
   isHeadlessServerEnvironment,
   sortFeedbackItems,
@@ -100,11 +102,11 @@ Usage:
   ontrack doctor [--json]
   ontrack discover [--site-url URL] [--base-url URL] [--probe] [--limit N] [--json]
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
-  ontrack task show --project-id ID (--task-id ID | --abbr ABBR) [--json]
-  ontrack feedback list --project-id ID (--task-id ID | --abbr ABBR) [--json]
+  ontrack task show --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
+  ontrack feedback list --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack feedback watch --project-id ID (--task-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]
-  ontrack pdf task --project-id ID (--task-id ID | --abbr ABBR) [--out-dir PATH]
-  ontrack pdf submission --project-id ID (--task-id ID | --abbr ABBR) [--out-dir PATH]
+  ontrack pdf task --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
+  ontrack pdf submission --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
   ontrack submission upload --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--json]
   ontrack submission upload-new-files --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--json]
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
@@ -118,6 +120,7 @@ Notes:
   - Use --hide-browser to force headless mode (recommended on servers without GUI).
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
   - PDF commands save files into ./downloads by default.
+  - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
 `);
 }
@@ -370,13 +373,85 @@ async function promptTaskSelectorFlags(): Promise<string[]> {
   return ['--project-id', projectId, '--task-id', taskId];
 }
 
+type TaskSelectorToken =
+  | { kind: 'abbr'; value: string }
+  | { kind: 'taskId'; value: number };
+
+/** Parse comma-separated task selector tokens (`P1,D4,501`) into typed entries. */
+function parseTaskSelectorTokens(raw: string): TaskSelectorToken[] {
+  const values = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  if (values.length === 0) {
+    throw new Error('Please enter at least one task selector.');
+  }
+
+  return values.map((value) => {
+    if (/^\d+$/.test(value)) {
+      return {
+        kind: 'taskId',
+        value: Number.parseInt(value, 10),
+      };
+    }
+    return {
+      kind: 'abbr',
+      value,
+    };
+  });
+}
+
+/** Build CLI args from parsed selector tokens. */
+function buildTaskSelectorArgs(projectId: string, tokens: TaskSelectorToken[]): string[] {
+  const args: string[] = ['--project-id', projectId];
+  for (const token of tokens) {
+    if (token.kind === 'taskId') {
+      args.push('--task-id', String(token.value));
+      continue;
+    }
+    args.push('--abbr', token.value);
+  }
+  return args;
+}
+
+/** Manual batch-capable fallback selector used when guided list loading fails. */
+async function promptTaskBatchSelectorFlags(allowAllTasks: boolean = true): Promise<string[]> {
+  const projectId = await promptRequired('Project ID: ');
+
+  while (true) {
+    const question = allowAllTasks
+      ? 'Task selectors (comma-separated codes/ids, e.g. P1,D4,501) or "all": '
+      : 'Task selectors (comma-separated codes/ids, e.g. P1,D4,501): ';
+    const raw = (await prompt(question)).trim();
+    if (!raw) {
+      console.log('[warn] This field is required.');
+      continue;
+    }
+
+    if (allowAllTasks && /^all$/i.test(raw)) {
+      return ['--project-id', projectId, '--all-tasks'];
+    }
+
+    try {
+      const tokens = parseTaskSelectorTokens(raw);
+      return buildTaskSelectorArgs(projectId, tokens);
+    } catch (error) {
+      console.log(`[warn] ${toRedactedError(error).message}`);
+    }
+  }
+}
+
 /**
  * Guided selector:
  * 1) choose project by index
- * 2) choose task by task code (abbr) within that project
+ * 2) choose task selectors (single/multiple/all) within that project
  * Supports `m` at either step for manual fallback.
  */
-async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
+async function promptTaskSelectorFromTaskList(options: {
+  allowBatch?: boolean;
+  allowAllTasks?: boolean;
+} = {}): Promise<string[] | null> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
   const projects = await loadProjectsWithTaskMetadata(api, session);
@@ -438,11 +513,15 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
     return null;
   }
 
+  const allowBatch = options.allowBatch ?? false;
+  const allowAllTasks = options.allowAllTasks ?? false;
   renderTerminalPanel(
     'SELECT TASK',
     [
       `Project ${selectedProject.id} (${unitCode}) loaded.`,
-      'Pick a task by task code (e.g. P1, D4).',
+      allowBatch
+        ? 'Choose single, multiple, or all tasks.'
+        : 'Pick a task by task code (e.g. P1, D4).',
       'If a row has no task code, enter its taskId number.',
       'Type m to switch to manual selector.',
     ],
@@ -474,21 +553,23 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
     tasksByAbbr.set(normalized, bucket);
     availableAbbrs.push(abbr.toUpperCase());
   }
-
-  while (true) {
-    const raw = (await prompt('Select task (e.g. P1) or taskId (or type m for manual): ')).trim();
-    if (!raw) {
-      continue;
+  const tasksById = new Map<number, TaskSummary>();
+  for (const task of tasks) {
+    const definitionId = getTaskDefinitionId(task);
+    if (definitionId !== undefined) {
+      tasksById.set(definitionId, task);
     }
-    if (/^m$/i.test(raw)) {
-      return null;
+    if (typeof task.id === 'number') {
+      tasksById.set(task.id, task);
     }
+  }
 
+  const projectId = String(selectedProject.id);
+  const resolveSingleTaskArgs = (raw: string): string[] | null => {
     const byAbbr = tasksByAbbr.get(raw.toLowerCase());
     if (byAbbr && byAbbr.length === 1) {
-      const task = byAbbr[0];
-      const projectId = String(selectedProject.id);
-      const abbr = getTaskAbbreviation(task);
+      const matched = byAbbr[0];
+      const abbr = getTaskAbbreviation(matched);
       if (abbr) {
         return ['--project-id', projectId, '--abbr', abbr];
       }
@@ -498,24 +579,19 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
       console.log(
         `[warn] Task code "${raw}" is ambiguous in this project. Use manual mode (m) and provide --task-id.`,
       );
-      continue;
+      return null;
     }
 
     const maybeTaskId = Number.parseInt(raw, 10);
     if (Number.isFinite(maybeTaskId)) {
-      const byTaskId = tasks.find((task) => {
-        const taskDefId = getTaskDefinitionId(task);
-        return taskDefId === maybeTaskId || task.id === maybeTaskId;
-      });
-
-      if (byTaskId) {
-        const projectId = String(selectedProject.id);
-        const abbr = getTaskAbbreviation(byTaskId);
+      const matched = tasksById.get(maybeTaskId);
+      if (matched) {
+        const abbr = getTaskAbbreviation(matched);
         if (abbr) {
           return ['--project-id', projectId, '--abbr', abbr];
         }
 
-        const taskId = getTaskDefinitionId(byTaskId);
+        const taskId = getTaskDefinitionId(matched);
         if (taskId !== undefined) {
           return ['--project-id', projectId, '--task-id', String(taskId)];
         }
@@ -532,27 +608,163 @@ async function promptTaskSelectorFromTaskList(): Promise<string[] | null> {
       console.log(
         `[warn] Unknown task "${raw}". Try one of: ${preview.join(', ')}${suffix} (or type m for manual).`,
       );
-      continue;
+      return null;
     }
 
     console.log('[warn] Unknown task selection. Enter taskId number or type m for manual selector.');
+    return null;
+  };
+
+  if (allowBatch) {
+    while (true) {
+      const modePrompt = allowAllTasks
+        ? 'Task selection mode [1=single, 2=multiple, 3=all, default 1]: '
+        : 'Task selection mode [1=single, 2=multiple, default 1]: ';
+      const rawMode = (await prompt(modePrompt)).trim();
+      if (/^m$/i.test(rawMode)) {
+        return null;
+      }
+      const mode = rawMode || '1';
+      if (!['1', '2', ...(allowAllTasks ? ['3'] : [])].includes(mode)) {
+        console.log(
+          `[warn] Invalid mode. Choose ${allowAllTasks ? '1, 2, or 3' : '1 or 2'}.`,
+        );
+        continue;
+      }
+
+      if (mode === '3') {
+        return ['--project-id', projectId, '--all-tasks'];
+      }
+
+      if (mode === '2') {
+        while (true) {
+          const rawSelectors = (
+            await prompt('Enter task selectors (comma-separated, e.g. P1,D4,501) or m for manual: ')
+          ).trim();
+          if (!rawSelectors) {
+            continue;
+          }
+          if (/^m$/i.test(rawSelectors)) {
+            return null;
+          }
+
+          let tokens: TaskSelectorToken[];
+          try {
+            tokens = parseTaskSelectorTokens(rawSelectors);
+          } catch (error) {
+            console.log(`[warn] ${toRedactedError(error).message}`);
+            continue;
+          }
+
+          const canonicalTokens: TaskSelectorToken[] = [];
+          let invalid = false;
+          for (const token of tokens) {
+            if (token.kind === 'abbr') {
+              const matched = tasksByAbbr.get(token.value.toLowerCase());
+              if (!matched || matched.length === 0) {
+                console.log(`[warn] Task code "${token.value}" was not found in this project.`);
+                invalid = true;
+                break;
+              }
+              if (matched.length > 1) {
+                console.log(`[warn] Task code "${token.value}" is ambiguous in this project.`);
+                invalid = true;
+                break;
+              }
+              const abbr = getTaskAbbreviation(matched[0]);
+              if (!abbr) {
+                console.log(`[warn] Task "${token.value}" has no abbreviation; use taskId instead.`);
+                invalid = true;
+                break;
+              }
+              canonicalTokens.push({ kind: 'abbr', value: abbr });
+              continue;
+            }
+
+            const matched = tasksById.get(token.value);
+            if (!matched) {
+              console.log(`[warn] Task id "${token.value}" was not found in this project.`);
+              invalid = true;
+              break;
+            }
+            const abbr = getTaskAbbreviation(matched);
+            if (abbr) {
+              canonicalTokens.push({ kind: 'abbr', value: abbr });
+            } else {
+              const taskId = getTaskDefinitionId(matched);
+              if (taskId === undefined) {
+                console.log(`[warn] Task id "${token.value}" could not be resolved.`);
+                invalid = true;
+                break;
+              }
+              canonicalTokens.push({ kind: 'taskId', value: taskId });
+            }
+          }
+
+          if (invalid) {
+            continue;
+          }
+
+          const deduped = new Map<string, TaskSelectorToken>();
+          for (const token of canonicalTokens) {
+            const key =
+              token.kind === 'abbr'
+                ? `abbr:${token.value.toLowerCase()}`
+                : `taskId:${token.value}`;
+            if (!deduped.has(key)) {
+              deduped.set(key, token);
+            }
+          }
+
+          return buildTaskSelectorArgs(projectId, [...deduped.values()]);
+        }
+      }
+
+      // mode === '1' falls through to single selector prompt below.
+      break;
+    }
+  }
+
+  while (true) {
+    const raw = (await prompt('Select task (e.g. P1) or taskId (or type m for manual): ')).trim();
+    if (!raw) {
+      continue;
+    }
+    if (/^m$/i.test(raw)) {
+      return null;
+    }
+
+    const singleArgs = resolveSingleTaskArgs(raw);
+    if (singleArgs) {
+      return singleArgs;
+    }
   }
 }
 
-/** Shared guided selector wrapper used by launcher actions 11-14. */
-async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string): Promise<string[]> {
+/** Shared guided selector wrapper used by launcher actions 7-14. */
+async function promptGuidedTaskSelector(
+  modeTitle: string,
+  modeSummary: string,
+  options: {
+    allowBatch?: boolean;
+    allowAllTasks?: boolean;
+  } = {},
+): Promise<string[]> {
   renderTerminalPanel(
     modeTitle,
     [
       modeSummary,
       'We will load your projects first, then tasks in the selected project.',
+      options.allowBatch
+        ? 'Batch enabled: choose single, multiple (comma-separated), or all tasks.'
+        : 'Single-task mode: pick one task code or task id.',
       'Type m in selector prompts to switch to manual project/task input.',
     ],
     'info',
   );
 
   try {
-    const selected = await promptTaskSelectorFromTaskList();
+    const selected = await promptTaskSelectorFromTaskList(options);
     if (selected) {
       return selected;
     }
@@ -560,6 +772,9 @@ async function promptGuidedTaskSelector(modeTitle: string, modeSummary: string):
     console.log(`[warn] Unable to load task list: ${toRedactedError(error).message}`);
   }
 
+  if (options.allowBatch) {
+    return promptTaskBatchSelectorFlags(options.allowAllTasks ?? false);
+  }
   return promptTaskSelectorFlags();
 }
 
@@ -634,12 +849,20 @@ async function runWelcomeAction(actionId: number): Promise<void> {
       await handleInbox([]);
       return;
     case 7: {
-      const selector = await promptTaskSelectorFlags();
+      const selector = await promptGuidedTaskSelector(
+        'TASK DETAILS',
+        'Inspect one or many tasks by code/id in the selected project.',
+        { allowBatch: true, allowAllTasks: true },
+      );
       await handleTaskShow(selector);
       return;
     }
     case 8: {
-      const selector = await promptTaskSelectorFlags();
+      const selector = await promptGuidedTaskSelector(
+        'FEEDBACK LIST',
+        'Read feedback timeline for one, many, or all tasks in a project.',
+        { allowBatch: true, allowAllTasks: true },
+      );
       await handleFeedbackList(selector);
       return;
     }
@@ -670,7 +893,8 @@ async function runWelcomeAction(actionId: number): Promise<void> {
     case 11: {
       const selector = await promptGuidedTaskSelector(
         'DOWNLOAD TASK PDF',
-        'Export a task sheet PDF for the selected task.',
+        'Export task sheet PDFs for one, many, or all tasks.',
+        { allowBatch: true, allowAllTasks: true },
       );
       const outDir = await promptGuidedOutputDirectory();
       await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
@@ -679,7 +903,8 @@ async function runWelcomeAction(actionId: number): Promise<void> {
     case 12: {
       const selector = await promptGuidedTaskSelector(
         'DOWNLOAD SUBMISSION PDF',
-        'Export your submission PDF copy for the selected task.',
+        'Export submission PDFs for one, many, or all tasks.',
+        { allowBatch: true, allowAllTasks: true },
       );
       const outDir = await promptGuidedOutputDirectory();
       await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
@@ -2206,17 +2431,19 @@ async function handleInbox(args: string[]): Promise<void> {
   );
 }
 
-/** Resolve and display one task in detail (abbr/task-id selector). */
+/** Resolve and display one or many tasks in detail (single/batch selectors). */
 async function handleTaskShow(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
-  const selector = parseTaskSelectorArgs(args);
+  const selector = parseTaskBatchSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
   });
-  const resolved = resolveTaskSelector(projects, selector);
+  const resolvedItems = resolveTaskBatchSelector(projects, selector);
+  const isSingleSelection =
+    !selector.allTasks && selector.taskIds.length + selector.abbrs.length === 1;
 
-  const payload = {
+  const payloads = resolvedItems.map((resolved) => ({
     projectId: resolved.project.id,
     unitId: resolved.unitId,
     unitCode: resolved.unitCode,
@@ -2230,15 +2457,24 @@ async function handleTaskShow(args: string[]): Promise<void> {
     grade: resolved.task.grade,
     qualityPts: resolved.task.qualityPts,
     raw: resolved.task,
-  };
+  }));
 
   if (hasFlag(args, '--json')) {
-    printJson(payload);
+    if (isSingleSelection && payloads.length === 1) {
+      printJson(payloads[0]);
+      return;
+    }
+
+    printJson({
+      projectId: selector.projectId,
+      count: payloads.length,
+      tasks: payloads,
+    });
     return;
   }
 
-  printTable([
-    {
+  printTable(
+    payloads.map((payload) => ({
       task: payload.abbr,
       title: payload.name ?? '-',
       status: payload.status ?? '-',
@@ -2251,8 +2487,8 @@ async function handleTaskShow(args: string[]): Promise<void> {
       taskDefId: payload.taskDefId,
       projectId: payload.projectId,
       unitId: payload.unitId ?? '-',
-    },
-  ]);
+    })),
+  );
 }
 
 /** Route subcommands under `ontrack project ...`. */
@@ -2367,29 +2603,69 @@ function presentFeedbackRows(comments: FeedbackItem[]): Array<Record<string, unk
   });
 }
 
-/** List task feedback/comments in chronological order. */
+/** List feedback/comments for one or many selected tasks. */
 async function handleFeedbackList(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
-  const selector = parseTaskSelectorArgs(args);
+  const selector = parseTaskBatchSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
   });
-  const resolved = resolveTaskSelector(projects, selector);
-  const comments = await api.listTaskComments(session, resolved.project.id, resolved.taskDefId);
+  const resolvedItems = resolveTaskBatchSelector(projects, selector);
+  const isSingleSelection =
+    !selector.allTasks && selector.taskIds.length + selector.abbrs.length === 1;
+
+  const results = await Promise.all(
+    resolvedItems.map(async (resolved) => ({
+      resolved,
+      comments: sortFeedbackItems(
+        await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
+      ),
+    })),
+  );
 
   if (hasFlag(args, '--json')) {
-    printJson(comments);
+    if (isSingleSelection && results.length === 1) {
+      printJson(results[0].comments);
+      return;
+    }
+
+    printJson({
+      projectId: selector.projectId,
+      count: results.length,
+      tasks: results.map((item) => ({
+        task: item.resolved.abbr,
+        taskId: item.resolved.taskId,
+        taskDefId: item.resolved.taskDefId,
+        unit: item.resolved.unitCode,
+        comments: item.comments,
+      })),
+    });
     return;
   }
 
-  const sortedComments = sortFeedbackItems(comments);
-  printTable(
-    presentFeedbackRows(sortedComments).map((row, index) => ({
+  if (isSingleSelection && results.length === 1) {
+    const sortedComments = results[0].comments;
+    printTable(
+      presentFeedbackRows(sortedComments).map((row, index) => ({
+        ...row,
+        isNew: sortedComments[index]?.isNew ?? sortedComments[index]?.is_new ?? '-',
+      })),
+    );
+    return;
+  }
+
+  const rows = results.flatMap((item) =>
+    presentFeedbackRows(item.comments).map((row, index) => ({
+      task: item.resolved.abbr,
+      unit: item.resolved.unitCode ?? '-',
       ...row,
-      isNew: sortedComments[index]?.isNew ?? sortedComments[index]?.is_new ?? '-',
+      isNew: item.comments[index]?.isNew ?? item.comments[index]?.is_new ?? '-',
+      projectId: item.resolved.project.id,
+      taskId: item.resolved.taskId,
     })),
   );
+  printTable(rows);
 }
 
 /** Real-time feedback watcher for a single task conversation stream. */
@@ -2528,34 +2804,82 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
   }
 }
 
-/** Download task/submission PDF with normalized filename and output path. */
+/** Download task/submission PDF for one or many selected tasks. */
 async function handlePdfDownload(args: string[], type: 'task' | 'submission'): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
-  const selector = parseTaskSelectorArgs(args);
+  const selector = parseTaskBatchSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
   });
-  const resolved = resolveTaskSelector(projects, selector);
+  const resolvedItems = resolveTaskBatchSelector(projects, selector);
   const outDir = getFlagValue(args, '--out-dir');
+  const asJson = hasFlag(args, '--json');
 
-  // Call type-specific endpoint but normalize naming/output behavior downstream.
-  const download =
-    type === 'task'
-      ? await api.downloadTaskPdf(
-          session,
-          resolved.unitId ??
-            (() => {
-              throw new Error('Unit id not found for task PDF download.');
-            })(),
-          resolved.taskDefId,
-        )
-      : await api.downloadSubmissionPdf(session, resolved.project.id, resolved.taskDefId);
+  const downloads: Array<{
+    task: string;
+    unit: string;
+    projectId: number;
+    taskId: number;
+    taskDefId: number;
+    filePath: string;
+  }> = [];
 
-  // Persist with deterministic filename format for easy scripting and lookup.
-  const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
-  const filePath = await writePdfFile(download.buffer, filename, outDir);
-  console.log(`Saved ${type} PDF to ${filePath}`);
+  for (const resolved of resolvedItems) {
+    // Call type-specific endpoint but normalize naming/output behavior downstream.
+    const download =
+      type === 'task'
+        ? await api.downloadTaskPdf(
+            session,
+            resolved.unitId ??
+              (() => {
+                throw new Error('Unit id not found for task PDF download.');
+              })(),
+            resolved.taskDefId,
+          )
+        : await api.downloadSubmissionPdf(session, resolved.project.id, resolved.taskDefId);
+
+    // Persist with deterministic filename format for easy scripting and lookup.
+    const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
+    const filePath = await writePdfFile(download.buffer, filename, outDir);
+    downloads.push({
+      task: resolved.abbr,
+      unit: resolved.unitCode ?? '-',
+      projectId: resolved.project.id,
+      taskId: resolved.taskId,
+      taskDefId: resolved.taskDefId,
+      filePath,
+    });
+  }
+
+  if (asJson) {
+    if (downloads.length === 1) {
+      printJson(downloads[0]);
+      return;
+    }
+    printJson({
+      type,
+      count: downloads.length,
+      downloads,
+    });
+    return;
+  }
+
+  if (downloads.length === 1) {
+    console.log(`Saved ${type} PDF to ${downloads[0].filePath}`);
+    return;
+  }
+
+  console.log(`Saved ${downloads.length} ${type} PDF file(s).`);
+  printTable(
+    downloads.map((item) => ({
+      unit: item.unit,
+      task: item.task,
+      projectId: item.projectId,
+      taskId: item.taskId,
+      file: item.filePath,
+    })),
+  );
 }
 
 /** Upload submission/new-files flow with requirement-aware file key mapping. */

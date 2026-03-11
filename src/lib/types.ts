@@ -210,6 +210,18 @@ export interface TaskSelector {
   abbr?: string;
 }
 
+/** User-provided selector for batch-capable task commands. */
+export interface TaskBatchSelector {
+  // Required project id.
+  projectId: number;
+  // Optional list of explicit task ids.
+  taskIds: number[];
+  // Optional list of task abbreviations.
+  abbrs: string[];
+  // When true, select all tasks in project.
+  allTasks?: boolean;
+}
+
 /** Comment/event item returned by feedback endpoints. */
 export interface FeedbackItem {
   // Feedback/comment id.

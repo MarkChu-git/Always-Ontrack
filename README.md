@@ -129,11 +129,13 @@ ontrack
 
 The launcher displays the ALWAYS ONTRACK digital-style menu. Enter a number to run a command path directly.
 
-For launcher actions `11-14` (task/submission PDF and upload flows), the CLI now opens a guided selector:
+Launcher actions now include guided task selection:
 
-- first pick a project from your live project list by index
-- then pick a task from that project by index
-- you can still switch to manual `--project-id` + `--abbr/--task-id` input
+- actions `7/8/11/12` support guided single-task and batch selection
+- you can choose `single`, `multiple` (comma-separated selectors), or `all tasks`
+- task selection is based on `task` code (for example `P1`, `D4`) or numeric task id
+- you can still switch to manual `--project-id` + selector input
+- upload actions `13/14` remain single-task guided by design
 
 ### 1. Check the authentication method
 
@@ -175,6 +177,13 @@ ontrack tasks
 ontrack task show --project-id 87 --abbr D4
 ```
 
+Batch examples:
+
+```bash
+ontrack task show --project-id 87 --abbr P1,D4
+ontrack task show --project-id 87 --all-tasks
+```
+
 ### 6. Read feedback and watch live updates
 
 ```bash
@@ -182,11 +191,23 @@ ontrack feedback list --project-id 87 --abbr D4
 ontrack feedback watch --project-id 87 --abbr D4
 ```
 
+Batch list example:
+
+```bash
+ontrack feedback list --project-id 87 --abbr P1,D4
+```
+
 ### 7. Download PDFs
 
 ```bash
 ontrack pdf task --project-id 87 --abbr D4
 ontrack pdf submission --project-id 87 --abbr D4
+```
+
+Batch PDF example:
+
+```bash
+ontrack pdf task --project-id 87 --all-tasks
 ```
 
 ### 8. Upload a submission or extra evidence
@@ -228,6 +249,15 @@ In most cases, `--abbr` is easier to read and remember than a numeric ID.
 ### `taskId`
 
 The CLI supports `--task-id`, but for normal usage `--abbr` is usually the better default.
+
+### Batch task selectors
+
+Batch-capable commands (`task show`, `feedback list`, `pdf task`, `pdf submission`) support:
+
+- repeated selectors: `--abbr P1 --abbr D4`
+- comma selectors: `--abbr P1,D4`
+- mixed selectors: `--task-id 501 --abbr D4`
+- project-wide selection: `--all-tasks`
 
 ### `--json`
 
@@ -337,13 +367,13 @@ ontrack logout
 | `ontrack tasks` | List tasks | Supports `--project-id` and `--status` |
 | `ontrack unit tasks --unit-id <id>` | List tasks for one unit | Unit-scoped view |
 | `ontrack inbox` | Load inbox tasks or fallback task list | Prefers `/units/:id/tasks/inbox` and falls back when needed |
-| `ontrack task show --project-id <id> --abbr <abbr>` | Show one task | Best option for precise task inspection |
+| `ontrack task show --project-id <id> --abbr <abbr>` | Show one or many tasks | Supports repeated/comma selectors and `--all-tasks` |
 
 ### Feedback and live tracking
 
 | Command | Purpose | Notes |
 | --- | --- | --- |
-| `ontrack feedback list --project-id <id> --abbr <abbr>` | Fetch task comments and events | Read the task conversation |
+| `ontrack feedback list --project-id <id> --abbr <abbr>` | Fetch comments/events for one or many tasks | Supports repeated/comma selectors and `--all-tasks` |
 | `ontrack feedback watch --project-id <id> --abbr <abbr>` | Poll task feedback in real time | Default interval is `15s` |
 | `ontrack watch` | Monitor task status, due date, and new comment changes | Default interval is `60s` |
 
@@ -351,8 +381,8 @@ ontrack logout
 
 | Command | Purpose | Notes |
 | --- | --- | --- |
-| `ontrack pdf task --project-id <id> --abbr <abbr>` | Download the task PDF | Saves to `./downloads` by default |
-| `ontrack pdf submission --project-id <id> --abbr <abbr>` | Download the submission PDF | Saves to `./downloads` by default |
+| `ontrack pdf task --project-id <id> --abbr <abbr>` | Download task PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
+| `ontrack pdf submission --project-id <id> --abbr <abbr>` | Download submission PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
 | `ontrack submission upload ...` | Upload a submission | Supports `--trigger` and `--comment` |
 | `ontrack submission upload-new-files ...` | Upload extra evidence files | Does not force a default trigger |
 
