@@ -16,6 +16,7 @@ export interface SsoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
+  onMfaNumberChallenge?: (numbers: string[]) => void;
 }
 
 export interface MfaMethodOption {
@@ -345,6 +346,21 @@ const USERNAME_CONTINUE_LABELS = ['next', 'continue', 'sign in', 'log in', 'veri
 const PASSWORD_SUBMIT_LABELS = ['sign in', 'log in', 'verify', 'continue', 'next'];
 const MFA_SELECT_BUTTON_LABEL = /select/i;
 const MFA_OPTION_LABEL_CLEANUP = /\bselect\b/gi;
+const KNOWN_MFA_METHODS: Array<{ pattern: RegExp; label: string; recommended?: boolean }> = [
+  {
+    pattern: /get a push notification/i,
+    label: 'Get a push notification (Okta Verify)',
+    recommended: true,
+  },
+  {
+    pattern: /enter a code/i,
+    label: 'Enter a code (Okta Verify)',
+  },
+  {
+    pattern: /google authenticator/i,
+    label: 'Google Authenticator',
+  },
+];
 
 const BLOCKED_LINK_HOSTS = new Set([
   'okta.com',
@@ -397,7 +413,24 @@ interface GuidedSsoRuntimeState {
   sawOktaVerifyChallenge: boolean;
   mfaSelectionDone: boolean;
   mfaSelectionPrompted: boolean;
+  lastMfaChallengeNumbersKey?: string;
 }
+
+const MFA_CHALLENGE_NUMBER_SELECTORS = [
+  '[data-se*="number-challenge"]',
+  '[data-se*="numberChallenge"]',
+  '[data-se*="challenge-number"]',
+  '[data-se*="factor-number"]',
+  '[data-se*="okta-verify-number"]',
+  '[class*="number-challenge"]',
+  '[id*="number-challenge"]',
+  '[class*="challenge-number"]',
+  '[id*="challenge-number"]',
+].join(', ');
+
+const MFA_CHALLENGE_TEXT_SIGNAL =
+  /number challenge|following number|enter the number|tap the number|okta verify|approve sign in|push notification/i;
+const MFA_CHALLENGE_NUMBER_TOKEN = /\b\d{1,3}\b/g;
 
 function collectScopes(page: Page): ScopeRef[] {
   const refs: ScopeRef[] = [{ page, scope: page }];
@@ -590,6 +623,124 @@ async function detectOktaVerifyChallenge(scopes: ScopeRef[]): Promise<boolean> {
   );
 }
 
+function uniqueInOrder(values: string[]): string[] {
+  const unique = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    if (unique.has(value)) {
+      continue;
+    }
+    unique.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function extractNumberTokens(text: string): string[] {
+  const matches = text.match(MFA_CHALLENGE_NUMBER_TOKEN);
+  if (!matches) {
+    return [];
+  }
+  return matches;
+}
+
+function hasMfaChallengeSignal(text: string): boolean {
+  return MFA_CHALLENGE_TEXT_SIGNAL.test(text);
+}
+
+export function extractMfaNumberChallengeFromText(text: string): string[] {
+  if (!text.trim()) {
+    return [];
+  }
+
+  const normalized = text.replace(/\r/g, '\n');
+  const lines = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const found: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (hasMfaChallengeSignal(line)) {
+      found.push(...extractNumberTokens(line));
+      for (let offset = 1; offset <= 3; offset += 1) {
+        const nextLine = lines[index + offset];
+        if (!nextLine) {
+          break;
+        }
+        const nextLineTokens = extractNumberTokens(nextLine);
+        if (/^\d{1,3}$/.test(nextLine) || nextLineTokens.length >= 2) {
+          found.push(...nextLineTokens);
+        }
+      }
+      continue;
+    }
+
+    if (!/^\d{1,3}$/.test(line)) {
+      continue;
+    }
+
+    const previous = lines[index - 1] ?? '';
+    const next = lines[index + 1] ?? '';
+    if (hasMfaChallengeSignal(previous) || hasMfaChallengeSignal(next)) {
+      found.push(line);
+    }
+  }
+
+  if (found.length === 0 && hasMfaChallengeSignal(normalized)) {
+    found.push(...extractNumberTokens(normalized));
+  }
+
+  return uniqueInOrder(found).slice(0, 3);
+}
+
+async function extractMfaNumberChallenge(scopes: ScopeRef[]): Promise<string[]> {
+  const textCandidates: string[] = [];
+
+  for (const scopeRef of scopes) {
+    try {
+      const body = scopeRef.scope.locator('body').first();
+      if ((await body.count()) > 0) {
+        const bodyText = await body.innerText({ timeout: 150 });
+        if (bodyText.trim()) {
+          textCandidates.push(bodyText);
+        }
+      }
+    } catch {
+      // ignore inaccessible body content
+    }
+
+    try {
+      const challengeNodes = scopeRef.scope.locator(MFA_CHALLENGE_NUMBER_SELECTORS);
+      const count = Math.min(await challengeNodes.count(), 12);
+      for (let index = 0; index < count; index += 1) {
+        const node = challengeNodes.nth(index);
+        try {
+          if (!(await node.isVisible({ timeout: 75 }))) {
+            continue;
+          }
+          const text = (await node.innerText({ timeout: 75 })).trim();
+          if (text) {
+            textCandidates.push(text);
+          }
+        } catch {
+          // skip individual inaccessible node
+        }
+      }
+    } catch {
+      // ignore selector errors
+    }
+  }
+
+  const collected: string[] = [];
+  for (const text of textCandidates) {
+    collected.push(...extractMfaNumberChallengeFromText(text));
+  }
+
+  return uniqueInOrder(collected).slice(0, 3);
+}
+
 async function canUseSelectorInScopes(scopes: ScopeRef[], selector: string): Promise<boolean> {
   for (const scopeRef of scopes) {
     if (await canUseSelector(scopeRef.scope, selector)) {
@@ -716,6 +867,94 @@ async function collectSelectControls(scopeRef: ScopeRef): Promise<Locator[]> {
   return controls;
 }
 
+async function findVisibleActionControl(container: Locator): Promise<Locator | null> {
+  const candidates = [
+    container.getByRole('button'),
+    container.getByRole('link'),
+    container.locator('button, a[role="button"], input[type="submit"], input[type="button"]'),
+  ];
+
+  for (const group of candidates) {
+    const count = Math.min(await group.count(), 10);
+    for (let index = 0; index < count; index += 1) {
+      const control = group.nth(index);
+      try {
+        if (!(await control.isVisible({ timeout: 100 }))) {
+          continue;
+        }
+        if ((await control.getAttribute('disabled')) !== null) {
+          continue;
+        }
+        return control;
+      } catch {
+        // skip inaccessible controls
+      }
+    }
+  }
+
+  return null;
+}
+
+function countKnownMfaMethodMentions(text: string): number {
+  let count = 0;
+  for (const method of KNOWN_MFA_METHODS) {
+    if (method.pattern.test(text)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+async function collectKnownMfaMethodOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
+  const options: DetectedMfaOption[] = [];
+
+  for (const scopeRef of scopes) {
+    for (const method of KNOWN_MFA_METHODS) {
+      const matches = scopeRef.scope.getByText(method.pattern);
+      const count = Math.min(await matches.count(), 8);
+      for (let index = 0; index < count; index += 1) {
+        const matchedNode = matches.nth(index);
+        try {
+          if (!(await matchedNode.isVisible({ timeout: 100 }))) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+
+        const row = matchedNode.locator(
+          'xpath=ancestor-or-self::*[self::div or self::li or self::tr or self::section or self::form][1]',
+        );
+
+        let rowText = '';
+        try {
+          rowText = (await row.innerText({ timeout: 100 })).replace(/\s+/g, ' ').trim();
+        } catch {
+          // use matched node if row text is unavailable
+        }
+
+        if (rowText && countKnownMfaMethodMentions(rowText) > 1) {
+          continue;
+        }
+
+        const control = await findVisibleActionControl(row);
+        if (!control) {
+          continue;
+        }
+
+        options.push({
+          scopeRef,
+          control,
+          label: method.label,
+          recommended: Boolean(method.recommended),
+        });
+      }
+    }
+  }
+
+  return options;
+}
+
 async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
   const options: DetectedMfaOption[] = [];
   for (const scopeRef of scopes) {
@@ -742,6 +981,8 @@ async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedM
       });
     }
   }
+
+  options.push(...(await collectKnownMfaMethodOptions(scopes)));
 
   const unique = new Map<string, DetectedMfaOption>();
   for (const option of options) {
@@ -890,6 +1131,7 @@ async function advanceGuidedSsoOnPage(
   password: string,
   state: GuidedSsoRuntimeState,
   chooseMfaMethod: ((options: MfaMethodOption[]) => Promise<number | null | undefined>) | undefined,
+  onMfaNumberChallenge: ((numbers: string[]) => void) | undefined,
   onStep?: (step: SsoStep) => void,
 ): Promise<void> {
   const scopes = collectScopes(page);
@@ -956,10 +1198,24 @@ async function advanceGuidedSsoOnPage(
       }
       return;
     }
+  }
 
-    const sawChallenge = await detectOktaVerifyChallenge(scopes);
-    if (sawChallenge) {
-      state.sawOktaVerifyChallenge = true;
+  const sawChallenge = await detectOktaVerifyChallenge(scopes);
+  if (sawChallenge) {
+    state.sawOktaVerifyChallenge = true;
+  }
+
+  if (state.sawOktaVerifyChallenge) {
+    const numbers = await extractMfaNumberChallenge(scopes);
+    if (numbers.length > 0) {
+      const key = numbers.join('|');
+      if (key !== state.lastMfaChallengeNumbersKey) {
+        state.lastMfaChallengeNumbersKey = key;
+        onMfaNumberChallenge?.(numbers);
+      }
+    }
+
+    if (!state.mfaWaitNotified) {
       state.mfaWaitNotified = true;
       onStep?.('mfa_wait');
       return;
@@ -1032,6 +1288,7 @@ async function captureSsoCredentialsInternal(
     password: string;
     onStep?: (step: SsoStep) => void;
     chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
+    onMfaNumberChallenge?: (numbers: string[]) => void;
   },
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
@@ -1137,6 +1394,7 @@ async function captureSsoCredentialsInternal(
           sawOktaVerifyChallenge: false,
           mfaSelectionDone: false,
           mfaSelectionPrompted: false,
+          lastMfaChallengeNumbersKey: undefined,
         }
       : null;
 
@@ -1155,6 +1413,7 @@ async function captureSsoCredentialsInternal(
             guidedLogin.password,
             guidedState,
             guidedLogin.chooseMfaMethod,
+            guidedLogin.onMfaNumberChallenge,
             guidedLogin.onStep,
           );
         }
@@ -1260,6 +1519,7 @@ export async function captureSsoCredentialsWithGuidedLogin(
       password: options.password,
       onStep,
       chooseMfaMethod: options.chooseMfaMethod,
+      onMfaNumberChallenge: options.onMfaNumberChallenge,
     },
   );
   onStep?.('completed');

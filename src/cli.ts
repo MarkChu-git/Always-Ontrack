@@ -75,8 +75,8 @@ Usage:
   ontrack auth-method [--base-url URL] [--json]
   ontrack login [--base-url URL] [--redirect-url URL]
   ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME
-  ontrack login [--base-url URL] --auto [--auto-timeout-sec N] [--show-browser]
-  ontrack login [--base-url URL] [--sso] [--sso-username USERNAME] [--sso-timeout-sec N] [--show-browser]
+  ontrack login [--base-url URL] --auto [--auto-timeout-sec N] [--show-browser|--hide-browser]
+  ontrack login [--base-url URL] [--sso] [--sso-username USERNAME] [--sso-timeout-sec N] [--show-browser|--hide-browser]
   ontrack logout
   ontrack whoami [--json]
   ontrack projects [--json]
@@ -101,8 +101,9 @@ Notes:
   - Running "ontrack" with no command opens the interactive launcher in TTY terminals.
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
-  - "ontrack login" defaults to guided SSO (username/password + Okta Verify) on all environments.
+  - "ontrack login" defaults to guided SSO (username/password + Okta Verify) with visible browser.
   - Use "ontrack login --sso" to force guided SSO, or "ontrack login --auto" for browser-only capture mode.
+  - Use --hide-browser to force headless mode (recommended on servers without GUI).
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
   - PDF commands save files into ./downloads by default.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
@@ -861,7 +862,12 @@ async function handleLogin(args: string[]): Promise<void> {
   }
   const auto = hasFlag(args, '--auto');
   const sso = hasFlag(args, '--sso');
-  const showBrowser = hasFlag(args, '--show-browser');
+  const showBrowserFlag = hasFlag(args, '--show-browser');
+  const hideBrowserFlag = hasFlag(args, '--hide-browser');
+  if (showBrowserFlag && hideBrowserFlag) {
+    throw new Error('Use either --show-browser or --hide-browser, not both.');
+  }
+  const showBrowser = showBrowserFlag || (!hideBrowserFlag && !auto);
   const autoTimeoutSec = hasFlag(args, '--auto-timeout-sec')
     ? parseIntegerFlagValue(getFlagValue(args, '--auto-timeout-sec'), '--auto-timeout-sec')
     : 300;
@@ -937,7 +943,7 @@ async function handleLogin(args: string[]): Promise<void> {
           throw new Error('Username cannot be empty.');
         }
 
-        let password = await promptHidden('Monash password: ');
+        let password = await promptHidden('Password: ');
         if (!password) {
           throw new Error('Password cannot be empty.');
         }
@@ -949,6 +955,11 @@ async function handleLogin(args: string[]): Promise<void> {
           mfa_wait: 'Waiting for Okta Verify push/number approval on your phone...',
           completed: 'SSO flow completed.',
         };
+
+        const renderChallengeNumbers = (numbers: string[]): string =>
+          numbers
+            .map((number) => launcherColor(` ${number} `, '1;30;103'))
+            .join(launcherColor('  ', KLEIN_BLUE_SOFT));
 
         const chooseMfaMethod = async (
           options: MfaMethodOption[],
@@ -994,6 +1005,15 @@ async function handleLogin(args: string[]): Promise<void> {
               timeoutMs: ssoTimeoutSec * 1000,
               headless: isHeadless && !showBrowser,
               chooseMfaMethod,
+              onMfaNumberChallenge: (numbers) => {
+                if (numbers.length === 0) {
+                  return;
+                }
+                console.log(
+                  `[mfa] Number challenge on page: ${renderChallengeNumbers(numbers)}`,
+                );
+                console.log('[mfa] Tap the matching number in Okta Verify.');
+              },
             },
             (step) => {
               const message = stepLabels[step];

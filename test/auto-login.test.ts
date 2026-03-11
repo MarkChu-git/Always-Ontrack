@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SsoFallbackError,
   classifySsoFallback,
+  extractMfaNumberChallengeFromText,
   extractCredentialsFromAuthPayload,
   extractCredentialsFromCookieJar,
   extractCredentialsFromUrl,
@@ -107,4 +108,33 @@ test('classifySsoFallback maps known fallback reasons', () => {
   assert.equal(classifySsoFallback(new Error('Unsupported MFA: webauthn challenge')), 'unsupported_mfa');
   assert.equal(classifySsoFallback(new Error('Unable to locate username field selector')), 'selector_missing');
   assert.equal(classifySsoFallback(new Error('Timeout waiting for verify')), 'timeout');
+});
+
+test('extractMfaNumberChallengeFromText finds number challenge code', () => {
+  const numbers = extractMfaNumberChallengeFromText(`
+    Check your Okta Verify app.
+    Enter the following number to sign in:
+    68
+  `);
+
+  assert.deepEqual(numbers, ['68']);
+});
+
+test('extractMfaNumberChallengeFromText supports multi-option number challenge', () => {
+  const numbers = extractMfaNumberChallengeFromText(`
+    Number challenge
+    Select the matching number in Okta Verify
+    12 / 35 / 87
+  `);
+
+  assert.deepEqual(numbers, ['12', '35', '87']);
+});
+
+test('extractMfaNumberChallengeFromText ignores unrelated numbers', () => {
+  const numbers = extractMfaNumberChallengeFromText(`
+    Verify it's you with a security method
+    Last signed in 2026-03-11
+  `);
+
+  assert.deepEqual(numbers, []);
 });

@@ -1,5 +1,4 @@
 import { createInterface } from 'node:readline/promises';
-import { createInterface as createMaskableInterface } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -65,41 +64,61 @@ export async function promptHidden(question: string): Promise<string> {
   }
 
   return new Promise<string>((resolvePromise, reject) => {
-    const rl = createMaskableInterface({
-      input,
-      output,
-      terminal: true,
-    }) as ReturnType<typeof createMaskableInterface> & {
-      stdoutMuted?: boolean;
-      _writeToOutput?: (value: string) => void;
+    const stdinStream = input;
+    if (!stdinStream.isTTY) {
+      resolvePromise('');
+      return;
+    }
+
+    let answer = '';
+    output.write(question);
+    stdinStream.setRawMode(true);
+    stdinStream.resume();
+    stdinStream.setEncoding('utf8');
+
+    const cleanup = (): void => {
+      stdinStream.removeListener('data', onData);
+      stdinStream.setRawMode(false);
+      stdinStream.pause();
     };
 
-    rl.stdoutMuted = true;
-    rl._writeToOutput = (value: string): void => {
-      if (!rl.stdoutMuted) {
-        output.write(value);
+    const onData = (chunk: string): void => {
+      const data = chunk ?? '';
+      if (!data) {
         return;
       }
 
-      if (value === '\n' || value === '\r\n' || value === '\r') {
-        output.write(value);
-        return;
-      }
+      for (const char of data) {
+        if (char === '\u0003') {
+          output.write('\n');
+          cleanup();
+          reject(new Error('Input interrupted.'));
+          return;
+        }
 
-      output.write('*');
+        if (char === '\r' || char === '\n') {
+          output.write('\n');
+          cleanup();
+          resolvePromise(answer.trim());
+          return;
+        }
+
+        if (char === '\u007f' || char === '\b') {
+          if (answer.length > 0) {
+            answer = answer.slice(0, -1);
+            output.write('\b \b');
+          }
+          continue;
+        }
+
+        if (char >= ' ' && char !== '\u007f') {
+          answer += char;
+          output.write('*');
+        }
+      }
     };
 
-    rl.on('SIGINT', () => {
-      rl.close();
-      reject(new Error('Input interrupted.'));
-    });
-
-    rl.question(question, (answer) => {
-      rl.stdoutMuted = false;
-      rl.close();
-      output.write('\n');
-      resolvePromise(answer.trim());
-    });
+    stdinStream.on('data', onData);
   });
 }
 

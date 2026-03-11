@@ -245,7 +245,9 @@ This flow:
 4. captures credentials and signs in through `/api/auth`
 5. stores a local session cache
 
-You can also use `ontrack login --sso` to force guided SSO explicitly.
+`ontrack login` now opens a visible browser by default for guided SSO.  
+Use `ontrack login --hide-browser` to force headless mode (for server/no-GUI environments).  
+You can still use `ontrack login --sso` to force guided SSO explicitly.
 
 ### Browser-only capture mode: `ontrack login --auto`
 
