@@ -546,6 +546,7 @@ Rules:
 - if a task requires two files, you must provide two files
 - if you mix explicit keys and plain paths, the CLI fills remaining keys in definition order
 - if `--task-id` and `--abbr` are both provided, they must resolve to the same task
+- if `--all-tasks` is provided, do not combine it with `--task-id` or `--abbr`
 
 ## Output, highlighting, and JSON
 

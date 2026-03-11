@@ -537,6 +537,7 @@ ontrack submission upload \
 - 如果任务要求 2 个文件，你就必须传 2 个文件
 - 如果同时提供显式 key 和普通路径，CLI 会把未指定 key 的路径按剩余 key 顺序补齐
 - 如果 `--task-id` 和 `--abbr` 同时存在，必须指向同一个任务
+- 如果使用 `--all-tasks`，不要再同时传 `--task-id` 或 `--abbr`
 
 ## 输出、高亮与 JSON
 

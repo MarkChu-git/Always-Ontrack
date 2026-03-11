@@ -2,6 +2,7 @@
   "name": "ontrack-cli",
   "version": "0.3.0",
   "description": "CLI for Monash OnTrack / Doubtfire",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "ontrack": "./dist/cli.js"
