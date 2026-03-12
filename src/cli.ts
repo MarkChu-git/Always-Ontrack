@@ -47,7 +47,6 @@ import {
   resolveTaskSelector,
   resolveTaskBatchSelector,
   resolveLoginMode,
-  isHeadlessServerEnvironment,
   sortFeedbackItems,
   toWatchStateMap,
   toRedactedError,
@@ -115,9 +114,10 @@ Notes:
   - Running "ontrack" with no command opens the interactive launcher in TTY terminals.
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
-  - "ontrack login" defaults to guided SSO (username/password + Okta Verify) with visible browser.
+  - "ontrack login" defaults to guided SSO (username/password + Okta Verify) in hidden-browser (headless) mode on all environments.
   - Use "ontrack login --sso" to force guided SSO, or "ontrack login --auto" for browser-only capture mode.
-  - Use --hide-browser to force headless mode (recommended on servers without GUI).
+  - Use --show-browser to force visible browser mode for debugging; --hide-browser keeps explicit headless mode.
+  - If Chromium runtime is missing, the CLI will attempt a one-time automatic install before fallback.
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
   - PDF commands save files into ./downloads by default.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
@@ -1538,7 +1538,9 @@ async function handleLogin(args: string[]): Promise<void> {
   if (showBrowserFlag && hideBrowserFlag) {
     throw new Error('Use either --show-browser or --hide-browser, not both.');
   }
-  const showBrowser = showBrowserFlag || (!hideBrowserFlag && !auto);
+  // Product default: use hidden browser everywhere for consistent UX across local/server.
+  // `--show-browser` remains available for debugging and diagnostics.
+  const showBrowser = showBrowserFlag && !hideBrowserFlag;
   const autoTimeoutSec = hasFlag(args, '--auto-timeout-sec')
     ? parseIntegerFlagValue(getFlagValue(args, '--auto-timeout-sec'), '--auto-timeout-sec')
     : 300;
@@ -1573,14 +1575,12 @@ async function handleLogin(args: string[]): Promise<void> {
       const redirectTo = method.redirect_to;
       console.log(`OnTrack uses ${method.method || 'SSO'} for authentication.`);
       console.log('Expected final redirect format: https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...');
-      const isHeadless = isHeadlessServerEnvironment();
       const loginMode = resolveLoginMode({
         auto,
         sso,
         hasAuthToken: Boolean(authToken),
         hasUsername: Boolean(username),
         hasRedirectUrl: Boolean(redirectUrl),
-        isHeadless,
       });
 
       // Last-resort fallback retained for edge MFA/captcha/selector issues.
@@ -1605,7 +1605,7 @@ async function handleLogin(args: string[]): Promise<void> {
           ssoUrl: redirectTo,
           apiBaseUrl: api.base,
           timeoutMs: autoTimeoutSec * 1000,
-          headless: isHeadless && !showBrowser,
+          headless: !showBrowser,
         });
         authToken = captured.authToken;
         username = captured.username;
@@ -1697,7 +1697,7 @@ async function handleLogin(args: string[]): Promise<void> {
               username: guidedUsername,
               password,
               timeoutMs: ssoTimeoutSec * 1000,
-              headless: isHeadless && !showBrowser,
+              headless: !showBrowser,
               chooseMfaMethod,
               onMfaNumberChallenge: (numbers) => {
                 if (numbers.length === 0) {
@@ -1746,7 +1746,7 @@ async function handleLogin(args: string[]): Promise<void> {
               ssoUrl: redirectTo,
               apiBaseUrl: api.base,
               timeoutMs: ssoTimeoutSec * 1000,
-              headless: false,
+              headless: !showBrowser,
             });
             authToken = captured.authToken;
             username = captured.username;

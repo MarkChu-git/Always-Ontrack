@@ -520,7 +520,6 @@ export function resolveLoginMode(options: {
   hasAuthToken: boolean;
   hasUsername: boolean;
   hasRedirectUrl: boolean;
-  isHeadless: boolean;
 }): LoginMode {
   if (options.auto) {
     return 'auto';

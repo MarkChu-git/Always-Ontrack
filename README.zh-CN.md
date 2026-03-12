@@ -78,7 +78,7 @@ ontrack <command>
 
 - Node.js `22+`
 - macOS / Linux / Windows
-- 建议有一个 Chromium 系浏览器用于 `ontrack login`（默认引导式 SSO）或 `ontrack login --auto`
+- 首次执行 `ontrack login` 建议保证网络可用（若缺少 Playwright Chromium runtime，CLI 会自动尝试安装）
 
 ### 全局安装
 
@@ -143,7 +143,7 @@ ontrack auth-method
 ontrack login
 ```
 
-无图形环境（服务器）可强制无头模式:
+显式无头模式（与默认行为一致）:
 
 ```bash
 ontrack login --hide-browser
@@ -268,15 +268,16 @@ ontrack login
 这个流程会:
 
 1. 在 CLI 里输入 Monash username/password（密码隐藏输入）
-2. 默认打开可见浏览器并进入引导式 SSO 自动化
+2. 默认使用隐藏浏览器（headless）进入引导式 SSO 自动化
 3. 在终端显示结构化登录进度面板
 4. 如果出现多个 MFA 方法，在 CLI 中给出编号选项供你选择
 5. 在 Okta Verify number challenge 时高亮显示页面数字
 6. 捕获凭据并调用 `/api/auth`
 7. 保存本地会话缓存
+8. 缺少 Chromium runtime 时自动尝试安装（best-effort）
 
-`ontrack login` 默认使用可见浏览器。  
-服务器/无 GUI 环境可使用 `ontrack login --hide-browser` 强制无头模式。  
+`ontrack login` 现在默认在本地和服务器都走隐藏浏览器（headless）模式。  
+只有排查问题时才建议使用 `ontrack login --show-browser`。  
 `ontrack login --sso` 可作为显式引导式 SSO 别名。
 
 ### 浏览器捕获模式: `ontrack login --auto`
@@ -341,7 +342,8 @@ ontrack logout
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |
 | `ontrack login` | 引导式 Monash SSO 登录（默认） | 主登录入口 |
 | `ontrack login --sso` | 引导式 Monash SSO 登录 | 显式别名模式 |
-| `ontrack login --hide-browser` | 强制无头引导式登录 | 服务器/无 GUI 环境推荐 |
+| `ontrack login --show-browser` | 显示浏览器执行引导式登录 | 调试 selector/MFA 边缘场景 |
+| `ontrack login --hide-browser` | 显式保持无头引导式登录 | 可选显式参数（默认行为） |
 | `ontrack login --auto` | 浏览器捕获模式登录 | 仅需被动捕获时使用 |
 | `ontrack logout` | 清理本地会话 | 切账号、重登、排障 |
 | `ontrack whoami` | 查看当前缓存账号 | 确认登录身份 |
@@ -601,7 +603,6 @@ ontrack tasks --project-id 87 --json
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | 覆盖默认 API base URL | 默认值为 Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | 指定自动登录用的浏览器可执行文件 | 当自动探测浏览器失败时使用 |
-| `ONTRACK_HEADLESS` | 强制覆盖是否无头模式（`true/false` 或 `1/0`） | 适合容器、CI 或 SSH 误判场景 |
 | `FORCE_COLOR` | 强制终端彩色输出 | 例如 `FORCE_COLOR=1` |
 | `NO_COLOR` | 关闭彩色输出 | 适合日志或纯文本环境 |
 | `XDG_CONFIG_HOME` | 控制 Linux/macOS 配置根目录 | 影响 session 存储路径 |
@@ -782,11 +783,13 @@ ontrack tasks
 ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
 ```
 
-或者安装 Playwright bundled Chromium:
+或者手动安装 Playwright bundled Chromium:
 
 ```bash
 npx playwright install chromium
 ```
+
+`ontrack login` 在可行时会自动尝试安装，不必每次手动执行。
 
 ### `419 Authentication Timeout`
 

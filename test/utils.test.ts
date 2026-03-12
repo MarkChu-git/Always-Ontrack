@@ -68,7 +68,6 @@ test('resolveLoginMode prefers auto, then guided sso as the default path', () =>
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: false,
-      isHeadless: true,
     }),
     'auto',
   );
@@ -80,7 +79,6 @@ test('resolveLoginMode prefers auto, then guided sso as the default path', () =>
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: false,
-      isHeadless: false,
     }),
     'sso_guided',
   );
@@ -92,7 +90,6 @@ test('resolveLoginMode prefers auto, then guided sso as the default path', () =>
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: false,
-      isHeadless: false,
     }),
     'sso_guided',
   );
@@ -104,7 +101,6 @@ test('resolveLoginMode prefers auto, then guided sso as the default path', () =>
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: false,
-      isHeadless: true,
     }),
     'sso_guided',
   );
@@ -116,7 +112,6 @@ test('resolveLoginMode prefers auto, then guided sso as the default path', () =>
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: true,
-      isHeadless: true,
     }),
     'manual',
   );

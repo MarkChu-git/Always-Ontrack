@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import type { Frame, Locator, Page } from 'playwright-core';
 
 /**
@@ -229,6 +230,108 @@ function browserInstallHint(): string {
     'No browser executable found. Install Chrome/Chromium/Edge, or run "npx playwright install chromium", ' +
     'or set ONTRACK_BROWSER_PATH.'
   );
+}
+
+/** Detect launch failures caused by missing X/Wayland display servers. */
+function isMissingDisplayServerError(message: string): boolean {
+  return /missing x server|\$display|headed browser without having a xserver|ozone_platform_x11|platform failed to initialize/i.test(
+    message,
+  );
+}
+
+/** Detect launch failures caused by missing shared system libraries. */
+function isMissingSharedLibraryError(message: string): boolean {
+  return /error while loading shared libraries|cannot open shared object file/i.test(message);
+}
+
+/** Detect errors indicating that Playwright Chromium binary is not installed yet. */
+function isMissingBrowserBinaryError(message: string): boolean {
+  return /executable doesn't exist|please run .*playwright install|browser executable.+not found/i.test(
+    message,
+  );
+}
+
+/** Run one shell command and capture compact output for diagnostics. */
+async function runCommand(command: string, args: string[], timeoutMs: number): Promise<{
+  ok: boolean;
+  output: string;
+}> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      env: process.env,
+    });
+
+    let output = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      output += String(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      output += String(chunk);
+    });
+    child.on('error', (error) => {
+      output += `${error instanceof Error ? error.message : String(error)}\n`;
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolve({
+          ok: false,
+          output: `${output}\nCommand timed out after ${timeoutMs}ms.`,
+        });
+        return;
+      }
+      resolve({
+        ok: code === 0,
+        output,
+      });
+    });
+  });
+}
+
+/** Best-effort automatic installer for Playwright Chromium browser binaries. */
+async function autoInstallChromiumBrowser(): Promise<{
+  ok: boolean;
+  detail: string;
+}> {
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const attempts: Array<{ command: string; args: string[]; note: string }> = [
+    {
+      command: npx,
+      args: ['--yes', 'playwright', 'install', 'chromium'],
+      note: 'npx playwright install chromium',
+    },
+    {
+      command: npx,
+      args: ['--yes', 'playwright', 'install', '--with-deps', 'chromium'],
+      note: 'npx playwright install --with-deps chromium',
+    },
+  ];
+
+  let lastDetail = '';
+  for (const attempt of attempts) {
+    const result = await runCommand(attempt.command, attempt.args, 10 * 60 * 1000);
+    const compactOutput = result.output.trim().slice(-2000);
+    if (result.ok) {
+      return {
+        ok: true,
+        detail: `${attempt.note} succeeded.`,
+      };
+    }
+    lastDetail = `${attempt.note} failed.\n${compactOutput}`;
+  }
+
+  return {
+    ok: false,
+    detail: lastDetail || 'Automatic install failed.',
+  };
 }
 
 /** Map unknown automation failures to high-level fallback reasons for CLI messaging. */
@@ -1329,25 +1432,63 @@ async function launchBrowserForCapture(options: {
           headless: options.headless,
         };
 
-  try {
-    const browser = await playwrightModule.chromium.launch(launchArgs);
-    return {
-      browser,
-      plan,
-    };
-  } catch (error) {
-    if (plan.source === 'bundled') {
+  let installAttempted = false;
+  while (true) {
+    try {
+      const browser = await playwrightModule.chromium.launch(launchArgs);
+      return {
+        browser,
+        plan,
+      };
+    } catch (error) {
+      const detail = asErrorMessage(error);
+      const canAutoInstall =
+        !installAttempted &&
+        (isMissingBrowserBinaryError(detail) ||
+          (plan.source === 'bundled' && isMissingSharedLibraryError(detail)));
+
+      if (canAutoInstall) {
+        installAttempted = true;
+        const installed = await autoInstallChromiumBrowser();
+        if (installed.ok) {
+          continue;
+        }
+        throw new SsoFallbackError(
+          'browser_unavailable',
+          'fallback',
+          `Browser runtime is missing and auto-install failed. ${installed.detail}`,
+        );
+      }
+
+      if (isMissingDisplayServerError(detail)) {
+        throw new SsoFallbackError(
+          'browser_unavailable',
+          'fallback',
+          'No display server found ($DISPLAY). Use default headless mode, or run with xvfb-run if you need --show-browser.',
+        );
+      }
+
+      if (isMissingSharedLibraryError(detail)) {
+        throw new SsoFallbackError(
+          'browser_unavailable',
+          'fallback',
+          'Browser dependencies are missing on this system. Install OS libraries or run "npx playwright install --with-deps chromium".',
+        );
+      }
+
+      if (plan.source === 'bundled') {
+        throw new SsoFallbackError(
+          'browser_unavailable',
+          'fallback',
+          `${browserInstallHint()} (${detail})`,
+        );
+      }
       throw new SsoFallbackError(
         'browser_unavailable',
         'fallback',
-        `${browserInstallHint()} (${asErrorMessage(error)})`,
+        `Unable to launch browser at "${plan.executablePath}": ${detail}`,
       );
     }
-    throw new SsoFallbackError(
-      'browser_unavailable',
-      'fallback',
-      `Unable to launch browser at "${plan.executablePath}": ${asErrorMessage(error)}`,
-    );
   }
 }
 

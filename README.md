@@ -78,7 +78,7 @@ It is designed to work out of the box, with no mandatory base URL setup and a co
 
 - Node.js `22+`
 - macOS, Linux, or Windows
-- A Chromium-based browser is recommended for `ontrack login` (default guided SSO) or `ontrack login --auto`
+- Network access on first guided login (`ontrack login`) if Playwright Chromium runtime needs to be installed automatically
 
 ### Global install
 
@@ -151,7 +151,7 @@ Recommended:
 ontrack login
 ```
 
-Server/no-GUI override (headless):
+Explicit headless mode (same as default behavior):
 
 ```bash
 ontrack login --hide-browser
@@ -276,15 +276,16 @@ ontrack login
 This flow:
 
 1. prompts for Monash username/password in CLI (password is hidden)
-2. launches guided SSO automation in a visible browser by default
+2. launches guided SSO automation in hidden-browser (headless) mode by default
 3. shows structured login progress in terminal panels
 4. prompts MFA method selection in CLI when multiple methods are available
 5. highlights Okta Verify number challenge values in terminal output
 6. captures credentials and signs in through `/api/auth`
 7. stores a local session cache
+8. auto-installs Playwright Chromium runtime when missing (best-effort)
 
-`ontrack login` now opens a visible browser by default for guided SSO.  
-Use `ontrack login --hide-browser` to force headless mode (for server/no-GUI environments).  
+`ontrack login` now defaults to hidden-browser (headless) mode across local and server environments.  
+Use `ontrack login --show-browser` only for debugging.  
 You can still use `ontrack login --sso` as an explicit guided alias.
 
 ### Browser-only capture mode: `ontrack login --auto`
@@ -350,7 +351,8 @@ ontrack logout
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
 | `ontrack login` | Run guided Monash SSO with Okta Verify push/number (default path) | Primary login command |
 | `ontrack login --sso` | Run guided Monash SSO with Okta Verify push/number | Explicit guided alias |
-| `ontrack login --hide-browser` | Force headless guided SSO | Recommended for server/no-GUI environments |
+| `ontrack login --show-browser` | Force visible browser mode for guided SSO | Debug selector or MFA edge cases |
+| `ontrack login --hide-browser` | Keep explicit headless guided SSO | Optional explicit flag (default behavior) |
 | `ontrack login --auto` | Run browser-only capture mode | Use when you only need passive capture |
 | `ontrack logout` | Clear the local session | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
@@ -608,7 +610,6 @@ That makes them a better fit for:
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | Override the default API base URL | Defaults to Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | Set the browser executable path for SSO automation | Highest priority browser override |
-| `ONTRACK_HEADLESS` | Force headless detection (`true/false` or `1/0`) | Useful when runtime detection is incorrect |
 | `FORCE_COLOR` | Force colored terminal output | Example: `FORCE_COLOR=1` |
 | `NO_COLOR` | Disable colored output | Useful for plain logs or CI |
 | `XDG_CONFIG_HOME` | Override the config root on Linux and macOS | Affects session storage |
@@ -789,11 +790,13 @@ Set the browser path explicitly:
 ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
 ```
 
-Or install bundled Chromium support:
+Or install bundled Chromium support manually:
 
 ```bash
 npx playwright install chromium
 ```
+
+`ontrack login` already attempts this installation automatically on first run when possible.
 
 ### `419 Authentication Timeout`
 
