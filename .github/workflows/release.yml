@@ -112,6 +112,8 @@ jobs:
     needs: validate-and-pack
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GH_REPO: ${{ github.repository }}
     permissions:
       contents: write
     steps:
@@ -195,6 +197,8 @@ jobs:
     if: ${{ always() && needs.validate-and-pack.result == 'success' && needs.create-draft-release.result == 'success' && (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GH_REPO: ${{ github.repository }}
     environment: release
     permissions:
       contents: write

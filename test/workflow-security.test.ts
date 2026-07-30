@@ -20,6 +20,7 @@ test('CI never uploads an unverified package from a failed job', async () => {
 test('release validates the exact single draft asset before reuse and publication', async () => {
   const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
 
+  assert.equal((workflow.match(/GH_REPO: \$\{\{ github\.repository \}\}/g) ?? []).length, 2);
   assert.equal((workflow.match(/\.assets \| length/g) ?? []).length, 2);
   assert.equal((workflow.match(/\.assets\[0\]\.name/g) ?? []).length, 2);
   assert.equal((workflow.match(/gh release download "\$TAG"/g) ?? []).length, 2);
