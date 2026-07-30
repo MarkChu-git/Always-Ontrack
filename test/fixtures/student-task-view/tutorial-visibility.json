@@ -1,0 +1,61 @@
+{
+  "project": {
+    "id": 101,
+    "target_grade": 0,
+    "tutorial_enrolments": [
+      {
+        "project_id": 101,
+        "tutorial_id": 7001
+      }
+    ],
+    "tasks": [],
+    "unit": {
+      "id": 55,
+      "code": "FIT0001",
+      "tutorial_streams": [
+        {
+          "id": 8001,
+          "name": "Main Feedback",
+          "abbreviation": "Main Feedback"
+        },
+        {
+          "id": 8002,
+          "name": "Alternate Feedback",
+          "abbreviation": "Alternate Feedback"
+        }
+      ],
+      "tutorials": [
+        {
+          "id": 7001,
+          "tutorial_stream_abbr": "Main Feedback"
+        }
+      ],
+      "task_definitions": [
+        {
+          "id": 501,
+          "abbreviation": "P1",
+          "name": "Pass task",
+          "target_grade": 0,
+          "tutorial_stream_abbr": "Main Feedback",
+          "start_date": "2026-03-01",
+          "target_date": "2026-03-08",
+          "due_date": "2026-03-10"
+        },
+        {
+          "id": 502,
+          "abbreviation": "P2",
+          "name": "Other stream task",
+          "target_grade": 0,
+          "tutorial_stream_abbr": "Alternate Feedback"
+        },
+        {
+          "id": 503,
+          "abbreviation": "C1",
+          "name": "Credit task",
+          "target_grade": 1,
+          "tutorial_stream_abbr": "Main Feedback"
+        }
+      ]
+    }
+  }
+}

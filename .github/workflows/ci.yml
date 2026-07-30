@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+    tags: ['v*']
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify Bun CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@ecf28ddc73e819eb6fa29df6b34ef8921c743461 # v2.1.3
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-1.3.14-${{ hashFiles('bun.lock') }}
+
+      - name: Verify Bun runtime
+        run: test "$(bun --version)" = "1.3.14"
+
+      - name: Install exactly from the lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test and enforce 80% core coverage
+        run: bun run test:coverage
+
+      - name: Audit lockfile dependencies
+        run: bun audit
+
+      - name: Build package
+        run: bun run build
+
+      - name: Smoke built CLI help
+        run: |
+          bun dist/cli.js --help
+          bun dist/cli.js auth-method --help
+
+      - name: Pack one release candidate
+        run: |
+          mkdir -p artifacts
+          bun pm pack --ignore-scripts --destination artifacts --quiet
+          bun scripts/verify-package.ts artifacts/*.tgz
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ci-coverage-${{ github.sha }}
+          path: coverage/lcov.info
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-package-${{ github.sha }}
+          path: artifacts/*.tgz
+          if-no-files-found: error
+          retention-days: 14

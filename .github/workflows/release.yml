@@ -1,0 +1,249 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated vX.Y.Z tag to verify and release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-pack:
+    name: Validate tag and pack one release artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      tarball: ${{ steps.metadata.outputs.tarball }}
+      manifest: ${{ steps.metadata.outputs.manifest }}
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate untrusted tag input format
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag must have vX.Y.Z form" >&2; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@ecf28ddc73e819eb6fa29df6b34ef8921c743461 # v2.1.3
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-1.3.14-${{ hashFiles('bun.lock') }}
+
+      - name: Validate annotated tag, version, and master ancestry
+        id: metadata
+        run: |
+          test "$(git cat-file -t "$TAG")" = tag
+          SOURCE_SHA="$(git rev-list -n 1 "$TAG")"
+          git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/master
+          VERSION="$(bun -e 'console.log((await Bun.file("package.json").json()).version)')"
+          test "$TAG" = "v$VERSION"
+          TARBALL="ontrack-cli-$VERSION.tgz"
+          MANIFEST="$TARBALL.sha256"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "tarball=$TARBALL"
+            echo "manifest=$MANIFEST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install exactly from the lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck, test, audit, and build
+        run: |
+          bun run typecheck
+          bun run test:coverage
+          bun audit
+          bun run build
+          bun dist/cli.js --help
+          bun dist/cli.js auth-method --help
+
+      - name: Pack and verify the only release artifact
+        env:
+          TARBALL: ${{ steps.metadata.outputs.tarball }}
+          MANIFEST: ${{ steps.metadata.outputs.manifest }}
+        run: |
+          mkdir -p artifacts
+          bun pm pack --ignore-scripts --destination artifacts --quiet
+          test -f "artifacts/$TARBALL"
+          bun scripts/verify-package.ts "artifacts/$TARBALL"
+          (
+            cd artifacts
+            sha256sum "$TARBALL" > "$MANIFEST"
+            sha256sum --check "$MANIFEST"
+          )
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ steps.metadata.outputs.tag }}
+          path: |
+            artifacts/${{ steps.metadata.outputs.tarball }}
+            artifacts/${{ steps.metadata.outputs.manifest }}
+          if-no-files-found: error
+          retention-days: 30
+
+  create-draft-release:
+    name: Create or verify draft GitHub Release
+    needs: validate-and-pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ needs.validate-and-pack.outputs.tag }}
+          path: artifacts
+
+      - name: Verify release artifact checksum
+        env:
+          MANIFEST: ${{ needs.validate-and-pack.outputs.manifest }}
+        run: |
+          cd artifacts
+          sha256sum --check "$MANIFEST"
+
+      - name: Create draft without replacing any existing asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-and-pack.outputs.tag }}
+          TARBALL: ${{ needs.validate-and-pack.outputs.tarball }}
+          MANIFEST: ${{ needs.validate-and-pack.outputs.manifest }}
+        run: |
+          if gh release view "$TAG" --json isDraft > existing-draft.json 2>/dev/null; then
+            test "$(jq -r '.isDraft' existing-draft.json)" = true
+          else
+            gh release create "$TAG" "artifacts/$TARBALL" --draft --generate-notes --verify-tag
+          fi
+          gh release view "$TAG" --json isDraft,assets > verified-draft.json
+          test "$(jq -r '.isDraft' verified-draft.json)" = true
+          test "$(jq -r '.assets | length' verified-draft.json)" = 1
+          test "$(jq -r '.assets[0].name' verified-draft.json)" = "$TARBALL"
+          mkdir verified-release
+          gh release download "$TAG" --pattern "$TARBALL" --dir verified-release
+          EXPECTED_SHA="$(cut -d ' ' -f 1 "artifacts/$MANIFEST")"
+          ACTUAL_SHA="$(sha256sum "verified-release/$TARBALL" | cut -d ' ' -f 1)"
+          test "$EXPECTED_SHA" = "$ACTUAL_SHA"
+
+  publish-npm:
+    name: Publish verified artifact to npm with OIDC
+    needs: [validate-and-pack, create-draft-release]
+    if: vars.PUBLISH_TO_NPM == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ needs.validate-and-pack.outputs.tag }}
+          path: artifacts
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Verify artifact checksum and unpublished version
+        env:
+          PACKAGE_NAME: ontrack-cli
+          VERSION: ${{ needs.validate-and-pack.outputs.version }}
+          TARBALL: ${{ needs.validate-and-pack.outputs.tarball }}
+          MANIFEST: ${{ needs.validate-and-pack.outputs.manifest }}
+        run: |
+          (
+            cd artifacts
+            sha256sum --check "$MANIFEST"
+          )
+          if npm view "$PACKAGE_NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "refusing to overwrite immutable registry version $PACKAGE_NAME@$VERSION" >&2
+            exit 1
+          fi
+          npm --version
+          npm publish "artifacts/$TARBALL" --provenance
+
+  verify-registry-and-publish-release:
+    name: Verify registry and publish approved GitHub Release
+    needs: [validate-and-pack, create-draft-release, publish-npm]
+    if: ${{ always() && needs.validate-and-pack.result == 'success' && needs.create-draft-release.result == 'success' && (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ needs.validate-and-pack.outputs.tag }}
+          path: artifacts
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: vars.PUBLISH_TO_NPM == 'true'
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Verify artifact checksum and registry integrity
+        env:
+          PACKAGE_NAME: ontrack-cli
+          VERSION: ${{ needs.validate-and-pack.outputs.version }}
+          TARBALL: ${{ needs.validate-and-pack.outputs.tarball }}
+          MANIFEST: ${{ needs.validate-and-pack.outputs.manifest }}
+          PUBLISH_TO_NPM: ${{ vars.PUBLISH_TO_NPM }}
+        run: |
+          (
+            cd artifacts
+            sha256sum --check "$MANIFEST"
+          )
+          if test "$PUBLISH_TO_NPM" = true; then
+            test "$(npm view "$PACKAGE_NAME@$VERSION" name)" = "$PACKAGE_NAME"
+            test "$(npm view "$PACKAGE_NAME@$VERSION" version)" = "$VERSION"
+            EXPECTED_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "artifacts/$TARBALL" | openssl base64 -A)"
+            test "$(npm view "$PACKAGE_NAME@$VERSION" dist.integrity)" = "$EXPECTED_INTEGRITY"
+          fi
+
+      - name: Publish the approved draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-and-pack.outputs.tag }}
+          TARBALL: ${{ needs.validate-and-pack.outputs.tarball }}
+          MANIFEST: ${{ needs.validate-and-pack.outputs.manifest }}
+        run: |
+          gh release view "$TAG" --json isDraft,assets > verified-draft.json
+          test "$(jq -r '.isDraft' verified-draft.json)" = true
+          test "$(jq -r '.assets | length' verified-draft.json)" = 1
+          test "$(jq -r '.assets[0].name' verified-draft.json)" = "$TARBALL"
+          mkdir verified-release
+          gh release download "$TAG" --pattern "$TARBALL" --dir verified-release
+          EXPECTED_SHA="$(cut -d ' ' -f 1 "artifacts/$MANIFEST")"
+          ACTUAL_SHA="$(sha256sum "verified-release/$TARBALL" | cut -d ' ' -f 1)"
+          test "$EXPECTED_SHA" = "$ACTUAL_SHA"
+          gh release edit "$TAG" --draft=false

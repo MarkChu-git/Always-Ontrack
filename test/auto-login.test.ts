@@ -73,6 +73,24 @@ test('extractCredentialsFromAuthPayload supports camelCase authToken', () => {
   });
 });
 
+test('extractCredentialsFromAuthPayload captures access-token expiry and nested user identity', () => {
+  const parsed = extractCredentialsFromAuthPayload({
+    auth_token: 'refreshed-token',
+    auth_token_expiry: '2030-01-01T00:00:00.000Z',
+    user: {
+      username: 'student3',
+      role: 'Student',
+    },
+  });
+
+  assert.deepEqual(parsed, {
+    authToken: 'refreshed-token',
+    username: 'student3',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    source: 'auth_request',
+  });
+});
+
 test('extractCredentialsFromCookieJar parses credentials when both values exist', () => {
   const parsed = extractCredentialsFromCookieJar([
     { name: 'auth_token', value: 'cookie-token', domain: 'ontrack.infotech.monash.edu' },

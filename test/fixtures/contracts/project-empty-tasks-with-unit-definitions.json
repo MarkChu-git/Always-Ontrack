@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "id": "project-empty-tasks-with-unit-definitions",
+    "schemaVersion": 1,
+    "method": "GET",
+    "route": "/projects/:projectId",
+    "provenance": {
+      "observedAt": "2026-07-31",
+      "role": "student",
+      "risk": "read-only",
+      "trust": "student-verified"
+    }
+  },
+  "payload": {
+    "project": {
+      "id": 1001,
+      "tasks": [],
+      "unit_id": 2001
+    },
+    "unit": {
+      "id": 2001,
+      "task_definitions": [
+        { "abbreviation": "T1", "id": 3001, "name": "Task 1" },
+        { "abbreviation": "T2", "id": 3002, "name": "Task 2" }
+      ]
+    }
+  }
+}

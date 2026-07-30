@@ -11,6 +11,8 @@ import type {
   TaskSummary,
   WatchEvent,
 } from './types.js';
+import { buildStudentTaskRows } from './student-task-view.js';
+import type { StudentTaskRow } from './student-task-view.js';
 
 /**
  * Cross-cutting CLI helpers:
@@ -552,6 +554,14 @@ export const SENSITIVE_QUERY_KEYS = new Set([
   'state',
   'id_token',
   'access_token',
+  'api_key',
+  'apikey',
+  'email',
+  'username',
+  'phone',
+  'mobile',
+  'cookie',
+  'secret',
 ]);
 
 /** Redact sensitive query params in a URL while preserving non-sensitive context. */
@@ -571,7 +581,7 @@ function redactQueryParams(rawUrl: string): string {
 
 const URL_PATTERN = /https?:\/\/[^\s)"']+/gi;
 const SENSITIVE_FIELD_NAME =
-  'auth[-_]?token|password|passcode|session[-_]?token|id[-_]?token|access[-_]?token|code|state';
+  'auth[-_]?token|password|passcode|session[-_]?token|id[-_]?token|access[-_]?token|api[-_]?key|cookie|secret|email|username|phone|mobile|address|code|state';
 const QUOTED_SENSITIVE_FIELD_PATTERN = new RegExp(
   `("(?:${SENSITIVE_FIELD_NAME})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`,
   'gi',
@@ -580,7 +590,12 @@ const UNQUOTED_SENSITIVE_FIELD_PATTERN = new RegExp(
   `\\b((?:${SENSITIVE_FIELD_NAME})\\b\\s*[:=]\\s*)(?!\\[REDACTED\\])([^\\s,;}&\\]]+)`,
   'gi',
 );
-const BEARER_AUTHORIZATION_PATTERN = /\b(authorization\s*:\s*bearer\s+)([^\s,;]+)/gi;
+const AUTHORIZATION_PATTERN =
+  /\b(authorization\s*:\s*)(?:bearer|basic)\s+[^\s,;]+/gi;
+const EMAIL_PATTERN = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi;
+const PHONE_PATTERN = /\+?\d(?:[\s().-]*\d){9,}/g;
+const PRIVATE_KEY_BLOCK_PATTERN =
+  /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?(?:-----END(?: [A-Z0-9]+)* PRIVATE KEY-----|$)/gi;
 
 /**
  * Redact token/password fields from free-form error strings.
@@ -589,9 +604,12 @@ const BEARER_AUTHORIZATION_PATTERN = /\b(authorization\s*:\s*bearer\s+)([^\s,;]+
 export function redactSensitiveText(value: string): string {
   let output = value;
   output = output.replace(URL_PATTERN, (match) => redactQueryParams(match));
-  output = output.replace(BEARER_AUTHORIZATION_PATTERN, '$1[REDACTED]');
+  output = output.replace(PRIVATE_KEY_BLOCK_PATTERN, '[REDACTED]');
+  output = output.replace(AUTHORIZATION_PATTERN, '$1[REDACTED]');
   output = output.replace(QUOTED_SENSITIVE_FIELD_PATTERN, '$1"[REDACTED]"');
   output = output.replace(UNQUOTED_SENSITIVE_FIELD_PATTERN, '$1[REDACTED]');
+  output = output.replace(EMAIL_PATTERN, '[REDACTED]');
+  output = output.replace(PHONE_PATTERN, '[REDACTED]');
   return output;
 }
 
@@ -608,17 +626,18 @@ export function toRedactedError(error: unknown): RedactedError {
 }
 
 /** Resolve task definition id across schema variants and fallback fields. */
-export function getTaskDefinitionId(task: TaskSummary): number | undefined {
+type TaskLike = Partial<TaskSummary>;
+
+export function getTaskDefinitionId(task: TaskLike): number | undefined {
   return (
     toInteger(task.definition?.id) ??
     toInteger(task.taskDefinitionId) ??
-    toInteger(task.task_definition_id) ??
-    toInteger(task.id)
+    toInteger(task.task_definition_id)
   );
 }
 
 /** Resolve task abbreviation across both normalized and raw payload forms. */
-export function getTaskAbbreviation(task: TaskSummary): string | undefined {
+export function getTaskAbbreviation(task: TaskLike): string | undefined {
   return (
     toStringValue(task.definition?.abbreviation) ??
     toStringValue(task.abbreviation) ??
@@ -627,49 +646,66 @@ export function getTaskAbbreviation(task: TaskSummary): string | undefined {
 }
 
 /** Resolve human-readable task name with fallback between definition/name fields. */
-export function getTaskName(task: TaskSummary): string | undefined {
+export function getTaskName(task: TaskLike): string | undefined {
   return toStringValue(task.definition?.name) ?? toStringValue(task.name);
 }
 
 /** Resolve due date string from mixed camelCase/snake_case payloads. */
-export function getTaskDueDate(task: TaskSummary): string | undefined {
+export function getTaskDueDate(task: TaskLike): string | undefined {
   return toStringValue(task.dueDate) ?? toStringValue(task.due_date);
 }
 
 /** Resolve completion date string from mixed payload variants. */
-export function getTaskCompletionDate(task: TaskSummary): string | undefined {
+export function getTaskCompletionDate(task: TaskLike): string | undefined {
   return toStringValue(task.completionDate) ?? toStringValue(task.completion_date);
 }
 
 /** Resolve canonical task status text. */
-export function getTaskStatus(task: TaskSummary): string | undefined {
+export function getTaskStatus(task: TaskLike): string | undefined {
   return toStringValue(task.status);
 }
 
-/** Compare two task payloads by task id first, then task-definition id fallback. */
-function isSameTask(left: TaskSummary, right: TaskSummary): boolean {
-  const leftTaskId = toInteger(left.id);
-  const rightTaskId = toInteger(right.id);
-  if (leftTaskId !== undefined && rightTaskId !== undefined && leftTaskId === rightTaskId) {
-    return true;
-  }
-
+/** Compare tasks only by explicit task-definition identity. */
+function isSameTask(left: TaskLike, right: TaskLike): boolean {
   const leftDefId = getTaskDefinitionId(left);
   const rightDefId = getTaskDefinitionId(right);
   return leftDefId !== undefined && rightDefId !== undefined && leftDefId === rightDefId;
 }
 
-/** Locate a task by raw task id or task definition id. */
-function findTaskById(tasks: TaskSummary[], taskId: number): TaskSummary | undefined {
-  return tasks.find((task) => {
-    const rawId = toInteger(task.id);
-    const taskDefId = getTaskDefinitionId(task);
-    return rawId === taskId || taskDefId === taskId;
-  });
+/** Locate a task by explicit task-definition id. */
+function findTaskByDefinitionId(
+  tasks: StudentTaskRow[],
+  taskDefinitionId: number,
+): StudentTaskRow | undefined {
+  return tasks.find((task) => getTaskDefinitionId(task) === taskDefinitionId);
+}
+
+/**
+ * Resolve the deprecated --task-id compatibility selector without allowing
+ * definition and instance identities to silently select different tasks.
+ */
+function findTaskByLegacyId(
+  tasks: StudentTaskRow[],
+  legacyTaskId: number,
+): StudentTaskRow | undefined {
+  const matches = tasks.filter(
+    (task) =>
+      getTaskDefinitionId(task) === legacyTaskId ||
+      task.taskInstanceId === legacyTaskId,
+  );
+  const byDefinition = new Map(
+    matches.map((task) => [getTaskDefinitionId(task), task]),
+  );
+  if (byDefinition.size > 1) {
+    throw new Error(
+      `Legacy task id ${legacyTaskId} is ambiguous between task definition and instance identities. Use --task-definition-id.`,
+    );
+  }
+  return matches[0];
 }
 
 /** Locate a task by abbreviation and guard against ambiguous duplicates. */
-function findTaskByAbbr(tasks: TaskSummary[], abbr: string): TaskSummary | undefined {
+function findTaskByAbbr(tasks: StudentTaskRow[], abbr: string): StudentTaskRow | undefined {
   const normalized = abbr.toLowerCase();
   const matches = tasks.filter((task) => (getTaskAbbreviation(task) || '').toLowerCase() === normalized);
 
@@ -683,16 +719,19 @@ function findTaskByAbbr(tasks: TaskSummary[], abbr: string): TaskSummary | undef
 export interface ResolvedTaskSelector {
   selector: TaskSelector;
   project: ProjectSummary;
-  task: TaskSummary;
+  task: StudentTaskRow;
   taskDefId: number;
-  taskId: number;
+  taskInstanceId?: number;
   abbr: string;
   unitId?: number;
   unitCode?: string;
 }
 
 /** Parse one or more values from repeated/comma-separated task selector flags. */
-function parseSelectorValues(args: string[], flag: '--task-id' | '--abbr'): string[] {
+function parseSelectorValues(
+  args: string[],
+  flag: '--task-definition-id' | '--task-id' | '--abbr',
+): string[] {
   const rawValues = getFlagValues(args, flag);
   const values: string[] = [];
   for (const raw of rawValues) {
@@ -717,24 +756,49 @@ function parseSelectorValues(args: string[], flag: '--task-id' | '--abbr'): stri
 export function parseTaskBatchSelectorArgs(args: string[]): TaskBatchSelector {
   const projectId = parseIntegerFlagValue(getFlagValue(args, '--project-id'), '--project-id');
   const allTasks = hasFlag(args, '--all-tasks');
+  const taskDefinitionIdTokens = parseSelectorValues(args, '--task-definition-id');
   const taskIdTokens = parseSelectorValues(args, '--task-id');
   const abbrTokens = parseSelectorValues(args, '--abbr');
 
-  if (allTasks && (taskIdTokens.length > 0 || abbrTokens.length > 0)) {
-    throw new Error('Do not combine --all-tasks with --task-id/--abbr selectors.');
+  if (taskIdTokens.length > 0) {
+    console.error(
+      '[deprecated] --task-id is deprecated because it mixes task definition and instance identity. Use --task-definition-id.',
+    );
   }
 
+  if (
+    allTasks &&
+    (taskDefinitionIdTokens.length > 0 || taskIdTokens.length > 0 || abbrTokens.length > 0)
+  ) {
+    throw new Error(
+      'Do not combine --all-tasks with --task-definition-id/--task-id/--abbr selectors.',
+    );
+  }
+
+  const taskDefinitionIds = [
+    ...new Set(
+      taskDefinitionIdTokens.map((raw) =>
+        parseIntegerFlagValue(raw, '--task-definition-id'),
+      ),
+    ),
+  ];
   const taskIds = [...new Set(taskIdTokens.map((raw) => parseIntegerFlagValue(raw, '--task-id')))];
   const abbrs = [...new Set(abbrTokens.map((abbr) => abbr.trim()).filter((abbr) => abbr.length > 0))];
 
-  if (!allTasks && taskIds.length === 0 && abbrs.length === 0) {
+  if (
+    !allTasks &&
+    taskDefinitionIds.length === 0 &&
+    taskIds.length === 0 &&
+    abbrs.length === 0
+  ) {
     throw new Error(
-      'Task-level commands require --all-tasks, or at least one --task-id <id> / --abbr <abbr> selector.',
+      'Task-level commands require --all-tasks, or at least one --task-definition-id <id> / --task-id <legacy-id> / --abbr <abbr> selector.',
     );
   }
 
   return {
     projectId,
+    taskDefinitionIds,
     taskIds,
     abbrs,
     allTasks,
@@ -744,14 +808,19 @@ export function parseTaskBatchSelectorArgs(args: string[]): TaskBatchSelector {
 /** Parse strict single-task selector (`--task-id` or `--abbr`) for mutating commands. */
 export function parseTaskSelectorArgs(args: string[]): TaskSelector {
   const parsed = parseTaskBatchSelectorArgs(args);
-  if (parsed.allTasks || parsed.taskIds.length > 1 || parsed.abbrs.length > 1) {
+  if (
+    parsed.allTasks ||
+    parsed.taskDefinitionIds.length + parsed.taskIds.length > 1 ||
+    parsed.abbrs.length > 1
+  ) {
     throw new Error(
-      'This command expects a single task selector set. Use one --task-id, one --abbr, or one of each referring to the same task.',
+      'This command expects a single task selector set. Use one --task-definition-id, one legacy --task-id, one --abbr, or one id plus a matching abbreviation.',
     );
   }
 
   return {
     projectId: parsed.projectId,
+    taskDefinitionId: parsed.taskDefinitionIds[0],
     taskId: parsed.taskIds[0],
     abbr: parsed.abbrs[0],
   };
@@ -760,7 +829,7 @@ export function parseTaskSelectorArgs(args: string[]): TaskSelector {
 /** Build normalized resolved selector payload from project + concrete task match. */
 function toResolvedTaskSelector(
   project: ProjectSummary,
-  task: TaskSummary,
+  task: StudentTaskRow,
   selector: TaskSelector,
 ): ResolvedTaskSelector {
   const taskDefId = getTaskDefinitionId(task);
@@ -768,17 +837,15 @@ function toResolvedTaskSelector(
     throw new Error('Resolved task does not contain a task definition id.');
   }
 
-  const taskId = toInteger(task.id);
-  if (taskId === undefined) {
-    throw new Error('Resolved task does not contain a task id.');
-  }
+  const taskInstanceId = toInteger(task.taskInstanceId) ?? toInteger(task.id);
 
   return {
     selector,
     project,
     task,
     taskDefId,
-    taskId,
+    taskInstanceId:
+      task.isInstantiated === false ? undefined : taskInstanceId,
     abbr: getTaskAbbreviation(task) || selector.abbr || String(taskDefId),
     unitId: toInteger(project.unit?.id),
     unitCode: toStringValue(project.unit?.code),
@@ -795,15 +862,31 @@ export function resolveTaskSelector(
     throw new Error(`Project ${selector.projectId} not found.`);
   }
 
-  const tasks = project.tasks || [];
+  const tasks = buildStudentTaskRows([project], {
+    includeBeyondTarget: true,
+    includeTutorialMismatches: true,
+    includeUnknown: true,
+  });
   if (tasks.length === 0) {
     throw new Error(`Project ${selector.projectId} has no tasks.`);
   }
 
+  const byTaskDefinitionId =
+    selector.taskDefinitionId !== undefined
+      ? findTaskByDefinitionId(tasks, selector.taskDefinitionId)
+      : undefined;
+  if (selector.taskDefinitionId !== undefined && !byTaskDefinitionId) {
+    throw new Error(
+      `Task definition id ${selector.taskDefinitionId} was not found in project ${selector.projectId}.`,
+    );
+  }
+
   const byTaskId =
-    selector.taskId !== undefined ? findTaskById(tasks, selector.taskId) : undefined;
+    selector.taskId !== undefined ? findTaskByLegacyId(tasks, selector.taskId) : undefined;
   if (selector.taskId !== undefined && !byTaskId) {
-    throw new Error(`Task id ${selector.taskId} was not found in project ${selector.projectId}.`);
+    throw new Error(
+      `Legacy task id ${selector.taskId} was not found in project ${selector.projectId}.`,
+    );
   }
 
   const byAbbr = selector.abbr ? findTaskByAbbr(tasks, selector.abbr) : undefined;
@@ -811,11 +894,14 @@ export function resolveTaskSelector(
     throw new Error(`Task abbreviation "${selector.abbr}" was not found in project ${selector.projectId}.`);
   }
 
-  if (byTaskId && byAbbr && !isSameTask(byTaskId, byAbbr)) {
-    throw new Error('--task-id and --abbr refer to different tasks. Please provide matching values.');
+  const idMatch = byTaskDefinitionId ?? byTaskId;
+  if (idMatch && byAbbr && !isSameTask(idMatch, byAbbr)) {
+    throw new Error(
+      `${byTaskDefinitionId ? '--task-definition-id' : '--task-id'} and --abbr refer to different tasks. Please provide matching values.`,
+    );
   }
 
-  const task = byTaskId || byAbbr;
+  const task = idMatch ?? byAbbr;
   if (!task) {
     throw new Error(`Unable to resolve task for project ${selector.projectId}.`);
   }
@@ -833,16 +919,20 @@ export function resolveTaskBatchSelector(
     throw new Error(`Project ${selector.projectId} not found.`);
   }
 
-  const tasks = project.tasks || [];
+  const tasks = buildStudentTaskRows([project], {
+    includeBeyondTarget: true,
+    includeTutorialMismatches: true,
+    includeUnknown: true,
+  });
   if (tasks.length === 0) {
     throw new Error(`Project ${selector.projectId} has no tasks.`);
   }
 
   const resolved: ResolvedTaskSelector[] = [];
   const seen = new Set<string>();
-  const pushResolved = (task: TaskSummary, taskSelector: TaskSelector): void => {
+  const pushResolved = (task: StudentTaskRow, taskSelector: TaskSelector): void => {
     const item = toResolvedTaskSelector(project, task, taskSelector);
-    const key = `${item.taskId}:${item.taskDefId}`;
+    const key = String(item.taskDefId);
     if (seen.has(key)) {
       return;
     }
@@ -852,15 +942,28 @@ export function resolveTaskBatchSelector(
 
   if (selector.allTasks) {
     for (const task of tasks) {
-      pushResolved(task, { projectId: selector.projectId, taskId: getTaskDefinitionId(task) });
+      pushResolved(task, {
+        projectId: selector.projectId,
+        taskDefinitionId: getTaskDefinitionId(task),
+      });
     }
     return resolved;
   }
 
-  for (const taskId of selector.taskIds) {
-    const matched = findTaskById(tasks, taskId);
+  for (const taskDefinitionId of selector.taskDefinitionIds ?? []) {
+    const matched = findTaskByDefinitionId(tasks, taskDefinitionId);
     if (!matched) {
-      throw new Error(`Task id ${taskId} was not found in project ${selector.projectId}.`);
+      throw new Error(
+        `Task definition id ${taskDefinitionId} was not found in project ${selector.projectId}.`,
+      );
+    }
+    pushResolved(matched, { projectId: selector.projectId, taskDefinitionId });
+  }
+
+  for (const taskId of selector.taskIds) {
+    const matched = findTaskByLegacyId(tasks, taskId);
+    if (!matched) {
+      throw new Error(`Legacy task id ${taskId} was not found in project ${selector.projectId}.`);
     }
     pushResolved(matched, { projectId: selector.projectId, taskId });
   }
@@ -1044,7 +1147,7 @@ export function getLatestFeedbackTimestamp(feedback: FeedbackItem[]): string | u
 export interface WatchTaskState {
   taskKey: string;
   projectId: number;
-  taskId: number;
+  taskDefinitionId: number;
   unitCode?: string;
   abbr?: string;
   status?: string;
@@ -1054,8 +1157,8 @@ export interface WatchTaskState {
 }
 
 /** Build stable map key for watch state by project + task-definition identity. */
-export function makeWatchTaskKey(projectId: number, taskId: number): string {
-  return `${projectId}:${taskId}`;
+export function makeWatchTaskKey(projectId: number, taskDefinitionId: number): string {
+  return `${projectId}:${taskDefinitionId}`;
 }
 
 /** Convert task-state array into key-addressable map for diffing. */
@@ -1085,7 +1188,7 @@ export function diffWatchStates(
         type: 'status_changed',
         taskKey,
         projectId: next.projectId,
-        taskId: next.taskId,
+        taskDefinitionId: next.taskDefinitionId,
         unitCode: next.unitCode,
         abbr: next.abbr,
         previous: prev.status || null,
@@ -1099,7 +1202,7 @@ export function diffWatchStates(
         type: 'due_changed',
         taskKey,
         projectId: next.projectId,
-        taskId: next.taskId,
+        taskDefinitionId: next.taskDefinitionId,
         unitCode: next.unitCode,
         abbr: next.abbr,
         previous: prev.dueDate || null,
@@ -1116,7 +1219,7 @@ export function diffWatchStates(
         type: 'new_feedback',
         taskKey,
         projectId: next.projectId,
-        taskId: next.taskId,
+        taskDefinitionId: next.taskDefinitionId,
         unitCode: next.unitCode,
         abbr: next.abbr,
         previous: prev.lastCommentAt || null,

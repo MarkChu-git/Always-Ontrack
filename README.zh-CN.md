@@ -125,7 +125,7 @@ bun run dev -- auth-method
 
 - `7/8/11/12` 支持引导单任务与批量任务选择
 - 可以选 `single`、`multiple`（逗号分隔）或 `all tasks`
-- 任务输入支持 task 代号（如 `P1`、`D4`）或数字 task id
+- 任务输入支持 task 代号（如 `P1`、`D4`）或数字 task definition id
 - 也支持切换到手动输入 `--project-id` + selector
 - 上传动作 `13/14` 仍保持单任务引导，避免误上传
 
@@ -202,15 +202,19 @@ ontrack pdf submission --project-id 87 --abbr D4
 ontrack pdf task --project-id 87 --all-tasks
 ```
 
-### 8. 上传 submission 或补充文件
+### 8. 先预检，再确认上传 submission 或补充文件
 
 ```bash
 ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
+ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
 ```
 
 ```bash
 ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf
+ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf --confirm
 ```
+
+不带 `--confirm` 时，两条命令都只做安全预检，不发送写请求。
 
 ## 核心概念
 
@@ -238,9 +242,9 @@ ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.
 
 相比纯数字 ID，`--abbr` 更适合日常使用。
 
-### `taskId`
+### `taskDefinitionId`
 
-CLI 支持 `--task-id`，但实际使用里更推荐优先用 `--abbr`，因为更稳定、更易读。
+数字选择器请使用无歧义的 `--task-definition-id`。旧 `--task-id` 仅作为弃用兼容 Adapter：它可解析唯一的旧 task instance/definition id，会在 stderr 提示弃用，并在 identity 冲突时拒绝执行。
 
 ### 批量任务选择器
 
@@ -248,7 +252,7 @@ CLI 支持 `--task-id`，但实际使用里更推荐优先用 `--abbr`，因为�
 
 - 重复参数：`--abbr P1 --abbr D4`
 - 逗号参数：`--abbr P1,D4`
-- 混合参数：`--task-id 501 --abbr D4`
+- 混合参数：`--task-definition-id 501 --abbr D4`
 - 整个项目：`--all-tasks`
 
 ### `--json`
@@ -384,8 +388,8 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
 | `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
-| `ontrack submission upload ...` | 上传 submission | 可选 `--trigger`、`--comment` |
-| `ontrack submission upload-new-files ...` | 追加/补充 evidence 文件 | 不强制默认 trigger |
+| `ontrack submission upload ...` | 预检或上传 submission | 默认 dry-run；`--confirm` 才单次 dispatch；可选 `--trigger`、`--comment` |
+| `ontrack submission upload-new-files ...` | 预检或追加 evidence 文件 | 必须先观察到 existing submission；默认 dry-run；`--confirm` 才单次 dispatch |
 
 ### 诊断与接口发现
 
@@ -481,20 +485,21 @@ FIT1045_D4_submission.pdf
 
 ### 工作流 5: 上传 submission
 
-最简单的上传:
+安全预检:
 
 ```bash
 ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
 ```
 
-上传多个文件:
+确认上传多个文件:
 
 ```bash
 ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --file ./demo.mp4
+  --file ./demo.mp4 \
+  --confirm
 ```
 
 显式映射上传键:
@@ -504,7 +509,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file file0=./report.pdf \
-  --file file1=./demo.mp4
+  --file file1=./demo.mp4 \
+  --confirm
 ```
 
 上传后顺便发评论:
@@ -514,7 +520,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --comment "Updated submission with revised report."
+  --comment "Updated submission with revised report." \
+  --confirm
 ```
 
 显式指定 trigger:
@@ -524,7 +531,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --trigger ready_for_feedback
+  --trigger ready_for_feedback \
+  --confirm
 ```
 
 ### submission upload 和 submission upload-new-files 的区别
@@ -535,6 +543,7 @@ ontrack submission upload \
   - 其他情况交给服务端默认行为
 - `submission upload-new-files`
   - 更接近“补充证据 / new evidence”
+  - 必须先由 `submission status` 证明 existing submission
   - 不主动施加默认 trigger
 
 ### 上传文件匹配规则
@@ -546,8 +555,9 @@ ontrack submission upload \
 - 至少提供一个 `--file`
 - 如果任务要求 2 个文件，你就必须传 2 个文件
 - 如果同时提供显式 key 和普通路径，CLI 会把未指定 key 的路径按剩余 key 顺序补齐
-- 如果 `--task-id` 和 `--abbr` 同时存在，必须指向同一个任务
-- 如果使用 `--all-tasks`，不要再同时传 `--task-id` 或 `--abbr`
+- 如果 `--task-definition-id` 和 `--abbr` 同时存在，必须指向同一个任务
+- 弃用的 `--task-id` 只有在 legacy definition/instance 含义唯一时才接受
+- 如果使用 `--all-tasks`，不要再同时传任何 id selector 或 `--abbr`
 
 ## 输出、高亮与 JSON
 
@@ -825,7 +835,7 @@ ontrack login
 说明同一个 project 里任务缩写不够唯一。改用:
 
 ```bash
-ontrack task show --project-id <id> --task-id <id>
+ontrack task show --project-id <id> --task-definition-id <id>
 ```
 
 ### `Upload key mismatch` 或文件数量不匹配
@@ -841,7 +851,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file file0=./report.pdf \
-  --file file1=./demo.mp4
+  --file file1=./demo.mp4 \
+  --confirm
 ```
 
 ### 没有颜色高亮

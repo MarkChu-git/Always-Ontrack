@@ -62,9 +62,9 @@
    - 页面加载时通过 `POST /api/auth/access-token` 获取新的 `auth_token`、`auth_token_expiry` 和 user。
    - 当前 CLI 仍重点依赖 redirect query、`doubtfire_credentials_token` 和 `doubtfire_user` 等旧捕获路径。
 
-3. **提交不是单次 multipart POST 那么简单。**
-   - 打开上传向导即进入一个临时 submission 状态。
-   - 取消会显式执行状态回滚。
+3. **提交在 UI 上是多阶段流程，但已观察的写合同是单次 multipart POST。**
+   - 打开上传向导时客户端可先显示临时 submission 状态。
+   - 在真正 dispatch 前取消会恢复 UI 状态；未观察到独立 server begin/cancel/rollback endpoint。
    - 上传要求是逐项 evidence slot，并有 `File Pending`、Next、Upload new files、异步 PDF processing 等阶段。
 
 4. **due date 已拆成多种日期语义。**
@@ -213,9 +213,9 @@ Task Planner 是一个新的核心工作流，不是附属页面：
 
 一个需要特别处理的真实语义：
 
-> 打开 Upload Submission 向导时，页面会先进入临时 `Ready for Feedback` 状态；点击 `Cancel Submission` 后才回滚为原状态。
+> 打开 Upload Submission 向导时，页面会先显示临时 `Ready for Feedback` 状态；点击 `Cancel Submission` 后恢复为原状态。
 
-这意味着 CLI 的上传实现必须具备事务式补偿逻辑，不能只依赖“POST 失败就什么都没发生”的假设。
+网络证据只确认了一次 multipart POST，没有确认独立 server begin/cancel/rollback。因此 CLI 实现采用本地 preflight → 单次 dispatch → failed/unknown/accepted/observed-success：dispatch 前取消不发请求，明确 HTTP rejection 是 failed，transport 无法证明结果时才是 unknown，2xx 后还会读取 status；任何不明结果都不自动重试，也不伪造补偿成功。
 
 ### 3.6 Portfolio
 
@@ -398,21 +398,21 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 
 | 现有命令/模块 | 结论 | 风险 | 原因 |
 |---|---|---:|---|
-| `login` | 需要重做生命周期 | P0 | 新前端运行时通过 `POST /auth/access-token` 换票，旧 localStorage 捕获假设不足 |
-| `logout` | 已确认不兼容 | P0 | 真实执行返回 `400 remember is missing`；现有 `DELETE /auth` 请求缺新必填语义 |
-| `whoami --json` | 安全缺陷 | P0 | 会序列化完整 session，包括 `authToken` |
-| `whoami` | 仅显示缓存，不验证在线性 | P1 | 旧缓存仍可显示身份，但生产请求已返回 419 |
+| `login` | 核心生命周期已修复 | P1 | access-token response 可捕获 nested identity/expiry；真实 Okta DOM 仍需周期 Ego smoke |
+| `logout` | 已修复 | - | 使用已观察的 `DELETE /auth?remember=false`，本地清理不依赖远端成功 |
+| `whoami --json` | 已修复 | - | 只输出 security identity allowlist，不再序列化 credential |
+| `whoami` | 已加 credential lifecycle gate | P2 | expiry 已知时本地 fail-fast；legacy expiry 未知时交由 server 验证 |
 | `projects` | endpoint 存在，但模型偏旧 | P1 | summary 更轻，新增动态 grade/portfolio/escalation |
 | `units` | 需要以 project + unit detail 聚合 | P1 | Web 主要由 project summary 选 unit，再加载 `/units/:id` |
-| `tasks` | 核心逻辑失真 | P0 | `project.tasks=[]`，但 UI 从 unit task definitions 派生任务 |
-| `task show` | 可能找不到尚未实例化的任务 | P0 | 当前 task selector 依赖 task instance/definition ID 混合匹配 |
+| `tasks` | 已修复 | - | StudentTaskView 从 unit definitions 派生，并显式连接可选 instance |
+| `task show` | 已修复 | - | selector 统一使用 taskDefinitionId，未实例化任务可读取 |
 | `inbox` | 路由仍在，需重新实测 | P1 | bundle 保留 endpoint，但未在本次学生主流程中触发 |
 | `feedback list/watch` | endpoint 基础仍在，模型不足 | P1 | comments 保留，但缺附件、语音、discussion thread/review |
 | `watch` | 日期与状态语义不足 | P1 | 需要区分个人计划、unit 默认、feedback deadline 和派生状态 |
 | `pdf task` | 基本合同仍在 | P2 | task PDF endpoint 已确认，Web 现在支持内嵌 viewer |
-| `pdf submission` | 需要 processing 状态 | P1 | 新增 `submission_details.has_pdf/processing_pdf` |
-| `submission upload` | 需要事务式重构 | P0 | 多步骤、临时状态、取消回滚、逐项 evidence slot |
-| `upload-new-files` | UI 能力仍在 | P1 | 需要与当前 submission 状态和 slot 完成度联动 |
+| `pdf submission` | 已修复 | - | 下载前检查 `submission_details` 的 unavailable/processing/ready |
+| `submission upload` | 已修复核心状态机 | - | 默认 dry-run、`--confirm` 单次 POST、明确 rejection/transport unknown/observed success、redacted output、comment failure 隔离 |
+| `upload-new-files` | 已修复核心状态机 | - | 独立读取 `submission_details`，只有已观察到 existing submission 才允许 confirmed dispatch |
 | `discover` | 有价值但规则已漏抓 | P1 | 真实 route/API 多为拼接字符串，现有 literal regex 覆盖不足 |
 | Portfolio/Tutorial/Group/Calendar/Engagement | 完全缺失 | P1/P2 | 已成为真实学生工作流 |
 
@@ -449,7 +449,7 @@ if (hasFlag(args, '--json')) {
 
 ### 6.3 `logout` 合同已经变化
 
-对旧 session 执行当前 `logout`：
+旧 CLI 对旧 session 执行 `DELETE /api/auth`：
 
 ```text
 400 Bad Request: remember is missing
@@ -457,7 +457,13 @@ if (hasFlag(args, '--json')) {
 
 CLI 随后按现有设计清除了本地 session 文件。Ego Lite 的浏览器会话是独立的，未被清除。
 
-这说明远端 logout 请求需要重新抓取和建模；不能假设 `DELETE /auth` 无 body 即可撤销会话。
+随后从 2026-07-31 的生产 bundle `main-573XYQ2E.js` 找到 Web 的真实实现：
+
+```text
+DELETE /api/auth?remember=false
+```
+
+Web 使用 query parameter，而不是 JSON body。CLI 已按该合同实现，并加入精确 URL/method 合同测试；远端注销仍为 best effort，本地 credential 始终清除，远端错误细节保持脱敏。
 
 ## 7. 前端 route 盘点
 
@@ -591,14 +597,14 @@ ontrack engagements
 - discuss
 - complete
 
-### Phase 3：提交与反馈状态机
+### Phase 3：提交与反馈生命周期
 
-1. 把 upload 做成显式 transaction：
-   - begin
-   - upload slots
-   - review
-   - commit/trigger
-   - rollback on cancel/failure
+1. 把 upload 做成显式 lifecycle：
+   - 本地 preflight 与 slot validation
+   - 单次 multipart dispatch
+   - failed / transport unknown / response accepted / status observed
+   - 仅 pre-dispatch local cancel
+   - post-dispatch unknown 时引导只读 status 核验，不自动重试
 2. 对每个 upload requirement 做 schema validation。
 3. 增加 `submission_details` 轮询和 PDF processing 状态。
 4. 评论模型支持附件、音频、discussion prompt/reply、feedback review。
@@ -638,8 +644,8 @@ ontrack engagements
 2. 目标成绩变化后，可见任务集合变化。
 3. tutorial stream 不同，任务集合不同。
 4. 任务尚未实例化时，task show/PDF/resources 仍可用。
-5. 上传中途失败时恢复原状态。
-6. cancel submission 后状态恢复。
+5. dispatch 前校验失败或 cancel 时不发写请求。
+6. dispatch 后网络结果不明时记录脱敏 `unknown`，不自动重发。
 7. submission PDF processing 时不误报下载成功。
 8. 419 时提示重登，不重复刷接口。
 9. 所有 JSON 输出均不包含 secret。
@@ -653,8 +659,7 @@ ontrack engagements
 - `/units/:id/tasks/inbox` 在新学期、不同角色下的真实响应。
 - 带真实 comments/attachments/audio 的数据 shape。
 - 已存在 task instance 时 `/projects/:id.tasks` 的完整 shape。
-- 完整提交成功时各请求的先后顺序和 rollback contract。
-- remote logout 的新 body/query contract。
+- 特定生产测试任务上的完整提交成功响应与之后只读状态变化；本轮没有执行生产写 smoke。
 - SCORM、content link、overseer、JPlag、LTI 的实际启用方式。
 - Portfolio 编译完成后的异步状态与下载接口。
 - Tutorial enrolment 写接口和容量冲突处理。
@@ -678,19 +683,19 @@ ontrack engagements
 2. `whoami` 已改用安全身份投影 Module。JSON 与人类输出只读取明确 allowlist，不再序列化完整 session；针对顶层 token、嵌套 token、authorization 与 browser credential 的回归测试已加入。
 3. 浏览器 session 复用已完成安全收口：凭据捕获严格绑定目标 OnTrack origin/domain；真实系统 profile 默认关闭且不会复制完整 storage state；CLI state 只保留 OnTrack cookies/origins，并以目录 `0700`、文件 `0600` 持久化。
 4. CLI 不再自动执行未固定版本的 Playwright/Chromium 安装；需要时由用户明确执行文档中的固定版本命令。
-5. `logout` 仍不猜测未知的生产 `remember` 合同，但远端失败信息会脱敏，并明确区分本地 session 已清理与远端注销失败。
+5. `logout` 已按生产 bundle 的 `DELETE /auth?remember=false` 合同修复；远端失败信息会脱敏，并明确区分本地 session 已清理与远端注销失败。
 
 本轮验证结果：
 
 - `bun install --frozen-lockfile`：通过
 - `bun run build`：通过
 - `bun run typecheck`：通过
-- `bun test`：73/73 通过
+- `bun test`：162/162 通过
 - `bun audit`：无已知漏洞
 - 新 `whoami` Module：100% 行/函数覆盖
-- 仓库整体：71.73% 行覆盖、76.00% 函数覆盖，尚未达到项目要求的 80%；主要缺口在浏览器自动登录与真实交互分支
+- Bun 可合并计数的 TypeScript library/script LCOV：82.32% 行覆盖（4285/5205）、87.15% 函数覆盖（373/428），达到项目要求的双 80%，且配置没有源码排除；process-entry CLI Adapter 由 spawned stub E2E 验证，真实浏览器/SSO 状态机由注入式 Browser Adapter 在无网络环境测试并辅以 Ego smoke。
 
-依据 improve-codebase-architecture 的探索阶段，下一轮可深入的候选 Module 是：
+依据 improve-codebase-architecture 的探索阶段，本轮已实施并接线以下 Module：
 
 1. Auth lifecycle / security identity Module
 2. Student task aggregation / `StudentTaskView` Module
@@ -698,4 +703,17 @@ ontrack engagements
 4. Task Planner / date semantics Module
 5. Production contract discovery and fixture Module
 
-这里暂不定义新 Interface 或 Adapter。应先选择一个候选，继续验证它是否能提供足够的 Depth、Leverage 与 Locality，并确认删除测试成立，再进入实现。
+这些 Module 均已有明确 Interface、不可变 Implementation、HTTP/CLI Adapter 与合同测试；删除任一 Module 都会使 identity、日期优先级、提交状态或合同脱敏规则重新散落到多个调用方，因此通过 deletion test。
+
+## 13. 最终实施结果
+
+截至 2026-07-31，本审计提出的五个核心 Module 与 CI/CD 已完成：
+
+1. **Auth lifecycle / security identity Module**：browser `/auth/access-token` response 直接建立 expiry-aware session（不再回调 legacy `/auth`）、legacy migration、typed 401/419、session provenance、safe whoami、精确 remote logout。
+2. **StudentTaskView Module**：以 definition catalogue 为主，以显式 `task_definition_id` 连接 instance；支持空 `project.tasks`、target grade、tutorial stream、not-instantiated，并拒绝同一 definition 的多 instance 歧义。
+3. **Submission lifecycle Module**：默认 dry-run、slot schema、immutable attempt journal、local-only pre-dispatch cancel、单次 POST、明确 server rejection=`failed`、transport failure=`unknown`、2xx 后 status observation、redacted output、submission status 与 PDF processing guard。
+4. **Planner Module**：personal → grade default → unit default 的日期优先级、明确 date kind/source/`unit_local_calendar_date` interpretation、prerequisite、独立 feedback deadline、严格 YYYY-MM-DD；写操作默认 dry-run，只有 `--confirm` 才执行已观察的 PUT，且 read-back 一致后才输出 verified。
+5. **Production contract Module**：脱敏 fixture catalog、provenance/trust、read-only route allowlist、shape/drift validator。
+6. **Bun CI/CD**：frozen install、typecheck、162 tests、无源码排除的 80/80 加权 coverage gate、audit、build、package allowlist、SHA-pinned Actions、dependency review、单一 tarball release chain、npm OIDC 与 registry integrity verification。
+
+2026-07-31 最终 Ego 复核发现：页面仍显示已加载的 Student UI，但裸 API 请求返回 419。该结果未被当作成功的生产数据读取；它验证了 CLI 必须把 419 归类为 credential expiry 并提示重新登录，而不能循环重试。前述生产 shape 结论来自本轮较早、credential 尚可用时的只读捕获与 bundle 证据。

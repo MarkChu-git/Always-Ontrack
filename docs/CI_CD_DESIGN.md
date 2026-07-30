@@ -1,6 +1,6 @@
-# OnTrack CLI CI/CD 设计（仅计划）
+# OnTrack CLI CI/CD 设计
 
-> 状态：设计提案，2026-07-31。本文**没有**新增 GitHub Actions workflow、没有变更业务代码、没有启用 registry 发布；它定义后续实施时应遵循的发布与验证合同。
+> 状态：仓库内的 CI、coverage ratchet、artifact release workflow、Dependabot 和 runbook 已于 2026-07-31 实施。Branch protection、`release` Environment 审批者、npm Trusted Publisher 与 `PUBLISH_TO_NPM` 是 GitHub/npm 管理面设置，刻意不由仓库代码隐式开启；操作步骤见 [RELEASE_RUNBOOK.md](./RELEASE_RUNBOOK.md)。
 
 ## 1. 结论与范围
 
@@ -14,7 +14,7 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 - 只有经验证、可安装的唯一 `.tgz` 可以成为 Release asset 或 registry 包。
 - tag、`package.json` version、GitHub Release 与 npm registry version 严格一致。
 - 不把真实 OnTrack 账号、session、cookie、token 或会产生写入的 smoke test 放进 GitHub Actions。
-- 从当前 lines 71.73%、functions 76.00% 的覆盖率稳步提升到项目要求的 80%，期间不允许回退。
+- 对 Bun 可合并计数的 TypeScript library/script 实施 LCOV lines/functions 双 80% 硬门禁且配置无排除；process-entry CLI Adapter 由 spawned stub E2E 覆盖（Bun 不把子进程 counter 合并到父 LCOV）。真实浏览器/SSO 状态机通过注入式 Browser Adapter 在无网络环境测试，人工 Ego smoke 继续验证真实 DOM/SSO 漂移。
 
 ## 2. 已核对的事实与约束
 
@@ -24,14 +24,14 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 | 版本 | `package.json` 为 `0.3.0` | Release tag 必须严格为 `v0.3.0` 形式，并与包版本去掉 `v` 后相同。 |
 | 历史 tag | 本地有带注释的 `v0.2.0`、`v0.3.0`，远端尚未发现它们 | 在启用 tag-triggered release 前，先确认并推送应保留的历史 tag。 |
 | package manager | `bun.lock`、`packageManager: bun@1.3.14`、`engines.bun: >=1.3.14` | CI 固定 Bun 1.3.14，使用 `bun install --frozen-lockfile`。 |
-| 现有 workflow | 无 `.github/workflows/` | 本文提供蓝图，后续单独 PR 实现。 |
+| 现有 workflow | 已实现 `ci.yml`、`dependency-review.yml`、`release.yml` | 本文同时是实施说明；远端治理项按 runbook 完成。 |
 | 公共发行 | npm registry 已有 `ontrack-cli@0.3.0` | registry 发布是现实需求；不能把“迁移 npm 到 Bun”误解成停止 npm registry 分发。 |
 | package 发布面 | `bun pm pack --dry-run` 当前包含 package metadata、LICENSE、双语 README 与 `dist/**` | 发布前必须验证 tarball allowlist，阻止源码、测试、session 或下载文件泄漏。 |
 | 真实 smoke | `smoke:real` 使用真实账号与生产环境 | 只放在维护者本机/受控人工 checklist，绝不放入 hosted CI。 |
 | Dependabot | GitHub 支持 Bun >=1.1.39 的文本 `bun.lock`，不支持旧 `bun.lockb` | 可以原生使用 Dependabot 的 `bun` ecosystem。 |
 | npm OIDC | Trusted Publishing 需要 npm CLI >=11.5.1、Node >=22.14、GitHub-hosted runner、`id-token: write`、精确匹配的 `repository.url` | 这是 registry publish job 使用 Node/npm 的唯一例外；发布前补齐包元数据与 trusted publisher 配置。 |
 
-当前 `package.json` 还应在 OIDC 发布前补充：
+`package.json` 已包含 OIDC 发布所需的仓库元数据：
 
 ```json
 {
@@ -49,7 +49,7 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 }
 ```
 
-这是后续实施项，不是本文实施的改动。
+registry 发布仍默认关闭，直到维护者完成 Trusted Publisher 与受保护 Environment 的外部配置。
 
 ## 3. 目标流水线
 
@@ -90,7 +90,7 @@ release 的关键顺序固定为：**生成并验证唯一 tgz → 建立 draft 
 
 ## 4. Workflow 蓝图
 
-以下是实现时的精确结构蓝图；占位的 `<PINNED_SHA>` 必须替换为完整 commit SHA，不能长期使用浮动 tag。
+实际 workflow 是唯一可执行的来源：[ci.yml](../.github/workflows/ci.yml)、[dependency-review.yml](../.github/workflows/dependency-review.yml) 与 [release.yml](../.github/workflows/release.yml)。下面的片段保留为设计解释，并与实施时使用的完整 Action commit SHA 对齐。
 
 ### 4.1 `.github/workflows/ci.yml`
 
@@ -127,16 +127,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@<PINNED_SHA>
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@<PINNED_SHA>
+      - uses: oven-sh/setup-bun@ecf28ddc73e819eb6fa29df6b34ef8921c743461
         with:
           bun-version: 1.3.14
 
-      - uses: actions/cache@<PINNED_SHA>
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-1.3.14-${{ hashFiles('bun.lock') }}
@@ -164,7 +164,7 @@ jobs:
       - name: Verify package contents and installed binary
         run: bun scripts/verify-package.ts artifacts/*.tgz
 
-      - uses: actions/upload-artifact@<PINNED_SHA>
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ci-${{ github.sha }}
           path: |
@@ -174,7 +174,7 @@ jobs:
           retention-days: 14
 ```
 
-实现时 `scripts/verify-package.ts` 应为小型确定性脚本：列出 tarball；检查必需的 `package.json`、LICENSE、README、`dist/cli.js`、运行时 `dist/lib/**`；拒绝 `src/**`、`test/**`、`.git/**`、`.env*`、`downloads/**`、session、coverage 与 `node_modules/**`；解包到临时目录并在隔离位置安装/执行 `ontrack --help`。当前仓库尚无此脚本，因此上面仅为 blueprint。
+已实现的 `scripts/verify-package.ts` 是小型确定性脚本：列出 tarball；检查必需的 `package.json`、LICENSE、双语 README、`dist/cli.js`、运行时 `dist/lib/**`；拒绝 `src/**`、`test/**`、`.git/**`、`.env*`、`downloads/**`、session、coverage 与 `node_modules/**`；解包到临时目录并执行打包后的 CLI `--help`。其行为由 `test/verify-package.test.ts` 覆盖。
 
 缓存只覆盖 Bun package cache，不缓存 `node_modules`、`dist`、浏览器 profile 或整个家目录。key 包含 OS、Bun 精确版本与 `bun.lock` hash，也不使用会取回过期依赖状态的宽泛 restore key。
 
@@ -198,10 +198,10 @@ jobs:
   dependency-review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@<PINNED_SHA>
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/dependency-review-action@<PINNED_SHA>
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
         with:
           fail-on-severity: high
           fail-on-scopes: runtime,development
@@ -293,7 +293,7 @@ git merge-base --is-ancestor "$SOURCE_SHA" origin/master
 publish job 安装 Node 24（满足 Node >=22.14）与 npm >=11.5.1；它不使用 npm 安装依赖，也不运行 npm build/test：
 
 ```yaml
-- uses: actions/setup-node@<PINNED_SHA>
+- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
   with:
     node-version: '24'
     registry-url: https://registry.npmjs.org
@@ -306,33 +306,26 @@ publish job 安装 Node 24（满足 Node >=22.14）与 npm >=11.5.1；它不使�
 
 发布后查询 registry 并验证 name、version、integrity 与 tarball URL；验证成功才执行 `gh release edit "$TAG" --draft=false`。若发布失败，draft 保留用于诊断，绝不自动公开。
 
-## 5. 覆盖率 Ratchet
+## 5. 覆盖率硬门禁
 
-项目标准是至少 80%，但当前覆盖率尚未达到。门禁应分三阶段推进：
-
-### Phase A：可见性
-
-- 在每次 CI 运行 `bun test --coverage --coverage-reporter=lcov`。
-- 上传 `coverage/lcov.info`，并在日志显示 summary。
-- 先验证 GitHub Linux runner 与本地的 lines 71.73%、functions 76.00% 基线一致。
-- 此阶段不设 threshold，避免首次引入 CI 时把现有主线错误标红。
-
-### Phase B：无回归
-
-新增受版本控制的 coverage threshold 文件与 LCOV parser，基线为：
+项目标准是 lines/functions 均至少 80%。CI 以 Bun LCOV 的 `LF/LH`、`FNF/FNH` 汇总字段做加权计算，不使用 Bun 文本表的逐文件平均值。受版本控制的门禁配置为：
 
 ```json
 {
-  "lines": 71.73,
-  "functions": 76.0
+  "lines": 80,
+  "functions": 80
 }
 ```
 
-parser 必须排除测试和生成输出，低于任一指标即失败，并输出当前值、要求值与主要低覆盖文件。阈值配置只能提高；任何下降必须经维护者显式审批并附带事故/迁移说明。
+覆盖门禁不排除任何源码文件。`src/lib/auto-login.ts` 通过窄 `BrowserLaunchAdapter` Seam 在无网络、无真实浏览器进程的情况下执行凭据捕获状态机；origin、cookie、storage、CAPTCHA、MFA 与引导式字段流都由确定性测试覆盖。parser 仍只接受精确的仓库相对 `.ts` 路径（如未来确有临时排除），拒绝 glob、绝对路径与 `..`，避免扩大排除面。
 
-### Phase C：达到 80%
+2026-07-31 LCOV 门禁实测：
 
-按风险和生产重要性补测试，而不是只覆盖简单代码：
+- lines：82.32%（4285/5205）
+- functions：87.15%（373/428）
+- 测试：162/162
+
+补测按风险和生产重要性实施，而不是只覆盖简单代码：
 
 1. `auto-login`：origin 限制、browser state 过滤、失败清理。
 2. API client：认证、非成功响应、上传/下载、生产合同漂移。
@@ -340,7 +333,7 @@ parser 必须排除测试和生成输出，低于任一指标即失败，并输�
 4. session/discovery：损坏状态、缓存、fixture drift。
 5. 稳定 mock/fixture 集成测试；真实 smoke 仍保持人工执行。
 
-逐档提升 lines/functions：`71.73/76 → 74/78 → 76/80 → 78/80 → 80/80`。每一档达成后立即提高 gate。到 80% 后再评估是否加入 branches/stmts 指标。
+阈值不得降低来让 PR 通过；未来可以提高到当前实测值，或在 Bun 提供稳定 branches/stmts 后通过独立决策增加指标。
 
 ## 6. 依赖更新与供应链管理
 
@@ -393,7 +386,7 @@ Actions 使用 SHA pinning，Dependabot 负责产生更新 PR。每个 Action �
 | --- | --- |
 | typecheck/test/audit/pack 失败 | 修复 PR，不绕过 required check。 |
 | tag 与 package version 不一致 | 若未推远，修正本地 tag；若已推远，不重用 tag，建立新 patch version。 |
-| draft Release 上传失败 | 修复 workflow 后针对同一 tag 重跑；asset upload 使用幂等 `--clobber`。 |
+| draft Release 创建/校验失败 | 保留现场并调查；仅当 draft 恰好只有同名 tgz 且 SHA256 一致时允许同一 tag 重跑，禁止 `--clobber` 或发布含额外 asset 的 draft。 |
 | npm OIDC 认证失败 | 检查 runner 类型、`id-token: write`、trusted publisher 的 owner/repo/workflow/environment 与 `repository.url`；不临时退回长期 token。 |
 | npm publish 成功但 GitHub Release 未公开 | 保留 draft，验证 registry metadata 后重跑公开步骤。 |
 | 已发布版本有缺陷 | 发布新 patch，使用 `npm deprecate ontrack-cli@bad-version "reason"`，把 `latest` 指向修复版；保留历史 tag，不 force-push、不 retag、不覆盖 immutable version。 |
@@ -413,16 +406,16 @@ Actions 使用 SHA pinning，Dependabot 负责产生更新 PR。每个 Action �
 
 ### Phase 1：CI 与 GitHub Release artifact
 
-- 实现 `ci.yml`、`dependency-review.yml`、package verification、coverage visibility、Dependabot。
-- 实现 tag/version/source 校验和 draft GitHub Release asset。
+- 已实现 `ci.yml`、`dependency-review.yml`、package verification、coverage gate、Dependabot。
+- 已实现 tag/version/source 校验和 draft GitHub Release asset。
 - 用一个新的 prerelease 或 patch tag 做演练。
 
 验收：PR/push/tag 都执行稳定验证；失败阻止合并；Release asset 可被隔离安装并执行 `ontrack --help`；普通 CI 没有 secrets 或写权限。
 
 ### Phase 2：Coverage ratchet 与 OIDC registry 发布
 
-- 建立 LCOV 无回归 gate。
-- 逐阶段补足高风险代码的测试并升到 80%。
+- 已建立 LCOV 80/80 硬门禁。
+- 已补足高风险代码测试，LCOV 门禁实测 82.32/87.15。
 - 建立 npm Trusted Publisher，完成一次受保护的 OIDC 发布演练。
 - 成功后撤销旧 automation token（如有）。
 
@@ -435,15 +428,15 @@ Actions 使用 SHA pinning，Dependabot 负责产生更新 PR。每个 Action �
 - GitHub artifact attestation。
 - 基于稳定 fixture 的跨 OS CLI integration matrix。
 
-## 10. Decision Gates
+## 10. 已决策与管理面 Gates
 
-以下决定必须在实施前由维护者确认，不能由 workflow 隐式猜测：
+仓库实现采用以下决策；需要 GitHub/npm 管理权限的项目仍按 runbook 显式配置，workflow 不隐式猜测：
 
 1. 历史 `v0.2.0`/`v0.3.0` 是否应推送到 origin。
-2. tag 后是自动公开 Release，还是始终先 draft + Environment 审批（推荐后者）。
-3. npm registry 是否是正式发行渠道；启用时是否接受“registry 成功后才公开 GitHub Release”的顺序（推荐接受）。
-4. 80% 是否以 lines/functions 双指标为合规口径，及之后是否加入 branches/stmts。
-5. 是否在首期就采用完整 SHA pinning（推荐是）并接受 Dependabot 对 Action SHA 的更新 PR。
+2. tag 后始终先 draft，再经 `release` Environment 审批。
+3. npm registry 是可选正式发行渠道；registry 成功并校验后才公开 GitHub Release。
+4. 80% 使用加权 lines/functions 双指标；branches/stmts 留待 Bun 稳定支持后另行决策。
+5. 所有第三方 Action 使用完整 SHA pinning，并由 Dependabot 更新。
 6. lint/format 工具选择是否与基础 CI 分开（推荐分开，避免扩大首期风险）。
 
 ## 11. 官方来源

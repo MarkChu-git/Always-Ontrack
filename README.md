@@ -133,7 +133,7 @@ Launcher actions now include guided task selection:
 
 - actions `7/8/11/12` support guided single-task and batch selection
 - you can choose `single`, `multiple` (comma-separated selectors), or `all tasks`
-- task selection is based on `task` code (for example `P1`, `D4`) or numeric task id
+- task selection is based on `task` code (for example `P1`, `D4`) or numeric task-definition id
 - you can still switch to manual `--project-id` + selector input
 - upload actions `13/14` remain single-task guided by design
 
@@ -210,15 +210,19 @@ Batch PDF example:
 ontrack pdf task --project-id 87 --all-tasks
 ```
 
-### 8. Upload a submission or extra evidence
+### 8. Preview, then confirm a submission or extra evidence
 
 ```bash
 ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
+ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
 ```
 
 ```bash
 ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf
+ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf --confirm
 ```
+
+Without `--confirm`, both commands perform a safe preflight and send no write request.
 
 ## Core concepts
 
@@ -246,9 +250,11 @@ The task abbreviation. This is usually the most practical selector for day-to-da
 
 In most cases, `--abbr` is easier to read and remember than a numeric ID.
 
-### `taskId`
+### `taskDefinitionId`
 
-The CLI supports `--task-id`, but for normal usage `--abbr` is usually the better default.
+Use `--task-definition-id` for an unambiguous numeric selector. The old `--task-id`
+is a deprecated compatibility adapter: it can resolve a unique legacy task-instance
+or task-definition id, warns on stderr, and rejects identity collisions.
 
 ### Batch task selectors
 
@@ -256,7 +262,7 @@ Batch-capable commands (`task show`, `feedback list`, `pdf task`, `pdf submissio
 
 - repeated selectors: `--abbr P1 --abbr D4`
 - comma selectors: `--abbr P1,D4`
-- mixed selectors: `--task-id 501 --abbr D4`
+- mixed selectors: `--task-definition-id 501 --abbr D4`
 - project-wide selection: `--all-tasks`
 
 ### `--json`
@@ -394,8 +400,8 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack pdf task --project-id <id> --abbr <abbr>` | Download task PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
 | `ontrack pdf submission --project-id <id> --abbr <abbr>` | Download submission PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
-| `ontrack submission upload ...` | Upload a submission | Supports `--trigger` and `--comment` |
-| `ontrack submission upload-new-files ...` | Upload extra evidence files | Does not force a default trigger |
+| `ontrack submission upload ...` | Preview or upload a submission | Dry-run by default; `--confirm` dispatches once; supports `--trigger` and `--comment` |
+| `ontrack submission upload-new-files ...` | Preview or upload extra evidence files | Requires an observed existing submission; dry-run by default; `--confirm` dispatches once |
 
 ### Diagnostics and discovery
 
@@ -491,20 +497,21 @@ FIT1045_D4_submission.pdf
 
 ### Workflow 5: upload a submission
 
-Simplest form:
+Safe preflight:
 
 ```bash
 ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
 ```
 
-Multiple files:
+Confirmed upload with multiple files:
 
 ```bash
 ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --file ./demo.mp4
+  --file ./demo.mp4 \
+  --confirm
 ```
 
 Explicit upload key mapping:
@@ -514,7 +521,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file file0=./report.pdf \
-  --file file1=./demo.mp4
+  --file file1=./demo.mp4 \
+  --confirm
 ```
 
 Upload and post a comment:
@@ -524,7 +532,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --comment "Updated submission with revised report."
+  --comment "Updated submission with revised report." \
+  --confirm
 ```
 
 Set the trigger explicitly:
@@ -534,7 +543,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --trigger ready_for_feedback
+  --trigger ready_for_feedback \
+  --confirm
 ```
 
 ### Difference between `submission upload` and `submission upload-new-files`
@@ -545,6 +555,7 @@ ontrack submission upload \
   - otherwise leaves trigger handling to server defaults
 - `submission upload-new-files`
   - closer to a "new evidence" flow
+  - requires `submission status` to prove an existing submission first
   - does not apply a default trigger automatically
 
 ### Upload matching rules
@@ -556,8 +567,9 @@ Rules:
 - at least one `--file` is required
 - if a task requires two files, you must provide two files
 - if you mix explicit keys and plain paths, the CLI fills remaining keys in definition order
-- if `--task-id` and `--abbr` are both provided, they must resolve to the same task
-- if `--all-tasks` is provided, do not combine it with `--task-id` or `--abbr`
+- if `--task-definition-id` and `--abbr` are both provided, they must resolve to the same task
+- deprecated `--task-id` is accepted only when its legacy definition/instance meaning is unique
+- if `--all-tasks` is provided, do not combine it with any id selector or `--abbr`
 
 ## Output, highlighting, and JSON
 
@@ -830,10 +842,10 @@ ontrack login
 
 ### `Task abbreviation "... " is ambiguous`
 
-The abbreviation is not unique inside that project. Use `--task-id` instead:
+The abbreviation is not unique inside that project. Use the task-definition id:
 
 ```bash
-ontrack task show --project-id <id> --task-id <id>
+ontrack task show --project-id <id> --task-definition-id <id>
 ```
 
 ### Upload key mismatch or incorrect file count
@@ -849,7 +861,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file file0=./report.pdf \
-  --file file1=./demo.mp4
+  --file file1=./demo.mp4 \
+  --confirm
 ```
 
 ### No color highlighting

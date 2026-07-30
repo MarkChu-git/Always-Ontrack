@@ -1,0 +1,22 @@
+{
+  "metadata": {
+    "id": "planner-prerequisites-shape",
+    "schemaVersion": 1,
+    "method": "GET",
+    "route": "/units/:unitId/task_prerequisites",
+    "provenance": {
+      "observedAt": "2026-07-31",
+      "role": "student",
+      "risk": "read-only",
+      "trust": "http-observed"
+    }
+  },
+  "payload": [
+    {
+      "id": 1,
+      "prerequisite_id": 3000,
+      "task_definition_id": 3001,
+      "task_status": "complete"
+    }
+  ]
+}

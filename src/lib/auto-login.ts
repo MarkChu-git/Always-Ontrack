@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import type { BrowserContext, BrowserContextOptions, Frame, Locator, Page } from 'playwright-core';
+import type { Browser, BrowserContext, BrowserContextOptions, Frame, Locator, Page } from 'playwright-core';
 
 /**
  * Browser automation flow for Monash SSO / Okta handoff.
@@ -15,7 +15,9 @@ import type { BrowserContext, BrowserContextOptions, Frame, Locator, Page } from
 export interface LoginCredentials {
   authToken: string;
   username: string;
+  expiresAt?: string;
   source: 'url' | 'auth_request' | 'auth_response' | 'local_storage' | 'cookie';
+  contract?: 'access-token' | 'legacy-auth';
 }
 
 /** Guided SSO options for username/password + MFA interaction mode. */
@@ -29,6 +31,7 @@ export interface SsoLoginOptions {
   chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
   requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
   onMfaNumberChallenge?: (numbers: string[]) => void;
+  browserAdapter?: BrowserLaunchAdapter;
 }
 
 /** One CLI-presented MFA option extracted from page controls. */
@@ -73,6 +76,11 @@ export class SsoFallbackError extends Error {
 export interface BrowserLaunchPlan {
   source: 'env' | 'system' | 'bundled';
   executablePath?: string;
+}
+
+/** Narrow browser Adapter for deterministic, no-network login state-machine tests. */
+export interface BrowserLaunchAdapter {
+  launch(options: { headless: boolean; executablePath?: string }): Promise<Pick<Browser, 'newContext' | 'close'>>;
 }
 
 const DEFAULT_ONTRACK_ORIGIN = 'https://ontrack.infotech.monash.edu';
@@ -138,14 +146,25 @@ export function extractCredentialsFromAuthPayload(payload: unknown): LoginCreden
       ? record.authToken
       : null;
   const username = hasValue(record.username) ? record.username : null;
+  const user = record.user;
+  const nestedUsername =
+    user && typeof user === 'object'
+      ? extractUsernameFromUserRecord(user as Record<string, unknown>)
+      : null;
+  const expiresAt = hasValue(record.auth_token_expiry)
+    ? record.auth_token_expiry
+    : hasValue(record.authTokenExpiry)
+      ? record.authTokenExpiry
+      : undefined;
 
-  if (!authToken || !username) {
+  if (!authToken || (!username && !nestedUsername)) {
     return null;
   }
 
   return {
     authToken,
-    username,
+    username: username ?? nestedUsername!,
+    ...(expiresAt ? { expiresAt } : {}),
     source: 'auth_request',
   };
 }
@@ -590,6 +609,7 @@ export interface AutoLoginOptions {
   apiBaseUrl: string;
   timeoutMs?: number;
   headless?: boolean;
+  browserAdapter?: BrowserLaunchAdapter;
 }
 
 /** Candidate system browser profile location used for direct session reuse probe. */
@@ -2050,21 +2070,11 @@ async function advanceGuidedSsoOnPage(
 /** Launch playwright chromium with best-available executable resolution. */
 async function launchBrowserForCapture(options: {
   headless: boolean;
+  browserAdapter?: BrowserLaunchAdapter;
 }): Promise<{
-  browser: Awaited<ReturnType<(typeof import('playwright-core'))['chromium']['launch']>>;
+  browser: Pick<Browser, 'newContext' | 'close'>;
   plan: BrowserLaunchPlan;
 }> {
-  let playwrightModule: typeof import('playwright-core');
-  try {
-    playwrightModule = await import('playwright-core');
-  } catch {
-    throw new SsoFallbackError(
-      'browser_unavailable',
-      'fallback',
-      'Auto login requires dependency "playwright-core". Install the CLI with dependencies and retry.',
-    );
-  }
-
   const plan = resolveBrowserLaunchPlan();
   const launchArgs =
     plan.executablePath !== undefined
@@ -2077,6 +2087,23 @@ async function launchBrowserForCapture(options: {
         };
 
   try {
+    if (options.browserAdapter) {
+      return {
+        browser: await options.browserAdapter.launch(launchArgs),
+        plan,
+      };
+    }
+
+    let playwrightModule: typeof import('playwright-core');
+    try {
+      playwrightModule = await import('playwright-core');
+    } catch {
+      throw new SsoFallbackError(
+        'browser_unavailable',
+        'fallback',
+        'Auto login requires dependency "playwright-core". Install the CLI with dependencies and retry.',
+      );
+    }
     const browser = await playwrightModule.chromium.launch(launchArgs);
     return {
       browser,
@@ -2139,6 +2166,7 @@ async function captureSsoCredentialsInternal(
   // Browser launch plan supports env override, system browser, then bundled Chromium.
   const launch = await launchBrowserForCapture({
     headless: options.headless ?? false,
+    browserAdapter: options.browserAdapter,
   });
   const browser = launch.browser;
 
@@ -2212,9 +2240,15 @@ async function captureSsoCredentialsInternal(
           const body = await response.json();
           const parsed = extractCredentialsFromAuthPayload(body);
           if (parsed) {
+            const contract = new URL(response.url()).pathname.endsWith(
+              '/api/auth/access-token',
+            )
+              ? 'access-token'
+              : 'legacy-auth';
             setCaptured({
               ...parsed,
               source: 'auth_response',
+              contract,
             });
           }
         } catch {
@@ -2583,6 +2617,7 @@ export async function captureSsoCredentialsWithGuidedLogin(
       apiBaseUrl: options.apiBaseUrl,
       timeoutMs: options.timeoutMs,
       headless: options.headless,
+      browserAdapter: options.browserAdapter,
     },
     {
       username: options.username,

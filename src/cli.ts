@@ -1,10 +1,15 @@
 #!/usr/bin/env bun
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
+import {
+  createSessionFromAccessToken,
+  OnTrackHttpError,
+  sessionUsability,
+} from './lib/auth.js';
 import { toWhoAmIView } from './lib/whoami.js';
 import {
   SsoFallbackError,
@@ -14,8 +19,29 @@ import {
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
 import type { MfaMethodOption } from './lib/auto-login.js';
+import type { LoginCredentials } from './lib/auto-login.js';
 import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
 import { getWelcomeMenuItems, parseWelcomeSelection } from './lib/welcome.js';
+import {
+  buildStudentTaskRows,
+  buildStudentTaskViews,
+  resolveStudentTaskViews,
+} from './lib/student-task-view.js';
+import type { StudentTaskRow } from './lib/student-task-view.js';
+import {
+  buildPlannerViews,
+  buildResetTargetDatesMutation,
+  buildTargetDateMutation,
+} from './lib/planner.js';
+import type { RawTaskPrerequisite } from './lib/planner.js';
+import {
+  createSubmissionAttempt,
+  isSubmissionObserved,
+  parseSubmissionDetails,
+  prepareSubmission,
+  transitionSubmissionAttempt,
+  validateSubmissionMode,
+} from './lib/submission-lifecycle.js';
 import {
   buildPdfFilename,
   diffWatchStates,
@@ -56,17 +82,17 @@ import {
 } from './lib/utils.js';
 import type {
   FeedbackItem,
+  CredentialSource,
   InboxTask,
   ProjectSummary,
   SessionData,
   SubmissionTrigger,
   TaskDefinitionSummary,
-  TaskUploadRequirement,
   TaskSummary,
   UnitSummary,
 } from './lib/types.js';
 import type { WelcomeMenuItem } from './lib/welcome.js';
-import type { WatchTaskState } from './lib/utils.js';
+import type { ResolvedTaskSelector, WatchTaskState } from './lib/utils.js';
 
 /**
  * Main CLI entry module.
@@ -78,7 +104,30 @@ import type { WatchTaskState } from './lib/utils.js';
  *
  * Lower-level HTTP/session/parsing logic lives in `src/lib/*`.
  */
-type InboxRowTask = InboxTask & { _unitId: number };
+type InboxRowTask = (InboxTask | StudentTaskRow) & { _unitId: number };
+
+/** Convert a credential captured from the verified access-token response into a session. */
+function sessionFromAccessTokenCapture(
+  baseUrl: string,
+  captured: LoginCredentials,
+  savedAt: string,
+): SessionData {
+  if (captured.contract !== 'access-token' || !captured.expiresAt) {
+    throw new Error(
+      'The observed access-token response is missing its required expiry.',
+    );
+  }
+  return createSessionFromAccessToken(
+    baseUrl,
+    captured.username,
+    {
+      auth_token: captured.authToken,
+      auth_token_expiry: captured.expiresAt,
+      user: { username: captured.username },
+    },
+    savedAt,
+  );
+}
 
 /** Print command help and high-level behavioral notes. */
 function help(): void {
@@ -103,19 +152,25 @@ Usage:
   ontrack doctor [--json]
   ontrack discover [--site-url URL] [--base-url URL] [--probe] [--limit N] [--json]
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
-  ontrack task show --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
-  ontrack feedback list --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
-  ontrack feedback watch --project-id ID (--task-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]
-  ontrack pdf task --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
-  ontrack pdf submission --project-id ID [--all-tasks | --task-id ID [--task-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
-  ontrack submission upload --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--json]
-  ontrack submission upload-new-files --project-id ID (--task-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--json]
+  ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
+  ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
+  ontrack plan show --project-id ID [--include-beyond-target] [--json]
+  ontrack plan set-dates --project-id ID (--task-definition-id ID | --abbr ABBR) --start YYYY-MM-DD --target YYYY-MM-DD [--confirm] [--json]
+  ontrack plan reset --project-id ID [--confirm] [--json]
+  ontrack feedback list --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
+  ontrack feedback watch --project-id ID (--task-definition-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]
+  ontrack pdf task --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
+  ontrack pdf submission --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
+  ontrack submission upload --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--json]
+  ontrack submission upload-new-files --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--json]
+  ontrack submission status --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
 
 Notes:
   - Running "ontrack" with no command opens the interactive launcher in TTY terminals.
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
+  - --task-definition-id is the unambiguous selector. Deprecated --task-id remains available for legacy definition/instance ids.
   - "ontrack login" defaults to guided SSO (username/password + Okta Verify) in hidden-browser (headless) mode on all environments.
   - Before prompting credentials, login reuses only its saved OnTrack browser state. Live system browser-profile reuse is disabled unless ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1.
   - Use "ontrack login --sso" to force guided SSO, or "ontrack login --auto" for browser-only capture mode.
@@ -125,6 +180,7 @@ Notes:
   - PDF commands save files into ./downloads by default.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
+  - Planner and submission writes are dry-runs unless --confirm is supplied.
 `);
 }
 
@@ -367,18 +423,18 @@ async function promptRequired(label: string): Promise<string> {
 /** Manual selector used as fallback when guided selection cannot resolve tasks. */
 async function promptTaskSelectorFlags(): Promise<string[]> {
   const projectId = await promptRequired('Project ID: ');
-  const abbr = (await prompt('Task abbreviation (preferred, e.g. P1/D4). Leave empty to use task id: ')).trim();
+  const abbr = (await prompt('Task abbreviation (preferred, e.g. P1/D4). Leave empty to use task definition id: ')).trim();
   if (abbr) {
     return ['--project-id', projectId, '--abbr', abbr];
   }
 
-  const taskId = await promptRequired('Task ID: ');
-  return ['--project-id', projectId, '--task-id', taskId];
+  const taskDefinitionId = await promptRequired('Task Definition ID: ');
+  return ['--project-id', projectId, '--task-definition-id', taskDefinitionId];
 }
 
 type TaskSelectorToken =
   | { kind: 'abbr'; value: string }
-  | { kind: 'taskId'; value: number };
+  | { kind: 'taskDefinitionId'; value: number };
 
 /** Parse comma-separated task selector tokens (`P1,D4,501`) into typed entries. */
 function parseTaskSelectorTokens(raw: string): TaskSelectorToken[] {
@@ -394,7 +450,7 @@ function parseTaskSelectorTokens(raw: string): TaskSelectorToken[] {
   return values.map((value) => {
     if (/^\d+$/.test(value)) {
       return {
-        kind: 'taskId',
+        kind: 'taskDefinitionId',
         value: Number.parseInt(value, 10),
       };
     }
@@ -409,8 +465,8 @@ function parseTaskSelectorTokens(raw: string): TaskSelectorToken[] {
 function buildTaskSelectorArgs(projectId: string, tokens: TaskSelectorToken[]): string[] {
   const args: string[] = ['--project-id', projectId];
   for (const token of tokens) {
-    if (token.kind === 'taskId') {
-      args.push('--task-id', String(token.value));
+    if (token.kind === 'taskDefinitionId') {
+      args.push('--task-definition-id', String(token.value));
       continue;
     }
     args.push('--abbr', token.value);
@@ -525,7 +581,7 @@ async function promptTaskSelectorFromTaskList(options: {
       allowBatch
         ? 'Choose single, multiple, or all tasks.'
         : 'Pick a task by task code (e.g. P1, D4).',
-      'If a row has no task code, enter its taskId number.',
+      'If a row has no task code, enter its taskDefinitionId number.',
       'Type m to switch to manual selector.',
     ],
     'info',
@@ -533,12 +589,12 @@ async function promptTaskSelectorFromTaskList(options: {
 
   const rows = tasks.map((task) => ({
     unit: unitCode,
-    task: getTaskAbbreviation(task) || `#${getTaskDefinitionId(task) ?? task.id}`,
-    title: getTaskName(task) || `Task #${getTaskDefinitionId(task) ?? task.id}`,
+    task: getTaskAbbreviation(task) || `#${getTaskDefinitionId(task) ?? 'unknown'}`,
+    title: getTaskName(task) || `Task #${getTaskDefinitionId(task) ?? 'unknown'}`,
     status: getTaskStatus(task) || '-',
     due: formatDate(getTaskDueDate(task)),
     projectId: selectedProject.id,
-    taskId: getTaskDefinitionId(task) ?? '-',
+    taskDefinitionId: getTaskDefinitionId(task) ?? '-',
     unitId,
   }));
   printTable(rows);
@@ -562,9 +618,6 @@ async function promptTaskSelectorFromTaskList(options: {
     if (definitionId !== undefined) {
       tasksById.set(definitionId, task);
     }
-    if (typeof task.id === 'number') {
-      tasksById.set(task.id, task);
-    }
   }
 
   const projectId = String(selectedProject.id);
@@ -580,7 +633,7 @@ async function promptTaskSelectorFromTaskList(options: {
 
     if (byAbbr && byAbbr.length > 1) {
       console.log(
-        `[warn] Task code "${raw}" is ambiguous in this project. Use manual mode (m) and provide --task-id.`,
+        `[warn] Task code "${raw}" is ambiguous in this project. Use manual mode (m) and provide --task-definition-id.`,
       );
       return null;
     }
@@ -594,9 +647,14 @@ async function promptTaskSelectorFromTaskList(options: {
           return ['--project-id', projectId, '--abbr', abbr];
         }
 
-        const taskId = getTaskDefinitionId(matched);
-        if (taskId !== undefined) {
-          return ['--project-id', projectId, '--task-id', String(taskId)];
+        const taskDefinitionId = getTaskDefinitionId(matched);
+        if (taskDefinitionId !== undefined) {
+          return [
+            '--project-id',
+            projectId,
+            '--task-definition-id',
+            String(taskDefinitionId),
+          ];
         }
       }
     }
@@ -614,7 +672,7 @@ async function promptTaskSelectorFromTaskList(options: {
       return null;
     }
 
-    console.log('[warn] Unknown task selection. Enter taskId number or type m for manual selector.');
+    console.log('[warn] Unknown task selection. Enter taskDefinitionId number or type m for manual selector.');
     return null;
   };
 
@@ -676,7 +734,7 @@ async function promptTaskSelectorFromTaskList(options: {
               }
               const abbr = getTaskAbbreviation(matched[0]);
               if (!abbr) {
-                console.log(`[warn] Task "${token.value}" has no abbreviation; use taskId instead.`);
+                console.log(`[warn] Task "${token.value}" has no abbreviation; use taskDefinitionId instead.`);
                 invalid = true;
                 break;
               }
@@ -686,7 +744,7 @@ async function promptTaskSelectorFromTaskList(options: {
 
             const matched = tasksById.get(token.value);
             if (!matched) {
-              console.log(`[warn] Task id "${token.value}" was not found in this project.`);
+              console.log(`[warn] Task definition id "${token.value}" was not found in this project.`);
               invalid = true;
               break;
             }
@@ -694,13 +752,16 @@ async function promptTaskSelectorFromTaskList(options: {
             if (abbr) {
               canonicalTokens.push({ kind: 'abbr', value: abbr });
             } else {
-              const taskId = getTaskDefinitionId(matched);
-              if (taskId === undefined) {
-                console.log(`[warn] Task id "${token.value}" could not be resolved.`);
+              const taskDefinitionId = getTaskDefinitionId(matched);
+              if (taskDefinitionId === undefined) {
+                console.log(`[warn] Task definition id "${token.value}" could not be resolved.`);
                 invalid = true;
                 break;
               }
-              canonicalTokens.push({ kind: 'taskId', value: taskId });
+              canonicalTokens.push({
+                kind: 'taskDefinitionId',
+                value: taskDefinitionId,
+              });
             }
           }
 
@@ -713,7 +774,7 @@ async function promptTaskSelectorFromTaskList(options: {
             const key =
               token.kind === 'abbr'
                 ? `abbr:${token.value.toLowerCase()}`
-                : `taskId:${token.value}`;
+                : `taskDefinitionId:${token.value}`;
             if (!deduped.has(key)) {
               deduped.set(key, token);
             }
@@ -729,7 +790,7 @@ async function promptTaskSelectorFromTaskList(options: {
   }
 
   while (true) {
-    const raw = (await prompt('Select task (e.g. P1) or taskId (or type m for manual): ')).trim();
+    const raw = (await prompt('Select task (e.g. P1) or taskDefinitionId (or type m for manual): ')).trim();
     if (!raw) {
       continue;
     }
@@ -760,7 +821,7 @@ async function promptGuidedTaskSelector(
       'We will load your projects first, then tasks in the selected project.',
       options.allowBatch
         ? 'Batch enabled: choose single, multiple (comma-separated), or all tasks.'
-        : 'Single-task mode: pick one task code or task id.',
+        : 'Single-task mode: pick one task code or task definition id.',
       'Type m in selector prompts to switch to manual project/task input.',
     ],
     'info',
@@ -921,11 +982,13 @@ async function runWelcomeAction(actionId: number): Promise<void> {
       const files = await promptUploadFiles();
       const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
       const comment = await prompt('Comment (optional): ');
+      const confirmation = await prompt('Type CONFIRM to dispatch this upload (otherwise dry-run): ');
       const args = [
         ...selector,
         ...files.flatMap((file) => ['--file', file]),
         ...optionalFlagArgs('--trigger', trigger),
         ...optionalFlagArgs('--comment', comment),
+        ...(confirmation.trim() === 'CONFIRM' ? ['--confirm'] : []),
       ];
       await handleSubmissionUpload(args, 'upload');
       return;
@@ -938,11 +1001,15 @@ async function runWelcomeAction(actionId: number): Promise<void> {
       const files = await promptUploadFiles();
       const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
       const comment = await prompt('Comment (optional): ');
+      const confirmation = await prompt(
+        'Type CONFIRM to dispatch replacement files (otherwise dry-run): ',
+      );
       const args = [
         ...selector,
         ...files.flatMap((file) => ['--file', file]),
         ...optionalFlagArgs('--trigger', trigger),
         ...optionalFlagArgs('--comment', comment),
+        ...(confirmation.trim() === 'CONFIRM' ? ['--confirm'] : []),
       ];
       await handleSubmissionUpload(args, 'upload-new-files');
       return;
@@ -1004,28 +1071,38 @@ function requireSession(session: SessionData | null): SessionData {
   if (!session) {
     throw new Error('No saved session found. Run `ontrack login` first.');
   }
+  const usability = sessionUsability(session);
+  if (usability.state === 'expired') {
+    throw new Error('The saved OnTrack credential has expired. Run `ontrack login` again.');
+  }
+  if (usability.state === 'unknown') {
+    console.error(
+      '[warn] This saved credential has no verified expiry metadata; continuing with server-side validation.',
+    );
+  }
   return session;
 }
 
 /** Flatten project task arrays while preserving project/unit context fields for display. */
-function flattenTasks(projects: ProjectSummary[]): Array<
-  TaskSummary & {
-    projectId: number;
-    unitId?: number;
-    unitCode?: string;
-    unitName?: string;
-  }
-> {
-  // Flatten project-scoped task arrays while retaining unit/project identity for display/filtering.
-  return projects.flatMap((project) =>
-    (project.tasks || []).map((task) => ({
-      ...task,
-      projectId: project.id,
-      unitId: project.unit?.id,
-      unitCode: project.unit?.code,
-      unitName: project.unit?.name,
-    })),
-  );
+function flattenTasks(projects: ProjectSummary[]): StudentTaskRow[] {
+  return buildStudentTaskRows(projects);
+}
+
+/** Add explicit task identities plus the stable legacy JSON aliases. */
+function taskIdentityJson(
+  resolved: Pick<ResolvedTaskSelector, 'taskDefId' | 'taskInstanceId'>,
+): {
+  taskDefinitionId: number;
+  taskInstanceId?: number;
+  taskId: number;
+  taskDefId: number;
+} {
+  return {
+    taskDefinitionId: resolved.taskDefId,
+    taskInstanceId: resolved.taskInstanceId,
+    taskId: resolved.taskInstanceId ?? resolved.taskDefId,
+    taskDefId: resolved.taskDefId,
+  };
 }
 
 /** Parse optional integer flag; returns undefined when flag is not present. */
@@ -1057,7 +1134,9 @@ function parseOptionalString(args: string[], flag: string): string | undefined {
 }
 
 /** Extract project id field from inbox payload variants. */
-function extractInboxProjectId(task: InboxTask): number | undefined {
+function extractInboxProjectId(
+  task: Pick<InboxTask, 'projectId' | 'project_id'>,
+): number | undefined {
   if (typeof task.projectId === 'number') {
     return task.projectId;
   }
@@ -1154,45 +1233,10 @@ type UploadFileInput = {
   path: string;
 };
 
-type UploadFileAssignment = {
-  key: string;
-  path: string;
-};
-
-function getTaskUploadRequirements(task: TaskSummary): TaskUploadRequirement[] {
-  const definition = task.definition as Record<string, unknown> | undefined;
-  const candidates = [
-    definition?.uploadRequirements,
-    definition?.upload_requirements,
-    task.uploadRequirements,
-    task.upload_requirements,
-  ];
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-
-    return candidate.filter(
-      (item): item is TaskUploadRequirement => typeof item === 'object' && item !== null,
-    );
-  }
-
-  return [];
-}
-
-/** Resolve upload requirement keys for task submission mapping. */
-function getUploadRequirementKeys(task: TaskSummary): string[] {
-  const requirements = getTaskUploadRequirements(task);
-  return requirements.map((requirement, index) => {
-    const key =
-      typeof requirement.key === 'string' ? requirement.key.trim() : '';
-    return key || `file${index}`;
-  });
-}
-
 /** Infer default upload trigger from task status when not supplied explicitly. */
-function deriveDefaultSubmissionTrigger(task: TaskSummary): SubmissionTrigger | undefined {
+function deriveDefaultSubmissionTrigger(
+  task: Partial<TaskSummary>,
+): SubmissionTrigger | undefined {
   const status = (getTaskStatus(task) || '').trim().toLowerCase();
   if (status === 'working_on_it' || status === 'need_help') {
     return 'need_help';
@@ -1214,94 +1258,8 @@ function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | un
   throw new Error('--trigger must be one of: need_help, ready_for_feedback.');
 }
 
-/**
- * Map provided upload files to required server keys.
- * Supports explicit `fileN=path` mapping and implicit ordered assignment.
- */
-function assignUploadFileKeys(
-  inputs: UploadFileInput[],
-  requirementKeys: string[],
-): UploadFileAssignment[] {
-  const explicit = new Map<string, string>();
-  const queuedPaths: string[] = [];
-
-  for (const input of inputs) {
-    if (!input.path.trim()) {
-      throw new Error('Upload file path cannot be empty.');
-    }
-
-    if (!input.key) {
-      queuedPaths.push(input.path);
-      continue;
-    }
-
-    if (explicit.has(input.key)) {
-      throw new Error(`Duplicate upload key "${input.key}".`);
-    }
-    explicit.set(input.key, input.path);
-  }
-
-  if (requirementKeys.length > 0) {
-    if (inputs.length !== requirementKeys.length) {
-      throw new Error(
-        `This task expects ${requirementKeys.length} file(s) (${requirementKeys.join(', ')}), but received ${inputs.length}.`,
-      );
-    }
-
-    for (const key of explicit.keys()) {
-      if (!requirementKeys.includes(key)) {
-        throw new Error(
-          `Upload key "${key}" is not valid for this task. Expected keys: ${requirementKeys.join(', ')}.`,
-        );
-      }
-    }
-
-    const remainingKeys = requirementKeys.filter((key) => !explicit.has(key));
-    if (queuedPaths.length !== remainingKeys.length) {
-      throw new Error(
-        `Unable to map files to required keys (${requirementKeys.join(', ')}). Use --file fileN=PATH to map explicitly.`,
-      );
-    }
-
-    const assignments: UploadFileAssignment[] = [];
-    let queueIndex = 0;
-    for (const key of requirementKeys) {
-      const path = explicit.get(key) ?? queuedPaths[queueIndex++];
-      assignments.push({ key, path });
-    }
-    return assignments;
-  }
-
-  const assignments: UploadFileAssignment[] = [];
-  const used = new Set(explicit.keys());
-  let autoIndex = 0;
-  for (const input of inputs) {
-    if (input.key) {
-      assignments.push({
-        key: input.key,
-        path: input.path,
-      });
-      continue;
-    }
-
-    let key = `file${autoIndex}`;
-    while (used.has(key)) {
-      autoIndex += 1;
-      key = `file${autoIndex}`;
-    }
-    autoIndex += 1;
-    used.add(key);
-    assignments.push({
-      key,
-      path: input.path,
-    });
-  }
-
-  return assignments;
-}
-
-/** Read upload file bytes and annotate with key + filename metadata. */
-async function readUploadFiles(assignments: UploadFileAssignment[]): Promise<
+/** Read upload file bytes and annotate with server-only key + filename metadata. */
+async function readUploadFiles(assignments: Array<{ key: string; localPath: string }>): Promise<
   Array<{
     key: string;
     filename: string;
@@ -1310,7 +1268,7 @@ async function readUploadFiles(assignments: UploadFileAssignment[]): Promise<
 > {
   return Promise.all(
     assignments.map(async (assignment) => {
-      const absolutePath = resolve(process.cwd(), assignment.path);
+      const absolutePath = resolve(process.cwd(), assignment.localPath);
       try {
         const content = await readFile(absolutePath);
         return {
@@ -1319,8 +1277,8 @@ async function readUploadFiles(assignments: UploadFileAssignment[]): Promise<
           content,
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to read upload file "${assignment.path}": ${message}`);
+        void error;
+        throw new Error(`Failed to read the local file for evidence slot "${assignment.key}".`);
       }
     }),
   );
@@ -1414,8 +1372,8 @@ async function loadProjectsWithTaskMetadata(
 
     const mergedUnit = fullUnit
       ? {
-          ...fullUnit,
           ...project.unit,
+          ...fullUnit,
         }
       : project.unit;
 
@@ -1563,6 +1521,9 @@ async function handleLogin(args: string[]): Promise<void> {
   // Direct credential flags are accepted for advanced/manual flows.
   let authToken = getFlagValue(args, '--auth-token');
   let username = getFlagValue(args, '--username');
+  let credentialSource: CredentialSource = 'manual-sign-in';
+  let credentialExpiresAt: string | undefined;
+  let credentialContract: LoginCredentials['contract'];
 
   // Manual redirect URL can also directly provide auth token + username.
   const redirectUrl = getFlagValue(args, '--redirect-url');
@@ -1598,19 +1559,33 @@ async function handleLogin(args: string[]): Promise<void> {
 
           if (reused) {
             try {
-              // Validate reused credentials immediately; stale tokens should not block normal SSO fallback.
-              const reusedResponse = await api.signIn({
-                auth_token: reused.authToken,
-                username: reused.username,
-                remember: true,
-              });
-              const reusedSession: SessionData = {
-                baseUrl: api.base,
-                username: reused.username,
-                authToken: reusedResponse.auth_token,
-                user: reusedResponse.user,
-                savedAt: new Date().toISOString(),
-              };
+              const savedAt = new Date().toISOString();
+              const reusedSession =
+                reused.contract === 'access-token'
+                  ? sessionFromAccessTokenCapture(api.base, reused, savedAt)
+                  : await (async (): Promise<SessionData> => {
+                      // Legacy URL/request captures still require the observed
+                      // `/auth` exchange before they become an API session.
+                      const response = await api.signIn({
+                        auth_token: reused.authToken,
+                        username: reused.username,
+                        remember: true,
+                      });
+                      return {
+                        baseUrl: api.base,
+                        username: reused.username,
+                        authToken: response.auth_token,
+                        user: response.user,
+                        savedAt,
+                        expiresAt:
+                          response.auth_token_expiry ??
+                          (response.auth_token === reused.authToken
+                            ? reused.expiresAt
+                            : undefined),
+                        source: 'browser-sso',
+                        refreshedAt: savedAt,
+                      };
+                    })();
               await saveSession(reusedSession);
               renderTerminalEvent(
                 `Reused existing browser session (${reused.source}). Skipping interactive sign-in.`,
@@ -1656,6 +1631,10 @@ async function handleLogin(args: string[]): Promise<void> {
         });
         authToken = captured.authToken;
         username = captured.username;
+        credentialExpiresAt = captured.expiresAt;
+        credentialContract = captured.contract;
+        credentialSource =
+          captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
         console.log(`Auto login captured credentials from ${captured.source}.`);
       } else if (loginMode === 'sso_guided') {
         // Guided mode asks username/password in CLI, then automates SSO form filling.
@@ -1789,6 +1768,10 @@ async function handleLogin(args: string[]): Promise<void> {
           );
           authToken = captured.authToken;
           username = captured.username;
+          credentialExpiresAt = captured.expiresAt;
+          credentialContract = captured.contract;
+          credentialSource =
+            captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
           renderTerminalEvent(`Guided SSO captured credentials from ${captured.source}.`, 'success');
         } catch (error) {
           // Guided flow failed: classify and show redacted reason before fallback.
@@ -1815,6 +1798,10 @@ async function handleLogin(args: string[]): Promise<void> {
             });
             authToken = captured.authToken;
             username = captured.username;
+            credentialExpiresAt = captured.expiresAt;
+            credentialContract = captured.contract;
+            credentialSource =
+              captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
             console.log(`Browser-assisted SSO captured credentials from ${captured.source}.`);
           } catch (assistedError) {
             // Fallback 2: last-resort manual redirect URL paste.
@@ -1840,20 +1827,43 @@ async function handleLogin(args: string[]): Promise<void> {
     throw new Error('Unable to obtain login credentials. Retry login with --sso, --auto, or --redirect-url.');
   }
 
-  // Exchange captured token/username for an authenticated API session.
-  const response = await api.signIn({
-    auth_token: authToken,
-    username,
-    remember: true,
-  });
-
-  const session: SessionData = {
-    baseUrl: api.base,
-    username,
-    authToken: response.auth_token,
-    user: response.user,
-    savedAt: new Date().toISOString(),
-  };
+  const savedAt = new Date().toISOString();
+  const session =
+    credentialContract === 'access-token'
+      ? sessionFromAccessTokenCapture(
+          api.base,
+          {
+            authToken,
+            username,
+            expiresAt: credentialExpiresAt,
+            source: 'auth_response',
+            contract: credentialContract,
+          },
+          savedAt,
+        )
+      : await (async (): Promise<SessionData> => {
+          // Manual/legacy captures use the older exchange contract. Browser
+          // access-token responses are already API credentials and never come here.
+          const response = await api.signIn({
+            auth_token: authToken,
+            username,
+            remember: true,
+          });
+          return {
+            baseUrl: api.base,
+            username,
+            authToken: response.auth_token,
+            user: response.user,
+            savedAt,
+            expiresAt:
+              response.auth_token_expiry ??
+              (response.auth_token === authToken
+                ? credentialExpiresAt
+                : undefined),
+            source: credentialSource,
+            refreshedAt: savedAt,
+          };
+        })();
 
   // Persist session for subsequent CLI commands.
   await saveSession(session);
@@ -1862,7 +1872,12 @@ async function handleLogin(args: string[]): Promise<void> {
 
 /** Clear remote/local auth state (remote sign-out failure does not block local cleanup). */
 async function handleLogout(): Promise<void> {
-  const session = requireSession(await loadSession());
+  const session = await loadSession();
+  if (!session) {
+    await clearSession();
+    console.log('Session cleared.');
+    return;
+  }
   const api = new OnTrackApiClient(session.baseUrl);
   let remoteSignOutError: unknown;
 
@@ -1926,7 +1941,7 @@ async function handleProjects(args: string[]): Promise<void> {
 }
 
 /** Build compact `status:count` summary used by project detail output. */
-function countTasksByStatus(tasks: TaskSummary[]): string {
+function countTasksByStatus(tasks: StudentTaskRow[]): string {
   if (tasks.length === 0) {
     return '-';
   }
@@ -1959,7 +1974,7 @@ async function handleProjectShow(args: string[]): Promise<void> {
     return;
   }
 
-  const tasks = project.tasks || [];
+  const tasks = flattenTasks([project]);
   printTable([
     {
       id: project.id,
@@ -1970,6 +1985,7 @@ async function handleProjectShow(args: string[]): Promise<void> {
       targetGrade: project.targetGrade ?? '-',
       submittedGrade: project.submittedGrade ?? '-',
       tasks: tasks.length,
+      taskInstances: Array.isArray(project.tasks) ? project.tasks.length : 0,
       byStatus: countTasksByStatus(tasks),
     },
   ]);
@@ -2064,7 +2080,8 @@ async function handleUnitTasks(args: string[]): Promise<void> {
       status: getTaskStatus(task) ?? '-',
       due: formatDate(getTaskDueDate(task)),
       completed: formatDate(getTaskCompletionDate(task)),
-      taskId: task.id,
+      taskDefinitionId: getTaskDefinitionId(task) ?? '-',
+      taskInstanceId: task.taskInstanceId ?? '-',
       projectId: task.projectId,
     })),
   );
@@ -2098,7 +2115,8 @@ async function handleTasks(args: string[]): Promise<void> {
       grade: task.grade ?? '-',
       due: formatDate(getTaskDueDate(task)),
       completed: formatDate(getTaskCompletionDate(task)),
-      taskId: task.id,
+      taskDefinitionId: getTaskDefinitionId(task) ?? '-',
+      taskInstanceId: task.taskInstanceId ?? '-',
       projectId: task.projectId,
     })),
   );
@@ -2494,7 +2512,8 @@ async function handleInbox(args: string[]): Promise<void> {
       title: getTaskName(task) ?? '-',
       status: getTaskStatus(task) ?? '-',
       due: formatDate(getTaskDueDate(task)),
-      taskId: task.id,
+      taskDefinitionId: getTaskDefinitionId(task) ?? '-',
+      taskInstanceId: task.id,
       projectId: extractInboxProjectId(task) ?? '-',
       unitId: task._unitId,
     })),
@@ -2511,14 +2530,14 @@ async function handleTaskShow(args: string[]): Promise<void> {
   });
   const resolvedItems = resolveTaskBatchSelector(projects, selector);
   const isSingleSelection =
-    !selector.allTasks && selector.taskIds.length + selector.abbrs.length === 1;
+    !selector.allTasks &&
+    selector.taskDefinitionIds.length + selector.taskIds.length + selector.abbrs.length === 1;
 
   const payloads = resolvedItems.map((resolved) => ({
     projectId: resolved.project.id,
     unitId: resolved.unitId,
     unitCode: resolved.unitCode,
-    taskId: resolved.taskId,
-    taskDefId: resolved.taskDefId,
+    ...taskIdentityJson(resolved),
     abbr: resolved.abbr,
     name: getTaskName(resolved.task),
     status: getTaskStatus(resolved.task),
@@ -2553,12 +2572,304 @@ async function handleTaskShow(args: string[]): Promise<void> {
       grade: payload.grade ?? '-',
       qualityPts: payload.qualityPts ?? '-',
       unit: payload.unitCode ?? '-',
-      taskId: payload.taskId,
-      taskDefId: payload.taskDefId,
+      taskDefinitionId: payload.taskDefinitionId,
+      taskInstanceId: payload.taskInstanceId ?? '-',
       projectId: payload.projectId,
       unitId: payload.unitId ?? '-',
     })),
   );
+}
+
+/** Resolve one definition-first StudentTaskView at the CLI selection Seam. */
+function resolveSelectedStudentTask(
+  projects: ProjectSummary[],
+  projectId: number,
+  taskDefinitionId: number,
+) {
+  const views = buildStudentTaskViews(projects, {
+    includeBeyondTarget: true,
+    includeTutorialMismatches: true,
+  });
+  return resolveStudentTaskViews(views, {
+    projectId,
+    taskDefinitionIds: [taskDefinitionId],
+    abbreviations: [],
+  })[0];
+}
+
+/** Show the observed prerequisite rows for one task definition. */
+async function handleTaskPrerequisites(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const selector = parseTaskSelectorArgs(args);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
+  const resolved = resolveTaskSelector(projects, selector);
+  if (resolved.unitId === undefined) {
+    throw new Error('Unit id not found for task prerequisite lookup.');
+  }
+
+  const all = await api.listUnitTaskPrerequisites(session, resolved.unitId);
+  const prerequisites = all.filter((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      return false;
+    }
+    const row = raw as Record<string, unknown>;
+    return (row.task_definition_id ?? row.taskDefinitionId) === resolved.taskDefId;
+  });
+
+  if (hasFlag(args, '--json')) {
+    printJson(prerequisites);
+    return;
+  }
+  printTable(
+    prerequisites.map((raw) => {
+      const row = raw as Record<string, unknown>;
+      return {
+        taskDefinitionId: resolved.taskDefId,
+        prerequisiteTaskDefinitionId:
+          row.prerequisite_id ?? row.prerequisiteId ?? '-',
+        requiredStatus: row.task_status ?? row.taskStatus ?? 'unknown',
+      };
+    }),
+  );
+}
+
+/** Read all planner views for one project using explicit date-source semantics. */
+async function loadPlannerContext(
+  api: OnTrackApiClient,
+  session: SessionData,
+  projectId: number,
+  includeBeyondTarget: boolean,
+): Promise<{
+  projects: ProjectSummary[];
+  plans: ReturnType<typeof buildPlannerViews>;
+}> {
+  const projects = await loadProjectsWithTaskMetadata(api, session, { projectId });
+  const project = projects[0];
+  if (!project) {
+    throw new Error(`Project ${projectId} not found.`);
+  }
+  if (project.unit?.id === undefined) {
+    throw new Error(`Unit id not found for project ${projectId}.`);
+  }
+
+  const prerequisites = (await api.listUnitTaskPrerequisites(
+    session,
+    project.unit.id,
+  )) as RawTaskPrerequisite[];
+  const views = buildStudentTaskViews(projects, {
+    includeBeyondTarget,
+  });
+  return {
+    projects,
+    plans: buildPlannerViews(views, prerequisites),
+  };
+}
+
+/** Show effective personal/default plan dates and prerequisites. */
+async function handlePlanShow(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const projectId = parseIntegerFlagValue(
+    getFlagValue(args, '--project-id'),
+    '--project-id',
+  );
+  const { plans } = await loadPlannerContext(
+    api,
+    session,
+    projectId,
+    hasFlag(args, '--include-beyond-target'),
+  );
+
+  if (hasFlag(args, '--json')) {
+    printJson(plans);
+    return;
+  }
+  printTable(
+    plans.map((plan) => ({
+      task: plan.abbreviation ?? `#${plan.reference.taskDefinitionId}`,
+      title: plan.name ?? '-',
+      start: plan.start.value ?? '-',
+      startSource: plan.start.source,
+      target: plan.target.value ?? '-',
+      targetSource: plan.target.source,
+      feedbackDeadline: plan.feedbackDeadline.value ?? '-',
+      prerequisites: plan.prerequisites.length,
+      editable: plan.target.editable,
+    })),
+  );
+}
+
+/** Safe planner read-back projection; excludes raw server mutation responses. */
+function plannerReadback(
+  plans: ReturnType<typeof buildPlannerViews>,
+): Array<{
+  taskDefinitionId: number;
+  start?: string;
+  startSource: string;
+  target?: string;
+  targetSource: string;
+}> {
+  return plans.map((plan) => ({
+    taskDefinitionId: plan.reference.taskDefinitionId,
+    start: plan.start.value,
+    startSource: plan.start.source,
+    target: plan.target.value,
+    targetSource: plan.target.source,
+  }));
+}
+
+/** Preview or apply one exact target-date mutation. */
+async function handlePlanSetDates(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const selector = parseTaskSelectorArgs(args);
+  const startDate = parseOptionalString(args, '--start');
+  const targetDate = parseOptionalString(args, '--target');
+  if (!startDate || !targetDate) {
+    throw new Error('plan set-dates requires --start and --target in YYYY-MM-DD form.');
+  }
+
+  const { projects, plans } = await loadPlannerContext(
+    api,
+    session,
+    selector.projectId,
+    true,
+  );
+  const resolved = resolveTaskSelector(projects, selector);
+  const plan = plans.find(
+    (item) => item.reference.taskDefinitionId === resolved.taskDefId,
+  );
+  if (!plan) {
+    throw new Error(`Task definition ${resolved.taskDefId} has no planner view.`);
+  }
+  const mutation = buildTargetDateMutation(plan, { startDate, targetDate });
+  const confirmed = hasFlag(args, '--confirm');
+  if (!confirmed) {
+    const preview = { dryRun: true, mutation };
+    if (hasFlag(args, '--json')) {
+      printJson(preview);
+    } else {
+      console.log('Dry run only. Re-run with --confirm to apply this target-date change.');
+      printJson(preview);
+    }
+    return;
+  }
+
+  const before = {
+    start: plan.start.value,
+    target: plan.target.value,
+  };
+  await api.updateTaskTargetDates(
+    session,
+    plan.reference.projectId,
+    plan.reference.taskDefinitionId,
+    startDate,
+    targetDate,
+  );
+  const readback = await loadPlannerContext(
+    api,
+    session,
+    selector.projectId,
+    true,
+  );
+  const observed = readback.plans.find(
+    (item) => item.reference.taskDefinitionId === plan.reference.taskDefinitionId,
+  );
+  if (
+    !observed ||
+    observed.start.value !== startDate ||
+    observed.target.value !== targetDate
+  ) {
+    throw new Error(
+      'Planner write received a response, but read-back did not verify the requested dates. Inspect `ontrack plan show` before retrying.',
+    );
+  }
+  const output = {
+    confirmed: true,
+    verified: true,
+    mutation,
+    before,
+    after: {
+      start: observed.start.value,
+      target: observed.target.value,
+    },
+  };
+  if (hasFlag(args, '--json')) {
+    printJson(output);
+    return;
+  }
+  console.log(
+    `Updated ${plan.abbreviation ?? `#${plan.reference.taskDefinitionId}`} target dates.`,
+  );
+}
+
+/** Preview or apply the exact project-wide target-date reset contract. */
+async function handlePlanReset(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const projectId = parseIntegerFlagValue(
+    getFlagValue(args, '--project-id'),
+    '--project-id',
+  );
+  const mutation = buildResetTargetDatesMutation(projectId);
+  const confirmed = hasFlag(args, '--confirm');
+  if (!confirmed) {
+    const preview = { dryRun: true, mutation };
+    if (hasFlag(args, '--json')) {
+      printJson(preview);
+    } else {
+      console.log('Dry run only. Re-run with --confirm to reset target dates.');
+      printJson(preview);
+    }
+    return;
+  }
+
+  const beforeContext = await loadPlannerContext(api, session, projectId, true);
+  const before = plannerReadback(beforeContext.plans);
+  await api.resetProjectTargetDates(session, projectId);
+  const afterContext = await loadPlannerContext(api, session, projectId, true);
+  const after = plannerReadback(afterContext.plans);
+  const beforeIds = before.map((item) => item.taskDefinitionId).sort((a, b) => a - b);
+  const afterIds = after.map((item) => item.taskDefinitionId).sort((a, b) => a - b);
+  const verified =
+    JSON.stringify(beforeIds) === JSON.stringify(afterIds) &&
+    after.every(
+      (item) =>
+        item.startSource !== 'personal' && item.targetSource !== 'personal',
+    );
+  if (!verified) {
+    throw new Error(
+      'Planner reset received a response, but read-back still contains personal dates or a changed task set. Inspect `ontrack plan show` before retrying.',
+    );
+  }
+  const output = { confirmed: true, verified: true, mutation, before, after };
+  if (hasFlag(args, '--json')) {
+    printJson(output);
+    return;
+  }
+  console.log(`Reset target dates for project ${projectId}.`);
+}
+
+/** Route subcommands under `ontrack plan ...`. */
+async function handlePlanCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+  const rest = args.slice(1);
+  if (subcommand === 'show') {
+    await handlePlanShow(rest);
+    return;
+  }
+  if (subcommand === 'set-dates') {
+    await handlePlanSetDates(rest);
+    return;
+  }
+  if (subcommand === 'reset') {
+    await handlePlanReset(rest);
+    return;
+  }
+  throw new Error(`Unknown plan subcommand: ${subcommand || '(missing)'}`);
 }
 
 /** Route subcommands under `ontrack project ...`. */
@@ -2683,7 +2994,8 @@ async function handleFeedbackList(args: string[]): Promise<void> {
   });
   const resolvedItems = resolveTaskBatchSelector(projects, selector);
   const isSingleSelection =
-    !selector.allTasks && selector.taskIds.length + selector.abbrs.length === 1;
+    !selector.allTasks &&
+    selector.taskDefinitionIds.length + selector.taskIds.length + selector.abbrs.length === 1;
 
   const results = await Promise.all(
     resolvedItems.map(async (resolved) => ({
@@ -2705,8 +3017,7 @@ async function handleFeedbackList(args: string[]): Promise<void> {
       count: results.length,
       tasks: results.map((item) => ({
         task: item.resolved.abbr,
-        taskId: item.resolved.taskId,
-        taskDefId: item.resolved.taskDefId,
+        ...taskIdentityJson(item.resolved),
         unit: item.resolved.unitCode,
         comments: item.comments,
       })),
@@ -2732,7 +3043,8 @@ async function handleFeedbackList(args: string[]): Promise<void> {
       ...row,
       isNew: item.comments[index]?.isNew ?? item.comments[index]?.is_new ?? '-',
       projectId: item.resolved.project.id,
-      taskId: item.resolved.taskId,
+      taskDefinitionId: item.resolved.taskDefId,
+      taskInstanceId: item.resolved.taskInstanceId ?? '-',
     })),
   );
   printTable(rows);
@@ -2828,14 +3140,16 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
           await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
         );
       } catch (error) {
+        rethrowWatchAuthFailure(error);
+        const message = toRedactedError(error).message;
         if (asJson) {
           printJson({
             type: 'error',
             at: new Date().toISOString(),
-            message: (error as Error).message,
+            message,
           });
         } else {
-          console.error(`[feedback-watch] ${(error as Error).message}`);
+          console.error(`[feedback-watch] ${message}`);
         }
         continue;
       }
@@ -2890,12 +3204,32 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
     task: string;
     unit: string;
     projectId: number;
+    taskDefinitionId: number;
+    taskInstanceId?: number;
     taskId: number;
     taskDefId: number;
     filePath: string;
   }> = [];
 
   for (const resolved of resolvedItems) {
+    if (type === 'submission') {
+      const details = parseSubmissionDetails(
+        await api.getSubmissionDetails(
+          session,
+          resolved.project.id,
+          resolved.taskDefId,
+        ),
+      );
+      if (details.pdfState === 'processing') {
+        throw new Error(
+          `Submission PDF for ${resolved.abbr} is still processing. Retry after OnTrack finishes generating it.`,
+        );
+      }
+      if (details.pdfState === 'unavailable') {
+        throw new Error(`Submission PDF for ${resolved.abbr} is not available.`);
+      }
+    }
+
     // Call type-specific endpoint but normalize naming/output behavior downstream.
     const download =
       type === 'task'
@@ -2916,8 +3250,7 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
       task: resolved.abbr,
       unit: resolved.unitCode ?? '-',
       projectId: resolved.project.id,
-      taskId: resolved.taskId,
-      taskDefId: resolved.taskDefId,
+      ...taskIdentityJson(resolved),
       filePath,
     });
   }
@@ -2946,13 +3279,14 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
       unit: item.unit,
       task: item.task,
       projectId: item.projectId,
-      taskId: item.taskId,
+      taskDefinitionId: item.taskDefinitionId,
+      taskInstanceId: item.taskInstanceId ?? '-',
       file: item.filePath,
     })),
   );
 }
 
-/** Upload submission/new-files flow with requirement-aware file key mapping. */
+/** Preview or dispatch a submission with requirement-aware file key mapping. */
 async function handleSubmissionUpload(
   args: string[],
   mode: 'upload' | 'upload-new-files',
@@ -2971,31 +3305,157 @@ async function handleSubmissionUpload(
     (mode === 'upload' ? deriveDefaultSubmissionTrigger(resolved.task) : undefined);
   const comment = parseOptionalString(args, '--comment');
 
-  const requirementKeys = getUploadRequirementKeys(resolved.task);
-  // Validate + map user file inputs onto server-required multipart keys.
-  const assignments = assignUploadFileKeys(fileInputs, requirementKeys);
-  const files = await readUploadFiles(assignments);
-
-  // Upload files first; optional comment is posted only after successful upload.
-  const upload = await api.uploadTaskSubmission(
-    session,
+  const view = resolveSelectedStudentTask(
+    projects,
     resolved.project.id,
     resolved.taskDefId,
-    files,
-    {
-      trigger,
-    },
   );
+  const inputDetails = await Promise.all(
+    fileInputs.map(async (input, index) => {
+      const absolutePath = resolve(process.cwd(), input.path);
+      let size: number;
+      try {
+        size = (await stat(absolutePath)).size;
+      } catch (error) {
+        void error;
+        throw new Error(`Failed to inspect upload file ${index + 1}.`);
+      }
+      return {
+        key: input.key,
+        localPath: input.path,
+        size,
+      };
+    }),
+  );
+  const prepared = prepareSubmission(view, inputDetails);
+  let attempt = createSubmissionAttempt(prepared, {
+    operationId: crypto.randomUUID(),
+    at: new Date().toISOString(),
+  });
 
-  let commentResult: FeedbackItem | undefined;
-  if (comment) {
-    // Keep comment as separate API call to match current OnTrack behavior.
-    commentResult = await api.addTaskComment(
+  if (mode === 'upload-new-files') {
+    const existing = parseSubmissionDetails(
+      await api.getSubmissionDetails(
+        session,
+        resolved.project.id,
+        resolved.taskDefId,
+      ),
+    );
+    validateSubmissionMode(mode, existing);
+  }
+
+  const safeFiles = prepared.files.map((file) => ({
+    key: file.key,
+    bytes: file.size,
+  }));
+  if (!hasFlag(args, '--confirm')) {
+    const preview = {
+      command: `submission ${mode}`,
+      dryRun: true,
+      confirmed: false,
+      projectId: resolved.project.id,
+      unitCode: resolved.unitCode,
+      task: resolved.abbr,
+      taskDefinitionId: resolved.taskDefId,
+      operationId: attempt.operationId,
+      state: attempt.state,
+      trigger: trigger ?? null,
+      files: safeFiles,
+      comment: { status: comment ? 'requested' : 'not_requested' },
+    };
+    if (hasFlag(args, '--json')) {
+      printJson(preview);
+    } else {
+      console.log('Dry run only. No submission request was sent.');
+      printTable(safeFiles);
+      console.log('Re-run with --confirm to dispatch exactly once.');
+    }
+    return;
+  }
+
+  const files = await readUploadFiles(prepared.files);
+  attempt = transitionSubmissionAttempt(attempt, {
+    type: 'upload_started',
+    at: new Date().toISOString(),
+  });
+
+  try {
+    // This non-idempotent request is dispatched exactly once.
+    await api.uploadTaskSubmission(
       session,
       resolved.project.id,
       resolved.taskDefId,
-      comment,
+      files,
+      {
+        trigger,
+      },
     );
+    attempt = transitionSubmissionAttempt(attempt, {
+      type: 'upload_accepted',
+      at: new Date().toISOString(),
+    });
+  } catch (error) {
+    if (error instanceof OnTrackHttpError) {
+      attempt = transitionSubmissionAttempt(attempt, {
+        type: 'upload_rejected',
+        at: new Date().toISOString(),
+      });
+      if (error.authFailure !== 'other') {
+        throw error;
+      }
+      throw new Error(
+        `Submission was rejected by OnTrack (HTTP ${error.status}). It was not retried.`,
+      );
+    }
+    attempt = transitionSubmissionAttempt(attempt, {
+      type: 'upload_outcome_unknown',
+      at: new Date().toISOString(),
+    });
+    throw new Error(
+      'Submission was dispatched once, but the transport outcome is unknown. Run `ontrack submission status` before considering any retry.',
+    );
+  }
+
+  let verification: 'observed' | 'not_observed' | 'unavailable' | 'credential_expired' =
+    'not_observed';
+  try {
+    const details = parseSubmissionDetails(
+      await api.getSubmissionDetails(
+        session,
+        resolved.project.id,
+        resolved.taskDefId,
+      ),
+    );
+    if (isSubmissionObserved(details)) {
+      attempt = transitionSubmissionAttempt(attempt, {
+        type: 'submission_observed',
+        at: new Date().toISOString(),
+      });
+      verification = 'observed';
+    }
+  } catch (error) {
+    verification =
+      error instanceof OnTrackHttpError && error.authFailure !== 'other'
+        ? 'credential_expired'
+        : 'unavailable';
+  }
+
+  let commentResult: FeedbackItem | undefined;
+  let commentFailed = false;
+  if (comment && attempt.state === 'succeeded') {
+    try {
+      // Keep comment as a separate non-idempotent API call. A failure here must
+      // never downgrade the already-confirmed upload into a retryable error.
+      commentResult = await api.addTaskComment(
+        session,
+        resolved.project.id,
+        resolved.taskDefId,
+        comment,
+      );
+    } catch (error) {
+      void error;
+      commentFailed = true;
+    }
   }
 
   if (hasFlag(args, '--json')) {
@@ -3004,27 +3464,73 @@ async function handleSubmissionUpload(
       projectId: resolved.project.id,
       unitCode: resolved.unitCode,
       task: resolved.abbr,
-      taskDefId: resolved.taskDefId,
+      taskDefinitionId: resolved.taskDefId,
+      operationId: attempt.operationId,
+      state: attempt.state,
+      dryRun: false,
+      confirmed: true,
+      verification,
       trigger: trigger ?? null,
-      files: files.map((file) => ({
-        key: file.key,
-        filename: file.filename,
-        bytes: file.content.length,
-      })),
-      upload,
-      comment: commentResult ?? null,
+      files: safeFiles,
+      upload: { status: 'response_accepted' },
+      comment: !comment
+        ? { status: 'not_requested' }
+        : commentResult
+          ? { status: 'posted', id: commentResult.id }
+          : commentFailed
+            ? { status: 'failed' }
+            : { status: 'skipped_until_submission_observed' },
     });
     return;
   }
 
   console.log(
-    `Uploaded ${files.length} file(s) for ${resolved.unitCode ?? '-'} ${resolved.abbr} (project ${resolved.project.id}).`,
+    `Submission response accepted for ${safeFiles.length} evidence slot(s) on ${resolved.unitCode ?? '-'} ${resolved.abbr} (project ${resolved.project.id}).`,
   );
-  console.log(`File keys: ${assignments.map((item) => `${item.key}=${item.path}`).join(', ')}`);
+  console.log(`Evidence slots: ${safeFiles.map((item) => item.key).join(', ')}`);
+  console.log(`Observed state: ${attempt.state} (${verification})`);
   console.log(`Trigger: ${trigger ?? 'ready_for_feedback (server default)'}`);
   if (commentResult) {
     console.log(`Comment posted: ${commentResult.id ?? 'ok'}`);
+  } else if (commentFailed) {
+    console.error(
+      '[warn] Submission was observed, but the optional comment was not posted.',
+    );
+  } else if (comment) {
+    console.error(
+      '[warn] Optional comment was not posted because the submission could not yet be observed.',
+    );
   }
+}
+
+/** Read and normalize server submission status before lifecycle actions. */
+async function handleSubmissionStatus(args: string[]): Promise<void> {
+  const session = requireSession(await loadSession());
+  const api = new OnTrackApiClient(session.baseUrl);
+  const selector = parseTaskSelectorArgs(args);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
+  const resolved = resolveTaskSelector(projects, selector);
+  const details = parseSubmissionDetails(
+    await api.getSubmissionDetails(
+      session,
+      resolved.project.id,
+      resolved.taskDefId,
+    ),
+  );
+  const output = {
+    projectId: resolved.project.id,
+    taskDefinitionId: resolved.taskDefId,
+    taskInstanceId: resolved.taskInstanceId,
+    task: resolved.abbr,
+    ...details,
+  };
+  if (hasFlag(args, '--json')) {
+    printJson(output);
+    return;
+  }
+  printTable([output]);
 }
 
 /** Apply optional project/unit filters to watch snapshot candidate projects. */
@@ -3043,6 +3549,13 @@ function filterProjectsForWatch(
   return scoped;
 }
 
+/** Preserve centralized 401/419 handling even when an error occurs inside a poll loop. */
+function rethrowWatchAuthFailure(error: unknown): void {
+  if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
+    throw error;
+  }
+}
+
 /** Build current watch snapshot by combining task metadata and feedback counts. */
 async function buildWatchSnapshot(
   api: OnTrackApiClient,
@@ -3059,24 +3572,29 @@ async function buildWatchSnapshot(
 
   const states: Array<WatchTaskState | null> = await Promise.all(
     tasks.map(async (task): Promise<WatchTaskState | null> => {
-      const taskId = getTaskDefinitionId(task);
-      if (!taskId) {
+      const taskDefinitionId = getTaskDefinitionId(task);
+      if (!taskDefinitionId) {
         return null;
       }
 
       let comments: FeedbackItem[] = [];
       try {
-        comments = await api.listTaskComments(session, task.projectId, taskId);
-      } catch {
+        comments = await api.listTaskComments(
+          session,
+          task.projectId,
+          taskDefinitionId,
+        );
+      } catch (error) {
+        rethrowWatchAuthFailure(error);
         comments = [];
       }
 
       return {
-        taskKey: makeWatchTaskKey(task.projectId, taskId),
+        taskKey: makeWatchTaskKey(task.projectId, taskDefinitionId),
         projectId: task.projectId,
-        taskId,
+        taskDefinitionId,
         unitCode: task.unitCode,
-        abbr: getTaskAbbreviation(task) ?? String(taskId),
+        abbr: getTaskAbbreviation(task) ?? String(taskDefinitionId),
         status: getTaskStatus(task),
         dueDate: getTaskDueDate(task),
         commentCount: comments.length,
@@ -3187,14 +3705,16 @@ async function handleWatch(args: string[]): Promise<void> {
       try {
         currentSnapshot = await buildWatchSnapshot(api, session, projectId, unitId);
       } catch (error) {
+        rethrowWatchAuthFailure(error);
+        const message = toRedactedError(error).message;
         if (asJson) {
           printJson({
             type: 'error',
             at: new Date().toISOString(),
-            message: (error as Error).message,
+            message,
           });
         } else {
-          console.error(`[watch] ${(error as Error).message}`);
+          console.error(`[watch] ${message}`);
         }
         continue;
       }
@@ -3235,6 +3755,10 @@ async function handleTaskCommand(args: string[]): Promise<void> {
   const rest = args.slice(1);
   if (subcommand === 'show') {
     await handleTaskShow(rest);
+    return;
+  }
+  if (subcommand === 'prerequisites') {
+    await handleTaskPrerequisites(rest);
     return;
   }
   throw new Error(`Unknown task subcommand: ${subcommand || '(missing)'}`);
@@ -3280,6 +3804,10 @@ async function handleSubmissionCommand(args: string[]): Promise<void> {
   }
   if (subcommand === 'upload-new-files') {
     await handleSubmissionUpload(rest, 'upload-new-files');
+    return;
+  }
+  if (subcommand === 'status') {
+    await handleSubmissionStatus(rest);
     return;
   }
   throw new Error(`Unknown submission subcommand: ${subcommand || '(missing)'}`);
@@ -3344,6 +3872,9 @@ async function main(): Promise<void> {
     case 'task':
       await handleTaskCommand(rest);
       return;
+    case 'plan':
+      await handlePlanCommand(rest);
+      return;
     case 'feedback':
       await handleFeedbackCommand(rest);
       return;
@@ -3363,6 +3894,12 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   const redacted = toRedactedError(error);
-  console.error(`Error: ${redacted.message}`);
+  if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
+    console.error(
+      `Error: OnTrack rejected the saved credential (${error.authFailure}). Run \`ontrack login\` again.`,
+    );
+  } else {
+    console.error(`Error: ${redacted.message}`);
+  }
   process.exitCode = 1;
 });

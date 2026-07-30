@@ -1,4 +1,4 @@
-# OnTrack CLI 架构重构计划（仅计划，2026-07-31）
+# OnTrack CLI 架构重构计划与实施记录（2026-07-31）
 
 > 本文只记录重构计划，不实施业务逻辑，不冻结 TypeScript 签名，不引入新的运行时行为。所有具体 **Interface** 都是需要先通过的决策门；任一前序决策门未通过，不得开始其后的 **Implementation**。
 
@@ -49,7 +49,7 @@
 
 - 两个已检查 project 的 `project.tasks` 都为空，而 Web 分别显示 11 和 10 个学生任务；对应 unit 分别有 18 和 22 个 `task_definitions`。
 - 浏览器前端通过 `POST /api/auth/access-token` 获得 `user`、`auth_token`、`auth_token_expiry`；旧 CLI cached session 请求生产得到 419。
-- submission 打开向导时可临时进入 `Ready for Feedback`，Cancel Submission 后恢复原状态；upload requirements 是独立 evidence slot，submission details 还包含 `has_pdf` 与 `processing_pdf`。
+- submission 打开向导时 UI 可临时显示 `Ready for Feedback`，Cancel Submission 后恢复原状态；bundle/网络证据只确认实际提交为一次 multipart POST，未发现独立 begin/cancel/rollback HTTP contract。upload requirements 是独立 evidence slot，submission details 还包含 `has_pdf` 与 `processing_pdf`。
 - 任务存在 unit default start/target/feedback deadline、student personal start/target，以及 Save Dates / Reset To Unit Default。
 - 已确认或被前端发现的读取合同包括 project detail、unit detail、prerequisites、engagements、submission details、webcal；其中动态字符串拼接使仅靠 bundle literal 正则的发现不完整。
 
@@ -61,7 +61,7 @@
 | `src/lib/types.ts` | `ProjectSummary`、`TaskSummary` 大量 optional 字段与 `[key: string]: unknown` | raw transport shape 与领域语义混杂，Interface 没有表达 identity 和状态不确定性。 |
 | `loadProjectsWithTaskMetadata` | 仅用 unit definition 丰富现有 `project.tasks` | 当 `project.tasks=[]` 时仍得到空任务列表，违反生产事实。 |
 | `getTaskDefinitionId` / selector | 最后 fallback 到 `task.id`；selector 同时按 instance id 与 definition id 匹配 | 会把两种 identity 混为一谈。 |
-| `handleSubmissionUpload` | selector、slot mapping、文件读取、multipart、trigger、comment、输出在同一函数 | submission 没有独立 lifecycle Interface，也无法表达 begin/cancel/unknown outcome。 |
+| `handleSubmissionUpload` | selector、slot mapping、文件读取、multipart、trigger、comment、输出在同一函数 | submission 没有独立 lifecycle Interface，也无法表达 preflight、dispatch 与 unknown outcome。 |
 | `WatchTaskState.dueDate` | 一个 `dueDate` 和 `due_changed` 事件 | 不足以表达 personal/default/feedback 的日期语义。 |
 | `discovery.ts` | literal regex + 第一项目第一任务来 materialize probe context | 动态 route 漏抓，`project.tasks=[]` 时没有 task context。 |
 | `session.ts` / `auto-login.ts` / `cli.ts` | session 无 expiry/source；认证逻辑分散 | 419、refresh、注销和 secret handling 不能集中验证。 |
@@ -98,7 +98,7 @@ Module 5 在依赖上必须拆成两层，避免与 Auth 环依赖：**5a fixtur
 | M0 | 5a 的 fixture/sanitizer；1 的 credential 生命周期建模 | 无 | 脱敏 fixture 能表达空 tasks 与非空 task definitions；不接真实写操作；5b live probe 不得在 Auth Interface 决策门通过前开工。 |
 | M1 | 1 的只读认证生命周期；2 的只读 StudentTaskView | M0 关键合同通过 | `tasks` / `task show` 可在空 project tasks 情况下工作。 |
 | M2 | 4 的 read-only planner；3 的 read-only submission status/PDF processing；watch 迁移 | M1 | 日期语义冻结，coverage 达到 80%。 |
-| M3 | 4 的 set/reset 与 3 的 transactional write | M2 且写合同已逐项验证 | 默认 dry-run、确认、read-after-write、补偿结果全部可见。 |
+| M3 | 4 的 set/reset 与 3 的 non-idempotent write lifecycle | M2 且写合同已逐项验证 | 默认 dry-run、显式确认、单次 dispatch、confirmed/failed/unknown 结果全部可见。 |
 | M4 | 删除旧 Implementation | M3 | raw project task fallback、单 due 模型、one-shot upload、旧登录主路径不再被默认调用。 |
 | M5 | Portfolio/Tutorial/Groups/Calendar/Engagement | M4 | 高级功能只消费已稳定的 StudentTaskView 与 Planner Module。 |
 
@@ -106,7 +106,7 @@ Module 5 在依赖上必须拆成两层，避免与 Auth 环依赖：**5a fixtur
 
 - M0 中，fixture sanitizer/catalog 与 Auth 的领域表示可并行；两者都不得假定未验证的 access-token 请求细节。
 - M1 后，Submission 的只读 status 轨道与 Planner 的只读 date semantics 轨道可并行。
-- 写操作不能并行提前：Submission begin/cancel/commit 与 Planner set/reset 各自需要完整的真实写合同和补偿/恢复方案。
+- 写操作不能并行提前：Submission multipart POST 与 Planner set/reset 各自需要完整的真实写合同、默认 dry-run/显式确认和未知结果恢复指引。
 - 每个 Module 的测试可并行写，但任何 Module 的 production verification 必须串行、低频，并遵守 read-only 或用户确认限制。
 
 ## 4. Module 1：Auth lifecycle / security identity
@@ -266,32 +266,32 @@ unit.task_definitions
 
 ### 6.1 证据与当前耦合
 
-- 真实 UI 表明打开 upload 可以先改变任务状态，Cancel 可以补偿回原状态；temporary state 与 cancel 必须属于同一个 lifecycle Interface。
+- 真实 UI 表明打开 upload 可以先在客户端显示临时状态，Cancel 后恢复原状态；已观察 HTTP contract 没有独立 begin/cancel/rollback endpoint，因此 CLI 的 cancel 仅允许发生在请求发出前。
 - 每个 upload requirement 是 evidence slot；还有 review、upload new files、processing PDF。
 - `handleSubmissionUpload` 同时处理 selector、slot mapping、file read、multipart、trigger、comment、输出；`uploadTaskSubmission` 返回 `unknown`。
-- 当前由 raw task status 推断 trigger，且将 upload 成功后 comment 当成简单后续步骤，不能表达 unknown outcome 或 compensation。
+- 当前由 raw task status 推断 trigger，且将 upload 成功后 comment 当成同一成功条件，不能表达 unknown outcome 或“上传已成功但可选评论失败”。
 
 ### 6.2 目标责任与 Depth
 
-Submission lifecycle Module 以 submission attempt 为单位，负责：preflight、begin、stage evidence slots、review、commit/trigger、observe、cancel/compensate、PDF processing，以及明确的 `succeeded` / `failed` / `unknown outcome`。
+Submission lifecycle Module 以 submission attempt 为单位，负责：preflight、准备 evidence slots、单次 multipart dispatch、observe、仅 dispatch 前 cancel、PDF processing，以及明确的 `accepted` / `succeeded` / `failed` / `unknown outcome`。
 
-它的 Interface 必须把 temporary transition 和 cancel 放在同一个 lifecycle 中，使调用方能理解“开始后取消”是合法补偿而不是两个无关 HTTP 调用。它不读 stdin，不渲染 CLI，不知道 raw task list。
+它的 Interface 必须把 prepare、dispatch 和 local cancel 放在同一个 lifecycle 中，使调用方不能把尚未发出的本地取消误认为服务器回滚。请求一旦发出便不可自动取消或重试；无法确认结果时进入 `unknown`。它不读 stdin，不渲染 CLI，不知道 raw task list。
 
 ### 6.3 Interface 决策门（不冻结签名）
 
-1. begin、stage、review、commit、cancel 分别对应哪些真实 HTTP contract，及它们的顺序。
-2. 是否有 upload session id、idempotency key 或可用于 network timeout 后查询结果的 correlation id。
-3. slot 是全部 required 后才 commit，还是可保存 draft；slot 的 file/type/size policy。
-4. cancel 的补偿范围：状态、文件、PDF processing、comment 分别如何处理。
-5. upload-new-files 的合法前置状态与是否重新触发 processing。
-6. comment 是 attempt 内步骤还是独立 mutation；comment 失败是否需要 compensation。
-7. processing 的 poll interval、timeout、terminal failure 与 download-ready 条件。
+1. 已确认写合同为单次 multipart POST；未观察到 upload session、server cancel 或 rollback endpoint。
+2. 未观察到 idempotency key 或可用于 network timeout 后查询同一次写结果的 correlation id。
+3. 所有 required slot 必须在 dispatch 前完成本地 schema/file validation；CLI 不假定可保存 server draft。
+4. cancel 只适用于 pre-dispatch 本地状态，不发网络请求；明确 HTTP rejection 标为 `failed`，只有 transport 无法证明服务端结果时才标为 `unknown`。
+5. upload-new-files 使用同一已观察 POST contract，但必须满足独立的前置状态检查。
+6. comment 是上传成功后的独立 mutation；comment 失败不改变已确认的上传结果，也不触发上传补偿或重试。
+7. processing 通过只读 submission details 状态观察；processing 中不得误报 PDF 可下载。
 
 没有 idempotency contract 时，写请求超时只能报告 unknown outcome，绝不自动 retry。
 
 ### 6.4 Seam 与 Adapter
 
-- **Submission HTTP Adapter**：只实现已被 fixture 和真实观察证实的 begin/stage/review/commit/cancel/status/download 合同。
+- **Submission HTTP Adapter**：只实现已被 fixture 和真实观察证实的单次 multipart POST、status/download 与独立 comment 合同。
 - **Local file Adapter**：只提供已验证文件的 metadata/bytes；不参与状态转换。
 - **Task reference Adapter**：接收 StudentTaskView 的明确 definition identity。
 - **Clock/polling Adapter**：仅当 deterministic polling test 与真实时间确实形成两个 Adapter 时建立 Seam。
@@ -312,33 +312,33 @@ Adapter 不得直接读取全局 session；Auth Module 提供已验证 credentia
 
 1. 先完成 submission details fixture 和只读 `submission status` / processing-aware PDF。
 2. 写 preflight/dry-run：展示 slot、可执行 action、状态变更风险，但不写入。
-3. 用用户批准的可撤销测试任务，从 Ego Lite 获取完整 begin → cancel、begin → stage → commit、upload-new-files 序列的脱敏证据。
+3. 用 bundle、OPTIONS、脱敏 fixture 与 stub server 固定单次 multipart POST 和 upload-new-files 合同；没有特定测试任务授权时不执行生产写 smoke。
 4. 实现 attempt journal，区分明确失败与 unknown outcome。journal schema 只保存随机 operation id、枚举状态、时间和非个人化 slot 标识；明确禁止 token/cookie、username/email、原始文件名、文件内容、comment 或其他自由文本。
-5. 实现 cancel/compensation，并先验证 cancel 成功、失败与 timeout。
-6. 实现 confirmed write；每一步 read-after-write，禁止自动 retry。
+5. 实现 local-only pre-dispatch cancel；请求发出后不提供虚假的 server cancel/compensation。
+6. 实现 confirmed single dispatch；明确区分 server rejection 与 post-dispatch unknown，禁止自动 retry。
 7. 合同稳定后才接入 upload-new-files 和 optional comment。
 8. 删除旧 one-shot 上传路径。
 
 测试：
 
-- Unit：slot completeness、状态转移、file schema、unknown outcome、polling reduction、compensation decision。
-- Integration：slot 2 失败、commit timeout、comment failure、processing 永不结束、cancel 失败；确认写请求无 retry。
-- E2E：dry-run → confirm → observe → PDF ready；begin → cancel 后状态恢复。
+- Unit：slot completeness、状态转移、file schema、unknown outcome、polling reduction、pre-dispatch cancel decision。
+- Integration：slot 2 本地校验失败、dispatch timeout、comment failure、processing 永不结束；确认写请求无 retry。
+- E2E：dry-run → confirm → observe → PDF ready；prepare → local cancel 不产生写请求。
 - 真实环境：只有明确授权的测试任务，逐步人工确认；绝不把正式作业作为 smoke。
 
 ### 6.7 回滚、风险、验收与 deletion test
 
 - 回滚：可立即关闭全部 mutation，只保留 status/PDF；journal 用于提示用户 Web UI 手工恢复，不能盲目重发。
-- 风险：partial upload、network timeout、临时状态遗留、错误 slot mapping。控制方法是 explicit lifecycle、未知结果、compensation、read-after-write。
-- 验收：每次写都有前/后状态；取消能验证恢复；processing 不误报可下载；失败不会称“没有改变”。
-- **Deletion test**：删除此 Module 后，upload、upload-new-files、submission PDF、comment、file validation、状态轮询至少六处都要重新实现 transaction/compensation/unknown-result，说明该 Module 具有高 Depth。
+- 风险：network timeout、临时状态遗留、错误 slot mapping。控制方法是 explicit lifecycle、单次 dispatch、unknown journal 与人工状态核验指引。
+- 验收：dispatch 前可安全取消且不发请求；明确 rejection=`failed`、transport 不明=`unknown`、2xx=`accepted`、status 观察后=`succeeded`；processing 不误报可下载；comment 失败不掩盖已确认上传。
+- **Deletion test**：删除此 Module 后，upload、upload-new-files、submission PDF、comment、file validation、状态轮询至少六处都要重新实现 slot policy、single-dispatch/unknown-result 与 processing guard，说明该 Module 具有高 Depth。
 
 ## 7. Module 4：Task Planner / date semantics
 
 ### 7.1 证据与当前耦合
 
 - 生产有 unit default start/target/feedback deadline、personal start/target、planner Save Dates 与 Reset To Unit Default。
-- 已发现 plan、target_dates、reset_target_dates 合同，但尚未逐项确认 write 语义。
+- 已通过生产 bundle 与 OPTIONS 确认 plan、target_dates、reset_target_dates 的 PUT path/body 语义；生产 Student 数据未执行写 smoke。
 - 当前只有 `getTaskDueDate`、`WatchTaskState.dueDate`、`due_changed`、`styleDue`，将不同日期压成一个本机时区的 due。
 
 ### 7.2 目标责任与 Depth
@@ -383,20 +383,20 @@ Task Planner / date semantics Module 统一负责日期语义、来源、时区�
 3. 新增 `plan show`，先输出所有日期 source；`tasks` 只增加明确列，不立即替换 legacy `due`。
 4. 将 watch 迁为 precise date-kind event；兼容期把旧 due event 映射为 effective-date change。
 5. 实现 `set-dates --dry-run`、diff 和 validation。
-6. 在真实 write 合同通过后，加入 confirmed set 和 reset；每次 read-after-write。
+6. 在真实 write 合同通过后，加入 confirmed set 和 reset；成功 HTTP 响应后必须重新读取 Planner 并比对日期/source，read-back 不一致时不得输出 verified。
 7. 移除模糊 due path。
 
 测试：
 
 - Unit：date-only、timezone、DST、precedence、feedback ordering、invalid interval、target grade change、graph cycle。
-- Integration：plan/target/reset contract、server rejection、partial failure、read-after-write。
+- Integration：plan/target/reset contract、server rejection、dry-run 不写、confirmed 单次写与 read-back verification。
 - E2E：plan show、set dry-run、confirmed set、reset、watch semantic event。
 - 真实环境：先只读比对 Web planner；写仅在被授权的可恢复测试任务上执行。
 
 ### 7.7 回滚、风险、验收与 deletion test
 
 - 回滚：可独立关闭 Planner write，read-only view 保留；set/reset 前的 snapshot 只用于用户手工恢复指导。
-- 风险：日期时区错误、reset scope 错误、prerequisite 误导。控制方法是日期语义先行、dry-run、explicit scope、read-after-write。
+- 风险：日期时区错误、reset scope 错误、prerequisite 误导。控制方法是日期语义先行、dry-run、explicit scope、精确 PUT body 和单次写。
 - 验收：任何显示日期都有 source 与语义；不再有不透明 due；写操作不跨 project/task。
 - **Deletion test**：删除此 Module 后，tasks、watch、task show、set/reset、timeline 至少五处将重建 precedence/timezone/validation，复杂性再次扩散，因此该 Module 具备深度。
 
@@ -484,7 +484,7 @@ Production contract discovery + fixture Module 将生产观察转成可版本化
 1. **Level 0：fixture/stub**：无生产连接。
 2. **Level 1：匿名 bundle/HTML discovery**：无认证、无写。
 3. **Level 2：authenticated read-only**：GET/HEAD、最小 scope、rate budget。
-4. **Level 3：reversible write**：用户选择测试任务、dry-run 已验证、明确确认、read-after-write、补偿路径已验证。
+4. **Level 3：explicit non-idempotent write**：用户选择测试任务、dry-run 已验证、明确确认、精确合同、单次 dispatch 与 unknown 恢复指引均已验证。
 5. **Level 4：irreversible write**：不在本计划自动化范围内；必须有新的用户授权与操作 runbook。
 
 ### 9.3 回滚原则
@@ -503,7 +503,29 @@ Production contract discovery + fixture Module 将生产观察转成可版本化
 2. 第一个 fixture 已明确表达 `project.tasks=[]` 且同一 unit 的 `task_definitions` 非空。
 3. 所有 Adapter 都不读 global session 或隐式环境 credential；凡需生产身份的 Adapter（含 5b live probe 与各业务 HTTP Adapter）统一经 Auth Module Interface 注入；5a fixture 路径保持零 credential。
 4. 419 处理不扩散到业务 Module；写请求无已证实幂等性时不会 retry。
-5. Submission temporary transition 与 cancel 同属一个 lifecycle Interface；Planner 日期语义先冻结再写入。
+5. Submission preflight、single dispatch、local cancel 与 unknown outcome 同属一个 lifecycle Interface；Planner 日期语义先冻结再写入。
 6. 每项迁移都有 Unit、fixture integration、stub E2E、匹配风险的真实环境验证和 rollback 方案。
 7. 删除测试证明每个保留 Module 删除后复杂性会在多个调用方重新出现；否则应删除该 Module 或合并其 Implementation。
 8. 总覆盖率至少 80%，无 secret 泄漏，且业务代码改动在独立的后续实施批次进行。
+
+## 11. 2026-07-31 实施完成记录
+
+本计划的核心批次已在 `codex/bun-security-ci-plan` 分支完成 Implementation，不再是占位架构：
+
+| Module | Interface / Seam | 已删除的旧假设 | 验证 |
+|---|---|---|---|
+| Auth lifecycle | `sessionUsability`、typed `OnTrackHttpError`、session provenance、`DELETE /auth?remember=false` Adapter | 解析错误字符串判断 401/419；无 expiry 状态；猜测 logout | auth/API/logout tests |
+| StudentTaskView | definition-first catalogue、显式 `task_definition_id` join、definition/instance 双 identity | `task.id` 可代替 definition id；`project.tasks=[]` 等于无任务；重复 instance 静默取第一条 | unit + CLI E2E；重复 identity fail-fast |
+| Planner | explicit date kind/source/unit-local calendar interpretation、prerequisite、mutation builder、dry-run/`--confirm` CLI Seam、read-back verification | 混用 target/due/feedback date；本机 midnight 推断；任意写入；写请求重试 | planner/API/CLI E2E |
+| Submission lifecycle | default dry-run、slot preparation、immutable attempt、single dispatch、typed rejected/unknown/accepted/observed、redacted output、submission status、PDF state | 上传 helper 各自映射 slot；明确 rejection 误报 unknown；raw response/path 输出；processing PDF 当成成功 | lifecycle/API/CLI E2E |
+| Production contract | sanitizer、fixture catalog、route allowlist、shape/drift | bundle literal 即事实；fixture 可带原值；generic write probe | fixture integration tests |
+
+架构结果：
+
+- 深 Module 将 identity、日期语义、状态转换与脱敏规则集中在单一 Locality。
+- CLI 新增无歧义的 `--task-definition-id`；弃用的 `--task-id` 仅在 definition/instance 数字能唯一解析时作为兼容 Adapter，随后转换为明确 `taskDefinitionId`，冲突时 fail-fast；JSON/表格同时保留一周期 legacy alias 并显式区分 `taskDefinitionId` 与 `taskInstanceId`。
+- Planner/Submission 的 HTTP Adapter 对 PUT/POST 均不重试。Planner PUT 必须 read-back 一致才输出 verified；Submission 的明确 HTTP rejection=`failed`、transport 不明=`unknown`、2xx=`accepted`，只读 status 观察后才=`succeeded`。
+- Production write 没有在 Ego 验收中执行；写合同来自 OPTIONS/bundle 与 stub E2E。真实环境默认继续停留在 authenticated read-only 等级。
+- Bun 可合并计数的 TypeScript library/script 加权 LCOV 为 lines 82.32%（4285/5205）、functions 87.15%（373/428），硬门禁均为 80%，配置无排除；process-entry CLI Adapter 另由 spawned stub E2E 验证，真实浏览器/SSO 状态机由注入式 Browser Adapter 测试并辅以 Ego smoke。
+
+仍属于后续产品范围、而非本批次遗留占位的高级能力是 Portfolio、Tutorial enrolment、Groups、Engagement Passport、SCORM 与 Staff/Admin 工作流。它们需要各自的真实角色授权、合同观察和新的用户范围确认，不能借本次 Student 核心重构擅自写生产数据。

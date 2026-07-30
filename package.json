@@ -3,6 +3,17 @@
   "version": "0.3.0",
   "description": "CLI for Monash OnTrack / Doubtfire",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MarkChu-git/ontrack-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MarkChu-git/ontrack-cli/issues"
+  },
+  "homepage": "https://github.com/MarkChu-git/ontrack-cli#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "ontrack": "./dist/cli.js"
@@ -11,7 +22,7 @@
     "build": "bun run clean && tsc -p tsconfig.json && bun -e \"import { chmod } from 'node:fs/promises'; await chmod('dist/cli.js', 0o755)\"",
     "dev": "bun src/cli.ts",
     "test": "bun test",
-    "test:coverage": "bun test --coverage",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov && bun scripts/check-coverage.ts",
     "typecheck": "tsc --noEmit",
     "smoke:real": "bun run build && bun scripts/smoke-real.mjs",
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",

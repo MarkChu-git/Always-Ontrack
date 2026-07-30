@@ -142,8 +142,30 @@ test('redactSensitiveText masks auth headers and unquoted token fields without c
     assert.equal(output.includes(secret), false, `output leaked ${secret}`);
   }
   assert.match(output, /Auth-Token: \[REDACTED\]/);
-  assert.match(output, /Authorization: Bearer \[REDACTED\]/);
+  assert.match(output, /Authorization: \[REDACTED\]/);
   assert.match(output, /authToken: \[REDACTED\]/);
   assert.match(output, /"authToken":"\[REDACTED\]"/);
   assert.equal(output.includes('status: normal text remains visible'), true);
+});
+
+test('redactSensitiveText masks PII, Basic auth, API keys, and private-key markers', () => {
+  const secrets = [
+    'student@example.edu',
+    '0400 000 000',
+    'dXNlcjpwYXNz',
+    'production-api-key',
+    'private-key-material',
+  ];
+  const input = [
+    'email=student@example.edu',
+    'phone: 0400 000 000',
+    'Authorization: Basic dXNlcjpwYXNz',
+    'api_key=production-api-key',
+    '-----BEGIN PRIVATE KEY-----\nprivate-key-material\n-----END PRIVATE KEY-----',
+  ].join('; ');
+
+  const output = redactSensitiveText(input);
+  for (const secret of secrets) {
+    assert.equal(output.includes(secret), false, `output leaked ${secret}`);
+  }
 });
