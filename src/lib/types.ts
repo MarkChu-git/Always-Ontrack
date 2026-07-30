@@ -39,9 +39,24 @@ export interface OnTrackUser {
 export interface SignInResponse {
   // Session auth token returned by `/api/auth`.
   auth_token: string;
+  // Expiry when the server returns the access-token response variant.
+  auth_token_expiry?: string;
   // Resolved signed-in user profile.
   user: OnTrackUser;
 }
+
+/** Verified `/auth/access-token` response shape captured from production. */
+export interface AccessTokenResponse {
+  auth_token: string;
+  auth_token_expiry: string;
+  user: OnTrackUser;
+}
+
+export type CredentialSource =
+  | 'legacy'
+  | 'manual-sign-in'
+  | 'browser-sso'
+  | 'access-token';
 
 /** Local cached session payload stored on disk. */
 export interface SessionData {
@@ -55,6 +70,12 @@ export interface SessionData {
   user: OnTrackUser;
   // ISO timestamp recording local save time.
   savedAt: string;
+  // Credential expiry supplied by the access-token contract when available.
+  expiresAt?: string;
+  // Provenance of the credential; absent records remain readable as legacy data.
+  source?: CredentialSource;
+  // ISO timestamp of the most recent credential refresh, when applicable.
+  refreshedAt?: string;
 }
 
 /** Unit/course summary with optional task definition payloads. */
@@ -204,7 +225,9 @@ export interface ProjectSummary {
 export interface TaskSelector {
   // Required project id.
   projectId: number;
-  // Optional explicit task id.
+  // Optional explicit task definition id.
+  taskDefinitionId?: number;
+  // Deprecated compatibility selector: definition id or unique instance id.
   taskId?: number;
   // Optional task abbreviation (preferred UX selector).
   abbr?: string;
@@ -214,7 +237,9 @@ export interface TaskSelector {
 export interface TaskBatchSelector {
   // Required project id.
   projectId: number;
-  // Optional list of explicit task ids.
+  // Optional list of explicit task definition ids.
+  taskDefinitionIds: number[];
+  // Deprecated compatibility selectors: definition ids or unique instance ids.
   taskIds: number[];
   // Optional list of task abbreviations.
   abbrs: string[];
@@ -260,12 +285,12 @@ export type WatchEventType = 'status_changed' | 'due_changed' | 'new_feedback';
 export interface WatchEvent {
   // Event category emitted by watch diff engine.
   type: WatchEventType;
-  // Stable key format: `projectId:taskId`.
+  // Stable key format: `projectId:taskDefinitionId`.
   taskKey: string;
   // Project id for changed task.
   projectId: number;
   // Task definition id for changed task.
-  taskId: number;
+  taskDefinitionId: number;
   // Unit code for user-facing output.
   unitCode?: string;
   // Task abbreviation for user-facing output.

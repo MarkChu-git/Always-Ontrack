@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import type { FeedbackItem, ProjectSummary } from '../src/lib/types.js';
@@ -57,6 +57,22 @@ test('parseTaskSelectorArgs supports --task-id', () => {
   assert.deepEqual(selector, {
     projectId: 101,
     taskId: 501,
+    taskDefinitionId: undefined,
+    abbr: undefined,
+  });
+});
+
+test('parseTaskSelectorArgs supports explicit --task-definition-id', () => {
+  const selector = parseTaskSelectorArgs([
+    '--project-id',
+    '101',
+    '--task-definition-id',
+    '501',
+  ]);
+  assert.deepEqual(selector, {
+    projectId: 101,
+    taskId: undefined,
+    taskDefinitionId: 501,
     abbr: undefined,
   });
 });
@@ -66,14 +82,15 @@ test('parseTaskSelectorArgs supports --abbr', () => {
   assert.deepEqual(selector, {
     projectId: 101,
     taskId: undefined,
+    taskDefinitionId: undefined,
     abbr: 'T1',
   });
 });
 
-test('parseTaskSelectorArgs requires --task-id or --abbr', () => {
+test('parseTaskSelectorArgs requires an explicit, legacy, or abbreviation selector', () => {
   assert.throws(
     () => parseTaskSelectorArgs(['--project-id', '101']),
-    /Task-level commands require --all-tasks, or at least one --task-id <id> \/ --abbr <abbr> selector/,
+    /at least one --task-definition-id <id> \/ --task-id <legacy-id> \/ --abbr <abbr>/,
   );
 });
 
@@ -99,6 +116,7 @@ test('parseTaskBatchSelectorArgs supports repeated and comma-separated selectors
   assert.deepEqual(parsed, {
     projectId: 101,
     taskIds: [501, 502],
+    taskDefinitionIds: [],
     abbrs: ['T1', 'T2', 'T3'],
     allTasks: false,
   });
@@ -109,6 +127,7 @@ test('parseTaskBatchSelectorArgs supports --all-tasks and validates conflicts', 
   assert.deepEqual(all, {
     projectId: 101,
     taskIds: [],
+    taskDefinitionIds: [],
     abbrs: [],
     allTasks: true,
   });
@@ -133,9 +152,38 @@ test('resolveTaskSelector accepts matching --task-id and --abbr', () => {
   assert.equal(resolved.unitCode, 'FIT2004');
 });
 
+test('resolveTaskSelector keeps unique legacy instance ids at the CLI compatibility seam', () => {
+  const resolved = resolveTaskSelector(sampleProjects, {
+    projectId: 101,
+    taskId: 11,
+  });
+
+  assert.equal(resolved.taskDefId, 501);
+  assert.equal(resolved.taskInstanceId, 11);
+});
+
+test('resolveTaskSelector rejects a legacy id that matches different definition and instance identities', () => {
+  const projects = structuredClone(sampleProjects);
+  projects[0].tasks!.push({
+    id: 501,
+    status: 'not_started',
+    definition: {
+      id: 503,
+      abbreviation: 'T3',
+      name: 'Task 3',
+    },
+  });
+
+  assert.throws(
+    () => resolveTaskSelector(projects, { projectId: 101, taskId: 501 }),
+    /ambiguous.*--task-definition-id/i,
+  );
+});
+
 test('resolveTaskBatchSelector resolves all selected tasks with dedupe', () => {
   const resolved = resolveTaskBatchSelector(sampleProjects, {
     projectId: 101,
+    taskDefinitionIds: [],
     taskIds: [501],
     abbrs: ['T1', 'T2'],
     allTasks: false,
@@ -150,6 +198,7 @@ test('resolveTaskBatchSelector resolves all selected tasks with dedupe', () => {
 test('resolveTaskBatchSelector resolves --all-tasks', () => {
   const resolved = resolveTaskBatchSelector(sampleProjects, {
     projectId: 101,
+    taskDefinitionIds: [],
     taskIds: [],
     abbrs: [],
     allTasks: true,
@@ -160,6 +209,37 @@ test('resolveTaskBatchSelector resolves --all-tasks', () => {
     resolved.map((item) => item.abbr),
     ['T1', 'T2'],
   );
+});
+
+test('resolveTaskSelector derives an uninstantiated task from unit definitions', () => {
+  const projects: ProjectSummary[] = [
+    {
+      id: 202,
+      target_grade: 0,
+      tasks: [],
+      unit: {
+        id: 77,
+        code: 'FIT0002',
+        task_definitions: [
+          {
+            id: 700,
+            abbreviation: 'P1',
+            name: 'Definition-only task',
+            target_grade: 0,
+          },
+        ],
+      },
+    },
+  ];
+
+  const resolved = resolveTaskSelector(projects, {
+    projectId: 202,
+    taskDefinitionId: 700,
+  });
+
+  assert.equal(resolved.taskDefId, 700);
+  assert.equal(resolved.taskInstanceId, undefined);
+  assert.equal(resolved.abbr, 'P1');
 });
 
 test('buildPdfFilename and resolveDownloadDir follow defaults', () => {
@@ -179,7 +259,7 @@ test('diffWatchStates emits status/due/new_feedback deltas', () => {
     {
       taskKey: key,
       projectId: 101,
-      taskId: 501,
+      taskDefinitionId: 501,
       unitCode: 'FIT2004',
       abbr: 'T1',
       status: 'working_on_it',
@@ -193,7 +273,7 @@ test('diffWatchStates emits status/due/new_feedback deltas', () => {
     {
       taskKey: key,
       projectId: 101,
-      taskId: 501,
+      taskDefinitionId: 501,
       unitCode: 'FIT2004',
       abbr: 'T1',
       status: 'ready_for_feedback',
@@ -218,7 +298,7 @@ test('diffWatchStates emits no events when nothing changed', () => {
     {
       taskKey: key,
       projectId: 101,
-      taskId: 501,
+      taskDefinitionId: 501,
       status: 'working_on_it',
       dueDate: '2026-03-20',
       commentCount: 1,
@@ -230,7 +310,7 @@ test('diffWatchStates emits no events when nothing changed', () => {
     {
       taskKey: key,
       projectId: 101,
-      taskId: 501,
+      taskDefinitionId: 501,
       status: 'working_on_it',
       dueDate: '2026-03-20',
       commentCount: 1,

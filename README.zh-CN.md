@@ -76,16 +76,16 @@ ontrack <command>
 
 ### 运行环境
 
-- Node.js `22+`
+- Bun `1.3.14+`
 - macOS / Linux / Windows
-- 首次执行 `ontrack login` 建议保证网络可用（若缺少 Playwright Chromium runtime，CLI 会自动尝试安装）
+- 需要手动安装经过审核的浏览器 runtime 时，请保证网络可用
 
 ### 全局安装
 
 推荐直接全局安装:
 
 ```bash
-npm install -g ontrack-cli
+bun add --global ontrack-cli
 ```
 
 安装完成后，命令入口为:
@@ -99,22 +99,22 @@ ontrack
 如果你只想在当前项目里使用:
 
 ```bash
-npm install
-npm exec ontrack -- auth-method
+bun install
+bun run ontrack -- auth-method
 ```
 
 ### 从源码运行
 
 ```bash
-npm install
-npm run build
-node dist/cli.js auth-method
+bun install
+bun run build
+bun dist/cli.js auth-method
 ```
 
 开发模式:
 
 ```bash
-npm run dev -- auth-method
+bun run dev -- auth-method
 ```
 
 ## 快速开始
@@ -125,7 +125,7 @@ npm run dev -- auth-method
 
 - `7/8/11/12` 支持引导单任务与批量任务选择
 - 可以选 `single`、`multiple`（逗号分隔）或 `all tasks`
-- 任务输入支持 task 代号（如 `P1`、`D4`）或数字 task id
+- 任务输入支持 task 代号（如 `P1`、`D4`）或数字 task definition id
 - 也支持切换到手动输入 `--project-id` + selector
 - 上传动作 `13/14` 仍保持单任务引导，避免误上传
 
@@ -202,15 +202,19 @@ ontrack pdf submission --project-id 87 --abbr D4
 ontrack pdf task --project-id 87 --all-tasks
 ```
 
-### 8. 上传 submission 或补充文件
+### 8. 先预检，再确认上传 submission 或补充文件
 
 ```bash
 ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
+ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
 ```
 
 ```bash
 ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf
+ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf --confirm
 ```
+
+不带 `--confirm` 时，两条命令都只做安全预检，不发送写请求。
 
 ## 核心概念
 
@@ -238,9 +242,9 @@ ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.
 
 相比纯数字 ID，`--abbr` 更适合日常使用。
 
-### `taskId`
+### `taskDefinitionId`
 
-CLI 支持 `--task-id`，但实际使用里更推荐优先用 `--abbr`，因为更稳定、更易读。
+数字选择器请使用无歧义的 `--task-definition-id`。旧 `--task-id` 仅作为弃用兼容 Adapter：它可解析唯一的旧 task instance/definition id，会在 stderr 提示弃用，并在 identity 冲突时拒绝执行。
 
 ### 批量任务选择器
 
@@ -248,7 +252,7 @@ CLI 支持 `--task-id`，但实际使用里更推荐优先用 `--abbr`，因为�
 
 - 重复参数：`--abbr P1 --abbr D4`
 - 逗号参数：`--abbr P1,D4`
-- 混合参数：`--task-id 501 --abbr D4`
+- 混合参数：`--task-definition-id 501 --abbr D4`
 - 整个项目：`--all-tasks`
 
 ### `--json`
@@ -267,18 +271,26 @@ ontrack login
 
 这个流程会:
 
-1. 在 CLI 里输入 Monash username/password（密码隐藏输入）
-2. 默认使用隐藏浏览器（headless）进入引导式 SSO 自动化
-3. 在终端显示结构化登录进度面板
-4. 如果出现多个 MFA 方法，在 CLI 中给出编号选项供你选择
-5. 在 Okta Verify number challenge 时高亮显示页面数字
-6. 捕获凭据并调用 `/api/auth`
-7. 保存本地会话缓存
-8. 缺少 Chromium runtime 时自动尝试安装（best-effort）
+1. 先尝试复用 CLI 已保存且仅包含 OnTrack 的浏览器状态
+2. 如果没有可复用会话，再在 CLI 输入 Monash username/password（密码隐藏输入）
+3. 默认使用隐藏浏览器（headless）进入引导式 SSO 自动化
+4. 在终端显示结构化登录进度面板
+5. 如果出现多个 MFA 方法，在 CLI 中给出编号选项供你选择
+6. 若选择代码型方法（`Google Authenticator` / `Enter a code`），CLI 会提示输入验证码并自动提交
+7. 若选择推送型方法（`Get a push notification`），CLI 会高亮显示 Okta Verify number challenge 数字
+8. 捕获凭据并调用 `/api/auth`
+9. 保存本地会话缓存
+10. 缺少 Chromium runtime 时提示你手动安装
 
 `ontrack login` 现在默认在本地和服务器都走隐藏浏览器（headless）模式。  
 只有排查问题时才建议使用 `ontrack login --show-browser`。  
 `ontrack login --sso` 可作为显式引导式 SSO 别名。
+
+系统浏览器 profile 复用默认关闭。如确有需要，显式设置
+`ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1`，并可配合
+`ONTRACK_BROWSER_USER_DATA_DIR` / `ONTRACK_BROWSER_PROFILE_DIR`。该模式可能会
+打开所选 profile 以发现凭据；CLI 不会复制完整 profile storage state，只会保存
+精确匹配的 OnTrack origin。请勿在共享或不受信任的 profile 上启用。
 
 ### 浏览器捕获模式: `ontrack login --auto`
 
@@ -376,8 +388,8 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
 | `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
-| `ontrack submission upload ...` | 上传 submission | 可选 `--trigger`、`--comment` |
-| `ontrack submission upload-new-files ...` | 追加/补充 evidence 文件 | 不强制默认 trigger |
+| `ontrack submission upload ...` | 预检或上传 submission | 默认 dry-run；`--confirm` 才单次 dispatch；可选 `--trigger`、`--comment` |
+| `ontrack submission upload-new-files ...` | 预检或追加 evidence 文件 | 必须先观察到 existing submission；默认 dry-run；`--confirm` 才单次 dispatch |
 
 ### 诊断与接口发现
 
@@ -473,20 +485,21 @@ FIT1045_D4_submission.pdf
 
 ### 工作流 5: 上传 submission
 
-最简单的上传:
+安全预检:
 
 ```bash
 ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
 ```
 
-上传多个文件:
+确认上传多个文件:
 
 ```bash
 ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --file ./demo.mp4
+  --file ./demo.mp4 \
+  --confirm
 ```
 
 显式映射上传键:
@@ -496,7 +509,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file file0=./report.pdf \
-  --file file1=./demo.mp4
+  --file file1=./demo.mp4 \
+  --confirm
 ```
 
 上传后顺便发评论:
@@ -506,7 +520,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --comment "Updated submission with revised report."
+  --comment "Updated submission with revised report." \
+  --confirm
 ```
 
 显式指定 trigger:
@@ -516,7 +531,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file ./report.pdf \
-  --trigger ready_for_feedback
+  --trigger ready_for_feedback \
+  --confirm
 ```
 
 ### submission upload 和 submission upload-new-files 的区别
@@ -527,6 +543,7 @@ ontrack submission upload \
   - 其他情况交给服务端默认行为
 - `submission upload-new-files`
   - 更接近“补充证据 / new evidence”
+  - 必须先由 `submission status` 证明 existing submission
   - 不主动施加默认 trigger
 
 ### 上传文件匹配规则
@@ -538,8 +555,9 @@ ontrack submission upload \
 - 至少提供一个 `--file`
 - 如果任务要求 2 个文件，你就必须传 2 个文件
 - 如果同时提供显式 key 和普通路径，CLI 会把未指定 key 的路径按剩余 key 顺序补齐
-- 如果 `--task-id` 和 `--abbr` 同时存在，必须指向同一个任务
-- 如果使用 `--all-tasks`，不要再同时传 `--task-id` 或 `--abbr`
+- 如果 `--task-definition-id` 和 `--abbr` 同时存在，必须指向同一个任务
+- 弃用的 `--task-id` 只有在 legacy definition/instance 含义唯一时才接受
+- 如果使用 `--all-tasks`，不要再同时传任何 id selector 或 `--abbr`
 
 ## 输出、高亮与 JSON
 
@@ -603,6 +621,10 @@ ontrack tasks --project-id 87 --json
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | 覆盖默认 API base URL | 默认值为 Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | 指定自动登录用的浏览器可执行文件 | 当自动探测浏览器失败时使用 |
+| `ONTRACK_BROWSER_STATE_PATH` | 覆盖浏览器会话状态文件路径 | 登录时用于复用 cookies/localStorage |
+| `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | 显式允许读取系统浏览器 profile 以发现凭据 | 默认关闭；请勿用于共享/不受信任 profile |
+| `ONTRACK_BROWSER_USER_DATA_DIR` | 覆盖 Chromium/Chrome 用户数据根目录 | 仅在显式启用 profile 复用时生效 |
+| `ONTRACK_BROWSER_PROFILE_DIR` | 覆盖用户数据目录下的 profile 名称 | 仅在显式启用时生效；默认 `Default` |
 | `FORCE_COLOR` | 强制终端彩色输出 | 例如 `FORCE_COLOR=1` |
 | `NO_COLOR` | 关闭彩色输出 | 适合日志或纯文本环境 |
 | `XDG_CONFIG_HOME` | 控制 Linux/macOS 配置根目录 | 影响 session 存储路径 |
@@ -646,31 +668,31 @@ dist/
 ### 安装依赖
 
 ```bash
-npm install
+bun install
 ```
 
 ### 构建
 
 ```bash
-npm run build
+bun run build
 ```
 
 ### 测试
 
 ```bash
-npm test
+bun test
 ```
 
 ### 开发调试
 
 ```bash
-npm run dev -- tasks --project-id 87
+bun run dev -- tasks --project-id 87
 ```
 
 ### 真实账号烟测
 
 ```bash
-npm run smoke:real -- --project-id 87 --abbr D4
+bun run smoke:real -- --project-id 87 --abbr D4
 ```
 
 这个脚本会验证以下流程:
@@ -713,22 +735,31 @@ npm run smoke:real -- --project-id 87 --abbr D4
   - upload 参数解析
 - [auto-login.test.ts](/Users/mark/ontrack-cli/test/auto-login.test.ts)
   - SSO credential capture 辅助逻辑
+  - OnTrack origin/domain 隔离
+  - 私有且经过滤的 browser-state 持久化
 - [discovery.test.ts](/Users/mark/ontrack-cli/test/discovery.test.ts)
   - 前端 bundle route/API 抽取逻辑
+- [logout.test.ts](/Users/mark/ontrack-cli/test/logout.test.ts)
+  - 远端注销失败时仍清理本地 session
+  - 失败输出脱敏
 - [utils.test.ts](/Users/mark/ontrack-cli/test/utils.test.ts)
   - base URL、redirect URL 等基础工具
+- [whoami.test.ts](/Users/mark/ontrack-cli/test/whoami.test.ts)
+  - allowlist 身份投影
+  - JSON 与人类输出的 secret 回归测试
 
 如果你要发版，最少建议执行:
 
 ```bash
-npm test
-npm run build
+bun test
+bun run test:coverage
+bun run build
 ```
 
 如果你已经登录真实账号，再加上:
 
 ```bash
-npm run smoke:real -- --project-id <id> --abbr <abbr>
+bun run smoke:real -- --project-id <id> --abbr <abbr>
 ```
 
 ## 项目结构
@@ -736,7 +767,7 @@ npm run smoke:real -- --project-id <id> --abbr <abbr>
 ```text
 .
 ├── always-ontrack-logo.png      # README logo
-├── package.json                 # npm metadata and scripts
+├── package.json                 # Bun package metadata and scripts
 ├── scripts/
 │   └── smoke-real.mjs           # real-account smoke verification
 ├── src/
@@ -747,7 +778,8 @@ npm run smoke:real -- --project-id <id> --abbr <abbr>
 │       ├── discovery.ts         # frontend surface discovery and probe
 │       ├── session.ts           # local session persistence
 │       ├── types.ts             # shared types
-│       └── utils.ts             # selectors, formatting, colors, helpers
+│       ├── utils.ts             # selectors, formatting, colors, helpers
+│       └── whoami.ts            # allowlist、secret-safe 身份投影
 ├── test/                        # unit tests
 └── tsconfig.json                # TypeScript build config
 ```
@@ -783,13 +815,11 @@ ontrack tasks
 ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
 ```
 
-或者手动安装 Playwright bundled Chromium:
+或者手动安装经过审核、版本固定的 Playwright Chromium runtime:
 
 ```bash
-npx playwright install chromium
+bunx playwright@1.58.2 install chromium
 ```
-
-`ontrack login` 在可行时会自动尝试安装，不必每次手动执行。
 
 ### `419 Authentication Timeout`
 
@@ -805,7 +835,7 @@ ontrack login
 说明同一个 project 里任务缩写不够唯一。改用:
 
 ```bash
-ontrack task show --project-id <id> --task-id <id>
+ontrack task show --project-id <id> --task-definition-id <id>
 ```
 
 ### `Upload key mismatch` 或文件数量不匹配
@@ -821,7 +851,8 @@ ontrack submission upload \
   --project-id 87 \
   --abbr D4 \
   --file file0=./report.pdf \
-  --file file1=./demo.mp4
+  --file file1=./demo.mp4 \
+  --confirm
 ```
 
 ### 没有颜色高亮

@@ -8,6 +8,7 @@ import type {
   SignInResponse,
   UnitSummary,
 } from './types.js';
+import { OnTrackHttpError } from './auth.js';
 
 /**
  * HTTP protocol layer for OnTrack API calls.
@@ -55,15 +56,9 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Build concise, user-facing error details from HTTP response + body. */
-function buildErrorMessage(response: Response, body: unknown): string {
-  let message = `${response.status} ${response.statusText}`;
-  if (typeof body === 'string' && body.trim()) {
-    message = `${message}: ${body.trim()}`;
-  } else if (body && typeof body === 'object' && 'error' in body) {
-    message = `${message}: ${String(body.error)}`;
-  }
-  return message;
+/** Build a status-only error; arbitrary remote bodies are never terminal-safe. */
+function buildErrorMessage(response: Response): string {
+  return `${response.status} ${response.statusText}`.trim();
 }
 
 /** Perform JSON request/response handling with retry support. */
@@ -80,15 +75,14 @@ async function requestJson<T>(
     return requestJson<T>(url, init, attempt + 1, maxRetries);
   }
 
+  if (!response.ok) {
+    throw new OnTrackHttpError(response.status, buildErrorMessage(response));
+  }
+
   const contentType = response.headers.get('content-type') || '';
   const body = contentType.includes('application/json')
     ? await response.json()
     : await response.text();
-
-  if (!response.ok) {
-    throw new Error(buildErrorMessage(response, body));
-  }
-
   return body as T;
 }
 
@@ -134,11 +128,7 @@ async function requestBinary(
   }
 
   if (!response.ok) {
-    const contentType = response.headers.get('content-type') || '';
-    const body = contentType.includes('application/json')
-      ? await response.json()
-      : await response.text();
-    throw new Error(buildErrorMessage(response, body));
+    throw new OnTrackHttpError(response.status, buildErrorMessage(response));
   }
 
   const arrayBuffer = await response.arrayBuffer();
@@ -210,7 +200,7 @@ export class OnTrackApiClient {
 
   /** Revoke remote auth session (best effort). */
   signOut(session: SessionData): Promise<unknown> {
-    return requestJson(withApiPath(this.baseUrl, 'auth'), {
+    return requestJson(withApiPath(this.baseUrl, 'auth?remember=false'), {
       method: 'DELETE',
       headers: {
         Accept: 'application/json',
@@ -272,6 +262,31 @@ export class OnTrackApiClient {
         ...authHeaders(session),
       },
     });
+  }
+
+  /** Read all prerequisite relationships for a unit's task definitions. */
+  listUnitTaskPrerequisites(session: SessionData, unitId: number): Promise<unknown[]> {
+    return requestJson<unknown[]>(withApiPath(this.baseUrl, `units/${unitId}/task_prerequisites`), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(session),
+      },
+    });
+  }
+
+  /** Read prerequisites for one task definition within a unit. */
+  listTaskPrerequisites(session: SessionData, unitId: number, taskDefId: number): Promise<unknown[]> {
+    return requestJson<unknown[]>(
+      withApiPath(this.baseUrl, `units/${unitId}/task_definitions/${taskDefId}/prerequisites`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(session),
+        },
+      },
+    );
   }
 
   /** Read comments/events for one task definition in a project. */
@@ -343,6 +358,77 @@ export class OnTrackApiClient {
           ...authHeaders(session),
         },
         body: form,
+      },
+    );
+  }
+
+  /** Read submission state before a PDF download or lifecycle action. */
+  getSubmissionDetails(session: SessionData, projectId: number, taskDefId: number): Promise<unknown> {
+    return requestJson(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/submission_details`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(session),
+        },
+      },
+    );
+  }
+
+  /** Set personal target dates using the production planner contract. */
+  updateTaskTargetDates(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    targetStartDate: string,
+    targetDueDate: string,
+  ): Promise<unknown> {
+    return requestJson(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/target_dates`),
+      {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...authHeaders(session),
+        },
+        body: JSON.stringify({
+          target_start_date: targetStartDate,
+          target_due_date: targetDueDate,
+        }),
+      },
+    );
+  }
+
+  /** Reset all project target dates using the server's default plan. */
+  resetProjectTargetDates(session: SessionData, projectId: number): Promise<unknown> {
+    return requestJson(withApiPath(this.baseUrl, `projects/${projectId}/reset_target_dates`), {
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(session),
+      },
+    });
+  }
+
+  /** Persist planner extension values without inferring their schema. */
+  updateTaskPlan(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    extensions: Record<string, unknown>,
+  ): Promise<unknown> {
+    return requestJson(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/plan`),
+      {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...authHeaders(session),
+        },
+        body: JSON.stringify({ extensions }),
       },
     );
   }

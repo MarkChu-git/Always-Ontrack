@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import type { Frame, Locator, Page } from 'playwright-core';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import type { Browser, BrowserContext, BrowserContextOptions, Frame, Locator, Page } from 'playwright-core';
 
 /**
  * Browser automation flow for Monash SSO / Okta handoff.
@@ -15,7 +15,9 @@ import type { Frame, Locator, Page } from 'playwright-core';
 export interface LoginCredentials {
   authToken: string;
   username: string;
+  expiresAt?: string;
   source: 'url' | 'auth_request' | 'auth_response' | 'local_storage' | 'cookie';
+  contract?: 'access-token' | 'legacy-auth';
 }
 
 /** Guided SSO options for username/password + MFA interaction mode. */
@@ -27,7 +29,9 @@ export interface SsoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
+  requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
   onMfaNumberChallenge?: (numbers: string[]) => void;
+  browserAdapter?: BrowserLaunchAdapter;
 }
 
 /** One CLI-presented MFA option extracted from page controls. */
@@ -38,7 +42,14 @@ export interface MfaMethodOption {
 }
 
 /** High-level guided login lifecycle steps used by terminal callbacks. */
-export type SsoStep = 'username' | 'password' | 'mfa_select' | 'mfa_wait' | 'completed' | 'fallback';
+export type SsoStep =
+  | 'username'
+  | 'password'
+  | 'mfa_select'
+  | 'mfa_code'
+  | 'mfa_wait'
+  | 'completed'
+  | 'fallback';
 
 /** Categorized fallback reasons surfaced to callers and users. */
 export type SsoFallbackReason =
@@ -67,15 +78,46 @@ export interface BrowserLaunchPlan {
   executablePath?: string;
 }
 
+/** Narrow browser Adapter for deterministic, no-network login state-machine tests. */
+export interface BrowserLaunchAdapter {
+  launch(options: { headless: boolean; executablePath?: string }): Promise<Pick<Browser, 'newContext' | 'close'>>;
+}
+
+const DEFAULT_ONTRACK_ORIGIN = 'https://ontrack.infotech.monash.edu';
+
 /** Type guard for non-empty string-like values. */
 function hasValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+/** True only when a URL belongs to the exact OnTrack origin being authenticated. */
+function isTargetOnTrackUrl(urlValue: string, targetOrigin: string): boolean {
+  try {
+    return new URL(urlValue).origin === new URL(targetOrigin).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** True only for an auth endpoint on the exact OnTrack origin. */
+function isTargetOnTrackAuthUrl(urlValue: string, targetOrigin: string): boolean {
+  if (!isTargetOnTrackUrl(urlValue, targetOrigin)) {
+    return false;
+  }
+
+  return new URL(urlValue).pathname === '/api/auth' || new URL(urlValue).pathname.startsWith('/api/auth/');
+}
+
 /** Extract authToken/username directly from redirect URL query params. */
-export function extractCredentialsFromUrl(urlValue: string): LoginCredentials | null {
+export function extractCredentialsFromUrl(
+  urlValue: string,
+  targetOrigin: string = DEFAULT_ONTRACK_ORIGIN,
+): LoginCredentials | null {
   try {
     const url = new URL(urlValue);
+    if (url.origin !== new URL(targetOrigin).origin) {
+      return null;
+    }
     const authToken = url.searchParams.get('authToken');
     const username = url.searchParams.get('username');
     if (!hasValue(authToken) || !hasValue(username)) {
@@ -104,25 +146,49 @@ export function extractCredentialsFromAuthPayload(payload: unknown): LoginCreden
       ? record.authToken
       : null;
   const username = hasValue(record.username) ? record.username : null;
+  const user = record.user;
+  const nestedUsername =
+    user && typeof user === 'object'
+      ? extractUsernameFromUserRecord(user as Record<string, unknown>)
+      : null;
+  const expiresAt = hasValue(record.auth_token_expiry)
+    ? record.auth_token_expiry
+    : hasValue(record.authTokenExpiry)
+      ? record.authTokenExpiry
+      : undefined;
 
-  if (!authToken || !username) {
+  if (!authToken || (!username && !nestedUsername)) {
     return null;
   }
 
   return {
     authToken,
-    username,
+    username: username ?? nestedUsername!,
+    ...(expiresAt ? { expiresAt } : {}),
     source: 'auth_request',
   };
 }
 
 /** Extract credentials from cookies for cases where URL/network interception misses. */
 export function extractCredentialsFromCookieJar(
-  cookies: Array<{ name: string; value: string }>,
+  cookies: Array<{ name: string; value: string; domain?: string }>,
+  targetOrigin: string = DEFAULT_ONTRACK_ORIGIN,
 ): LoginCredentials | null {
+  let targetHostname: string;
+  try {
+    targetHostname = new URL(targetOrigin).hostname;
+  } catch {
+    return null;
+  }
+
+  const belongsToTargetHost = (cookie: { domain?: string }): boolean => {
+    const cookieDomain = cookie.domain?.trim().toLowerCase().replace(/^\./, '');
+    return Boolean(cookieDomain && cookieDomain === targetHostname.toLowerCase());
+  };
+
   const find = (names: string[]): string | undefined => {
     for (const name of names) {
-      const hit = cookies.find((cookie) => cookie.name === name);
+      const hit = cookies.find((cookie) => cookie.name === name && belongsToTargetHost(cookie));
       if (hit?.value) {
         return hit.value;
       }
@@ -140,6 +206,29 @@ export function extractCredentialsFromCookieJar(
     authToken,
     username,
     source: 'cookie',
+  };
+}
+
+/** Extract credentials from outbound request headers set by web app runtime. */
+function extractCredentialsFromRequestHeaders(
+  headers: Record<string, string>,
+): LoginCredentials | null {
+  const normalized = new Map<string, string>();
+  for (const [key, value] of Object.entries(headers)) {
+    normalized.set(key.toLowerCase(), value);
+  }
+
+  const authToken =
+    normalized.get('auth-token') || normalized.get('auth_token') || normalized.get('authtoken');
+  const username = normalized.get('username');
+  if (!authToken || !username) {
+    return null;
+  }
+
+  return {
+    authToken,
+    username,
+    source: 'auth_request',
   };
 }
 
@@ -227,7 +316,7 @@ export function resolveBrowserLaunchPlan(
 /** Human-readable remediation when no launchable browser is found. */
 function browserInstallHint(): string {
   return (
-    'No browser executable found. Install Chrome/Chromium/Edge, or run "npx playwright install chromium", ' +
+    'No browser executable found. Install Chrome/Chromium/Edge, install a reviewed Playwright Chromium runtime manually, ' +
     'or set ONTRACK_BROWSER_PATH.'
   );
 }
@@ -242,96 +331,6 @@ function isMissingDisplayServerError(message: string): boolean {
 /** Detect launch failures caused by missing shared system libraries. */
 function isMissingSharedLibraryError(message: string): boolean {
   return /error while loading shared libraries|cannot open shared object file/i.test(message);
-}
-
-/** Detect errors indicating that Playwright Chromium binary is not installed yet. */
-function isMissingBrowserBinaryError(message: string): boolean {
-  return /executable doesn't exist|please run .*playwright install|browser executable.+not found/i.test(
-    message,
-  );
-}
-
-/** Run one shell command and capture compact output for diagnostics. */
-async function runCommand(command: string, args: string[], timeoutMs: number): Promise<{
-  ok: boolean;
-  output: string;
-}> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-      env: process.env,
-    });
-
-    let output = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk) => {
-      output += String(chunk);
-    });
-    child.stderr.on('data', (chunk) => {
-      output += String(chunk);
-    });
-    child.on('error', (error) => {
-      output += `${error instanceof Error ? error.message : String(error)}\n`;
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        resolve({
-          ok: false,
-          output: `${output}\nCommand timed out after ${timeoutMs}ms.`,
-        });
-        return;
-      }
-      resolve({
-        ok: code === 0,
-        output,
-      });
-    });
-  });
-}
-
-/** Best-effort automatic installer for Playwright Chromium browser binaries. */
-async function autoInstallChromiumBrowser(): Promise<{
-  ok: boolean;
-  detail: string;
-}> {
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const attempts: Array<{ command: string; args: string[]; note: string }> = [
-    {
-      command: npx,
-      args: ['--yes', 'playwright', 'install', 'chromium'],
-      note: 'npx playwright install chromium',
-    },
-    {
-      command: npx,
-      args: ['--yes', 'playwright', 'install', '--with-deps', 'chromium'],
-      note: 'npx playwright install --with-deps chromium',
-    },
-  ];
-
-  let lastDetail = '';
-  for (const attempt of attempts) {
-    const result = await runCommand(attempt.command, attempt.args, 10 * 60 * 1000);
-    const compactOutput = result.output.trim().slice(-2000);
-    if (result.ok) {
-      return {
-        ok: true,
-        detail: `${attempt.note} succeeded.`,
-      };
-    }
-    lastDetail = `${attempt.note} failed.\n${compactOutput}`;
-  }
-
-  return {
-    ok: false,
-    detail: lastDetail || 'Automatic install failed.',
-  };
 }
 
 /** Map unknown automation failures to high-level fallback reasons for CLI messaging. */
@@ -368,6 +367,204 @@ function tryParseJson(raw: string): unknown {
   }
 }
 
+/** Recursively collect auth token + username candidates from arbitrary JSON-like payloads. */
+function extractCredentialsFromUnknownObject(
+  value: unknown,
+  depth: number = 0,
+): { authToken?: string; username?: string } {
+  if (!value || typeof value !== 'object' || depth > 6) {
+    return {};
+  }
+
+  const tokenKeys = new Set(['authenticationtoken', 'auth_token', 'authtoken', 'auth-token']);
+  const usernameKeys = new Set(['username', 'user_name', 'login']);
+  let authToken: string | undefined;
+  let username: string | undefined;
+
+  const visit = (node: unknown, level: number): void => {
+    if (level > 6 || !node) {
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item, level + 1);
+        if (authToken && username) {
+          return;
+        }
+      }
+      return;
+    }
+
+    if (typeof node !== 'object') {
+      return;
+    }
+
+    const record = node as Record<string, unknown>;
+    for (const [key, rawValue] of Object.entries(record)) {
+      const normalizedKey = key.toLowerCase();
+      if (!authToken && tokenKeys.has(normalizedKey) && hasValue(rawValue)) {
+        authToken = rawValue.trim();
+      }
+      if (!username && usernameKeys.has(normalizedKey) && hasValue(rawValue)) {
+        username = rawValue.trim();
+      }
+      if (authToken && username) {
+        return;
+      }
+    }
+
+    for (const child of Object.values(record)) {
+      visit(child, level + 1);
+      if (authToken && username) {
+        return;
+      }
+    }
+  };
+
+  visit(value, depth);
+  return { authToken, username };
+}
+
+/** Snapshot of one browser storage key/value pair used during session reuse probing. */
+interface BrowserStorageEntry {
+  scope: 'local' | 'session';
+  key: string;
+  value: string;
+}
+
+/** Decode storage string values that may be raw text or JSON-encoded strings. */
+function normalizeStorageStringValue(raw: string): string | null {
+  if (!hasValue(raw)) {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  const parsed = tryParseJson(trimmed);
+  if (typeof parsed === 'string' && hasValue(parsed)) {
+    return parsed.trim();
+  }
+
+  return trimmed;
+}
+
+/** Parse username-ish fields from user objects that OnTrack stores in browser storage. */
+function extractUsernameFromUserRecord(record: Record<string, unknown>): string | null {
+  const candidates = [
+    record.username,
+    record.user_name,
+    record.login,
+    record.email,
+    record.student_email,
+  ];
+
+  for (const candidate of candidates) {
+    if (hasValue(candidate)) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse auth credentials from browser storage entries.
+ * This handles OnTrack's real storage layout where token + user are stored under different keys:
+ * - `doubtfire_credentials_token` (token string)
+ * - `doubtfire_user` (JSON user object containing username)
+ */
+export function extractCredentialsFromStorageEntries(
+  entries: BrowserStorageEntry[],
+): LoginCredentials | null {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return null;
+  }
+
+  let authToken: string | null = null;
+  let username: string | null = null;
+
+  const normalizedEntries = entries
+    .filter((entry) => hasValue(entry.key) && hasValue(entry.value))
+    .map((entry) => ({
+      ...entry,
+      normalizedKey: entry.key.trim().toLowerCase(),
+    }));
+
+  // 1) Exact-key extraction for known OnTrack keys (most reliable + fastest).
+  for (const entry of normalizedEntries) {
+    if (entry.normalizedKey === 'doubtfire_credentials_token') {
+      authToken = normalizeStorageStringValue(entry.value);
+      if (authToken) {
+        break;
+      }
+    }
+  }
+
+  for (const entry of normalizedEntries) {
+    if (entry.normalizedKey !== 'doubtfire_user') {
+      continue;
+    }
+
+    const parsed = tryParseJson(entry.value);
+    if (parsed && typeof parsed === 'object') {
+      username = extractUsernameFromUserRecord(parsed as Record<string, unknown>);
+      if (!username) {
+        const extracted = extractCredentialsFromUnknownObject(parsed);
+        username = extracted.username ?? null;
+      }
+    } else {
+      username = normalizeStorageStringValue(entry.value);
+    }
+
+    if (username) {
+      break;
+    }
+  }
+
+  // 2) Generic key-based fallback (covers future key renames and other identity providers).
+  for (const entry of normalizedEntries) {
+    if (!authToken && ['auth_token', 'authtoken', 'auth-token', 'authenticationtoken'].includes(entry.normalizedKey)) {
+      authToken = normalizeStorageStringValue(entry.value);
+    }
+
+    if (!username && ['username', 'user_name', 'login', 'email'].includes(entry.normalizedKey)) {
+      username = normalizeStorageStringValue(entry.value);
+    }
+  }
+
+  // 3) Recursive object scan fallback for opaque JSON blobs.
+  if (!authToken || !username) {
+    for (const entry of normalizedEntries) {
+      const parsed = tryParseJson(entry.value);
+      if (!parsed || typeof parsed !== 'object') {
+        continue;
+      }
+
+      const extracted = extractCredentialsFromUnknownObject(parsed);
+      if (!authToken && extracted.authToken) {
+        authToken = extracted.authToken;
+      }
+      if (!username && extracted.username) {
+        username = extracted.username;
+      }
+
+      if (authToken && username) {
+        break;
+      }
+    }
+  }
+
+  if (!authToken || !username) {
+    return null;
+  }
+
+  return {
+    authToken,
+    username,
+    source: 'local_storage',
+  };
+}
+
 /** Attempt to recover credentials from OnTrack localStorage session payload. */
 async function extractCredentialsFromLocalStorage(page: {
   evaluate: (fn: () => unknown) => Promise<unknown>;
@@ -375,37 +572,32 @@ async function extractCredentialsFromLocalStorage(page: {
   try {
     const data = await page.evaluate(() => {
       try {
-        return localStorage.getItem('doubtfire_user');
+        const collect = (storage: Storage, scope: 'local' | 'session') => {
+          const out: Array<{ scope: 'local' | 'session'; key: string; value: string }> = [];
+          for (let index = 0; index < storage.length; index += 1) {
+            const key = storage.key(index);
+            if (!key) {
+              continue;
+            }
+            const item = storage.getItem(key);
+            if (item) {
+              out.push({ scope, key, value: item });
+            }
+          }
+          return out;
+        };
+
+        return [...collect(localStorage, 'local'), ...collect(sessionStorage, 'session')];
       } catch {
         return null;
       }
     });
 
-    if (!hasValue(data)) {
+    if (!Array.isArray(data) || data.length === 0) {
       return null;
     }
 
-    const parsed = tryParseJson(data);
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-
-    const record = parsed as Record<string, unknown>;
-    const authToken = hasValue(record.authenticationToken)
-      ? record.authenticationToken
-      : hasValue(record.auth_token)
-        ? record.auth_token
-        : null;
-    const username = hasValue(record.username) ? record.username : null;
-    if (!authToken || !username) {
-      return null;
-    }
-
-    return {
-      authToken,
-      username,
-      source: 'local_storage',
-    };
+    return extractCredentialsFromStorageEntries(data as BrowserStorageEntry[]);
   } catch {
     return null;
   }
@@ -417,6 +609,344 @@ export interface AutoLoginOptions {
   apiBaseUrl: string;
   timeoutMs?: number;
   headless?: boolean;
+  browserAdapter?: BrowserLaunchAdapter;
+}
+
+/** Candidate system browser profile location used for direct session reuse probe. */
+export interface SystemBrowserProfileLocation {
+  label: string;
+  userDataDir: string;
+  profileDir: string;
+}
+
+/**
+ * Resolve disk location for persisted browser session state (cookies/localStorage).
+ * This state is generated by successful automated logins and reused on future runs.
+ */
+export function resolveBrowserSessionStatePath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+): string {
+  const explicit = env.ONTRACK_BROWSER_STATE_PATH?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  if (env.XDG_CONFIG_HOME) {
+    return join(env.XDG_CONFIG_HOME, 'ontrack-cli', 'browser-state.json');
+  }
+
+  if (platform === 'win32' && env.APPDATA) {
+    return join(env.APPDATA, 'ontrack-cli', 'browser-state.json');
+  }
+
+  return join(home, '.config', 'ontrack-cli', 'browser-state.json');
+}
+
+/**
+ * Resolve likely Chromium-family user-data roots from platform conventions.
+ * Used to reuse an already logged-in browser profile before asking user credentials.
+ */
+export function resolveSystemBrowserUserDataDirs(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+): SystemBrowserProfileLocation[] {
+  const profileDir = (env.ONTRACK_BROWSER_PROFILE_DIR || 'Default').trim() || 'Default';
+  const explicit = env.ONTRACK_BROWSER_USER_DATA_DIR?.trim();
+  if (explicit) {
+    return [
+      {
+        label: 'env:ONTRACK_BROWSER_USER_DATA_DIR',
+        userDataDir: explicit,
+        profileDir,
+      },
+    ];
+  }
+
+  if (platform === 'darwin') {
+    return [
+      {
+        label: 'Google Chrome',
+        userDataDir: join(home, 'Library', 'Application Support', 'Google', 'Chrome'),
+        profileDir,
+      },
+      {
+        label: 'Microsoft Edge',
+        userDataDir: join(home, 'Library', 'Application Support', 'Microsoft Edge'),
+        profileDir,
+      },
+      {
+        label: 'Chromium',
+        userDataDir: join(home, 'Library', 'Application Support', 'Chromium'),
+        profileDir,
+      },
+      {
+        label: 'Brave',
+        userDataDir: join(home, 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser'),
+        profileDir,
+      },
+    ];
+  }
+
+  if (platform === 'win32') {
+    const local = env.LOCALAPPDATA?.trim() || '';
+    if (!local) {
+      return [];
+    }
+    return [
+      {
+        label: 'Google Chrome',
+        userDataDir: join(local, 'Google', 'Chrome', 'User Data'),
+        profileDir,
+      },
+      {
+        label: 'Microsoft Edge',
+        userDataDir: join(local, 'Microsoft', 'Edge', 'User Data'),
+        profileDir,
+      },
+      {
+        label: 'Chromium',
+        userDataDir: join(local, 'Chromium', 'User Data'),
+        profileDir,
+      },
+      {
+        label: 'Brave',
+        userDataDir: join(local, 'BraveSoftware', 'Brave-Browser', 'User Data'),
+        profileDir,
+      },
+    ];
+  }
+
+  return [
+    {
+      label: 'Google Chrome',
+      userDataDir: join(home, '.config', 'google-chrome'),
+      profileDir,
+    },
+    {
+      label: 'Microsoft Edge',
+      userDataDir: join(home, '.config', 'microsoft-edge'),
+      profileDir,
+    },
+    {
+      label: 'Chromium',
+      userDataDir: join(home, '.config', 'chromium'),
+      profileDir,
+    },
+    {
+      label: 'Brave',
+      userDataDir: join(home, '.config', 'BraveSoftware', 'Brave-Browser'),
+      profileDir,
+    },
+  ];
+}
+
+/** System browser-profile reuse is intentionally off unless the user opts in. */
+export function isSystemBrowserProfileReuseEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE === '1';
+}
+
+/** Heuristic profile directory matcher for Chromium-family user-data roots. */
+function isLikelyChromiumProfileDir(name: string): boolean {
+  return /^(Default|Profile \d+|Person \d+|Guest Profile)$/i.test(name);
+}
+
+/**
+ * Expand each browser user-data candidate into concrete profile candidates.
+ * When profile override is unset, auto-discovers Default/Profile N folders.
+ */
+export function expandSystemBrowserProfileCandidates(
+  bases: SystemBrowserProfileLocation[],
+  options: {
+    profileOverride?: string | undefined;
+    pathExists?: (path: string) => boolean;
+    listDirNames?: (path: string) => string[];
+  } = {},
+): SystemBrowserProfileLocation[] {
+  const pathExists = options.pathExists ?? existsSync;
+  const listDirNames =
+    options.listDirNames ??
+    ((path: string): string[] => {
+      try {
+        return readdirSync(path, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name);
+      } catch {
+        return [];
+      }
+    });
+  const hasProfileOverride = Boolean(options.profileOverride?.trim());
+  const expanded: SystemBrowserProfileLocation[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (candidate: SystemBrowserProfileLocation): void => {
+    const key = `${candidate.userDataDir}::${candidate.profileDir}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    expanded.push(candidate);
+  };
+
+  for (const base of bases) {
+    if (!pathExists(base.userDataDir)) {
+      continue;
+    }
+
+    if (hasProfileOverride) {
+      const profilePath = join(base.userDataDir, base.profileDir);
+      if (pathExists(profilePath)) {
+        pushCandidate(base);
+      }
+      continue;
+    }
+
+    const discoveredNames = listDirNames(base.userDataDir).filter(isLikelyChromiumProfileDir);
+    const orderedNames = discoveredNames.sort((left, right) => {
+      if (left === 'Default') {
+        return -1;
+      }
+      if (right === 'Default') {
+        return 1;
+      }
+      return left.localeCompare(right);
+    });
+
+    if (orderedNames.length === 0) {
+      const defaultPath = join(base.userDataDir, base.profileDir);
+      if (pathExists(defaultPath)) {
+        pushCandidate(base);
+      }
+      continue;
+    }
+
+    for (const profileName of orderedNames) {
+      pushCandidate({
+        ...base,
+        profileDir: profileName,
+      });
+    }
+  }
+
+  return expanded;
+}
+
+type BrowserStorageState = Exclude<NonNullable<BrowserContextOptions['storageState']>, string>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isBrowserStorageCookie(value: unknown): value is BrowserStorageState['cookies'][number] {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    hasValue(value.name) &&
+    typeof value.value === 'string' &&
+    hasValue(value.domain) &&
+    hasValue(value.path) &&
+    typeof value.expires === 'number' &&
+    typeof value.httpOnly === 'boolean' &&
+    typeof value.secure === 'boolean' &&
+    (value.sameSite === 'Strict' || value.sameSite === 'Lax' || value.sameSite === 'None')
+  );
+}
+
+function isBrowserStorageOrigin(value: unknown): value is BrowserStorageState['origins'][number] {
+  if (!isRecord(value) || !hasValue(value.origin) || !Array.isArray(value.localStorage)) {
+    return false;
+  }
+  return value.localStorage.every(
+    (entry) => isRecord(entry) && hasValue(entry.name) && typeof entry.value === 'string',
+  );
+}
+
+function isBrowserStorageState(value: unknown): value is BrowserStorageState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.cookies) &&
+    Array.isArray(value.origins) &&
+    value.cookies.every(isBrowserStorageCookie) &&
+    value.origins.every(isBrowserStorageOrigin)
+  );
+}
+
+/** Retain only the exact OnTrack origin, never IdP or unrelated browser state. */
+function filterBrowserSessionState(state: BrowserStorageState, targetOrigin: string): BrowserStorageState {
+  const target = new URL(targetOrigin);
+  const targetHostname = target.hostname.toLowerCase();
+  const cookies = state.cookies.filter(
+    (cookie) => cookie.domain.trim().toLowerCase().replace(/^\./, '') === targetHostname,
+  );
+  const origins = state.origins.filter((origin) => origin.origin === target.origin);
+
+  return { cookies, origins };
+}
+
+function writePrivateBrowserSessionState(storagePath: string, state: BrowserStorageState): void {
+  mkdirSync(dirname(storagePath), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(storagePath), 0o700);
+  writeFileSync(storagePath, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+  chmodSync(storagePath, 0o600);
+}
+
+export interface SaveBrowserSessionStateOptions {
+  storagePath?: string;
+  targetOrigin?: string;
+}
+
+/** Persist a private, OnTrack-only browser session state for future reuse. */
+export async function saveBrowserSessionState(context: {
+  storageState: () => Promise<unknown>;
+}, options: SaveBrowserSessionStateOptions = {}): Promise<void> {
+  const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
+  const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
+  const state = await context.storageState();
+  const filtered = filterBrowserSessionState(
+    isBrowserStorageState(state) ? state : { cookies: [], origins: [] },
+    targetOrigin,
+  );
+  writePrivateBrowserSessionState(storagePath, filtered);
+}
+
+/** Build context options with optional previously persisted browser session state. */
+export function buildContextOptionsWithStoredSession(options: {
+  storagePath?: string;
+  targetOrigin?: string;
+} = {}):
+  | {
+      storageState: BrowserStorageState;
+    }
+  | undefined {
+  const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
+  const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
+  if (!existsSync(storagePath)) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(storagePath, 'utf8')) as unknown;
+    if (!isBrowserStorageState(parsed)) {
+      return undefined;
+    }
+    const filtered = filterBrowserSessionState(parsed, targetOrigin);
+    // Migrate legacy full-state files before a browser context ever receives them.
+    writePrivateBrowserSessionState(storagePath, filtered);
+    return { storageState: filtered };
+  } catch {
+    // A corrupt or unreadable state is never passed to Playwright.
+    try {
+      chmodSync(storagePath, 0o600);
+    } catch {
+      // Ignore a best-effort permission repair failure.
+    }
+    return undefined;
+  }
 }
 
 // Username selector list spans Okta + Microsoft + generic IdP form variants.
@@ -549,6 +1079,11 @@ interface GuidedSsoRuntimeState {
   sawOktaVerifyChallenge: boolean;
   mfaSelectionDone: boolean;
   mfaSelectionPrompted: boolean;
+  selectedMfaMethodLabel?: string;
+  expectsMfaCode: boolean;
+  mfaCodePrompted: boolean;
+  mfaCodeSubmitted: boolean;
+  pendingMfaCode?: string;
   lastMfaChallengeNumbersKey?: string;
 }
 
@@ -569,6 +1104,25 @@ const MFA_CHALLENGE_NUMBER_SELECTORS = [
 const MFA_CHALLENGE_TEXT_SIGNAL =
   /number challenge|following number|enter the number|tap the number|okta verify|approve sign in|push notification/i;
 const MFA_CHALLENGE_NUMBER_TOKEN = /\b\d{1,3}\b/g;
+
+// MFA code input selectors for Google Authenticator / Okta Verify "enter code" flows.
+const MFA_CODE_INPUT_SELECTORS = [
+  'input[name="answer"]',
+  'input[name="credentials.passcode"]',
+  'input[name="passCode"]',
+  'input[name="otp"]',
+  'input[name="code"]',
+  'input[name="verificationCode"]',
+  'input[autocomplete="one-time-code"]',
+  'input[inputmode="numeric"]',
+];
+
+const MFA_CODE_SUBMIT_LABELS = ['verify', 'submit', 'continue', 'next', 'sign in', 'log in'];
+
+/** Identify MFA methods that require user-entered one-time code instead of push/number approval. */
+function isCodeBasedMfaLabel(label: string): boolean {
+  return /google authenticator|enter a code|passcode|one[- ]time/i.test(label);
+}
 
 /** Collect main page plus all child frames for resilient selector scanning. */
 function collectScopes(page: Page): ScopeRef[] {
@@ -1255,10 +1809,100 @@ async function maybeHandleMfaMethodSelection(
   const clicked = await clickDetectedMfaOption(selectedOption);
   if (clicked) {
     state.mfaSelectionDone = true;
+    state.selectedMfaMethodLabel = selectedOption.label;
+    state.expectsMfaCode = isCodeBasedMfaLabel(selectedOption.label);
     return true;
   }
 
   return false;
+}
+
+/** Handle MFA code-entry methods by prompting user for OTP and submitting verification form. */
+async function maybeHandleMfaCodeEntry(
+  scopes: ScopeRef[],
+  state: GuidedSsoRuntimeState,
+  requestMfaCode: ((methodLabel: string) => Promise<string | null | undefined>) | undefined,
+  onStep?: (step: SsoStep) => void,
+): Promise<boolean> {
+  if (!state.expectsMfaCode || state.mfaCodeSubmitted) {
+    return false;
+  }
+
+  const hasCodeField = await hasAnySelectorInScopes(scopes, MFA_CODE_INPUT_SELECTORS);
+  if (!hasCodeField) {
+    return false;
+  }
+
+  onStep?.('mfa_code');
+
+  if (!requestMfaCode) {
+    throw new SsoFallbackError(
+      'unsupported_mfa',
+      'fallback',
+      `Selected MFA method "${state.selectedMfaMethodLabel || 'code'}" requires code entry, but no code prompt callback was provided.`,
+    );
+  }
+
+  if (!state.mfaCodePrompted) {
+    state.mfaCodePrompted = true;
+    const input = await requestMfaCode(state.selectedMfaMethodLabel || 'Verification code');
+    const code = input?.trim() ?? '';
+    if (!code) {
+      throw new SsoFallbackError(
+        'unsupported_mfa',
+        'fallback',
+        `No code entered for MFA method "${state.selectedMfaMethodLabel || 'code'}".`,
+      );
+    }
+    state.pendingMfaCode = code;
+  }
+
+  const codeToSubmit = state.pendingMfaCode?.trim() ?? '';
+  if (!codeToSubmit) {
+    return false;
+  }
+
+  const codeFilled = await fillMfaCodeInputs(scopes, codeToSubmit);
+  if (!codeFilled) {
+    return false;
+  }
+  await submitAfterFieldFill(scopes, MFA_CODE_SUBMIT_LABELS);
+  state.mfaCodeSubmitted = true;
+  return true;
+}
+
+/** Fill OTP code in either segmented 1-digit inputs or a single MFA code field. */
+async function fillMfaCodeInputs(scopes: ScopeRef[], code: string): Promise<boolean> {
+  const compactCode = code.replace(/\s+/g, '');
+  const segmentedSelector = [
+    'input[inputmode="numeric"][maxlength="1"]',
+    'input[type="tel"][maxlength="1"]',
+    'input[name*="code"][maxlength="1"]',
+    'input[id*="code"][maxlength="1"]',
+  ].join(', ');
+
+  for (const scopeRef of scopes) {
+    const segmented = scopeRef.scope.locator(segmentedSelector);
+    const count = Math.min(await segmented.count(), 12);
+    if (count < 4) {
+      continue;
+    }
+    try {
+      if (!(await segmented.first().isVisible({ timeout: 150 }))) {
+        continue;
+      }
+      const digits = [...compactCode];
+      const max = Math.min(count, digits.length);
+      for (let index = 0; index < max; index += 1) {
+        await segmented.nth(index).fill(digits[index]);
+      }
+      return true;
+    } catch {
+      // try next scope/strategy
+    }
+  }
+
+  return fillFirstVisible(scopes, MFA_CODE_INPUT_SELECTORS, compactCode);
 }
 
 /** Submit current auth step via selector, label-driven click, or Enter fallback. */
@@ -1303,6 +1947,7 @@ async function advanceGuidedSsoOnPage(
   password: string,
   state: GuidedSsoRuntimeState,
   chooseMfaMethod: ((options: MfaMethodOption[]) => Promise<number | null | undefined>) | undefined,
+  requestMfaCode: ((methodLabel: string) => Promise<string | null | undefined>) | undefined,
   onMfaNumberChallenge: ((numbers: string[]) => void) | undefined,
   onStep?: (step: SsoStep) => void,
 ): Promise<void> {
@@ -1372,25 +2017,44 @@ async function advanceGuidedSsoOnPage(
     }
   }
 
-  const sawChallenge = await detectOktaVerifyChallenge(scopes);
-  if (sawChallenge) {
-    state.sawOktaVerifyChallenge = true;
+  if (state.expectsMfaCode && !state.mfaCodeSubmitted) {
+    const submittedMfaCode = await maybeHandleMfaCodeEntry(
+      scopes,
+      state,
+      requestMfaCode,
+      onStep,
+    );
+    if (submittedMfaCode) {
+      try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 2000 });
+      } catch {
+        // keep polling
+      }
+      return;
+    }
   }
 
-  if (state.sawOktaVerifyChallenge) {
-    const numbers = await extractMfaNumberChallenge(scopes);
-    if (numbers.length > 0) {
-      const key = numbers.join('|');
-      if (key !== state.lastMfaChallengeNumbersKey) {
-        state.lastMfaChallengeNumbersKey = key;
-        onMfaNumberChallenge?.(numbers);
-      }
+  if (!state.expectsMfaCode) {
+    const sawChallenge = await detectOktaVerifyChallenge(scopes);
+    if (sawChallenge) {
+      state.sawOktaVerifyChallenge = true;
     }
 
-    if (!state.mfaWaitNotified) {
-      state.mfaWaitNotified = true;
-      onStep?.('mfa_wait');
-      return;
+    if (state.sawOktaVerifyChallenge) {
+      const numbers = await extractMfaNumberChallenge(scopes);
+      if (numbers.length > 0) {
+        const key = numbers.join('|');
+        if (key !== state.lastMfaChallengeNumbersKey) {
+          state.lastMfaChallengeNumbersKey = key;
+          onMfaNumberChallenge?.(numbers);
+        }
+      }
+
+      if (!state.mfaWaitNotified) {
+        state.mfaWaitNotified = true;
+        onStep?.('mfa_wait');
+        return;
+      }
     }
   }
 
@@ -1406,21 +2070,11 @@ async function advanceGuidedSsoOnPage(
 /** Launch playwright chromium with best-available executable resolution. */
 async function launchBrowserForCapture(options: {
   headless: boolean;
+  browserAdapter?: BrowserLaunchAdapter;
 }): Promise<{
-  browser: Awaited<ReturnType<(typeof import('playwright-core'))['chromium']['launch']>>;
+  browser: Pick<Browser, 'newContext' | 'close'>;
   plan: BrowserLaunchPlan;
 }> {
-  let playwrightModule: typeof import('playwright-core');
-  try {
-    playwrightModule = await import('playwright-core');
-  } catch {
-    throw new SsoFallbackError(
-      'browser_unavailable',
-      'fallback',
-      'Auto login requires dependency "playwright-core". Install the CLI with dependencies and retry.',
-    );
-  }
-
   const plan = resolveBrowserLaunchPlan();
   const launchArgs =
     plan.executablePath !== undefined
@@ -1432,63 +2086,61 @@ async function launchBrowserForCapture(options: {
           headless: options.headless,
         };
 
-  let installAttempted = false;
-  while (true) {
-    try {
-      const browser = await playwrightModule.chromium.launch(launchArgs);
+  try {
+    if (options.browserAdapter) {
       return {
-        browser,
+        browser: await options.browserAdapter.launch(launchArgs),
         plan,
       };
-    } catch (error) {
-      const detail = asErrorMessage(error);
-      const canAutoInstall =
-        !installAttempted &&
-        (isMissingBrowserBinaryError(detail) ||
-          (plan.source === 'bundled' && isMissingSharedLibraryError(detail)));
+    }
 
-      if (canAutoInstall) {
-        installAttempted = true;
-        const installed = await autoInstallChromiumBrowser();
-        if (installed.ok) {
-          continue;
-        }
-        throw new SsoFallbackError(
-          'browser_unavailable',
-          'fallback',
-          `Browser runtime is missing and auto-install failed. ${installed.detail}`,
-        );
-      }
-
-      if (isMissingDisplayServerError(detail)) {
-        throw new SsoFallbackError(
-          'browser_unavailable',
-          'fallback',
-          'No display server found ($DISPLAY). Use default headless mode, or run with xvfb-run if you need --show-browser.',
-        );
-      }
-
-      if (isMissingSharedLibraryError(detail)) {
-        throw new SsoFallbackError(
-          'browser_unavailable',
-          'fallback',
-          'Browser dependencies are missing on this system. Install OS libraries or run "npx playwright install --with-deps chromium".',
-        );
-      }
-
-      if (plan.source === 'bundled') {
-        throw new SsoFallbackError(
-          'browser_unavailable',
-          'fallback',
-          `${browserInstallHint()} (${detail})`,
-        );
-      }
+    let playwrightModule: typeof import('playwright-core');
+    try {
+      playwrightModule = await import('playwright-core');
+    } catch {
       throw new SsoFallbackError(
         'browser_unavailable',
         'fallback',
-        `Unable to launch browser at "${plan.executablePath}": ${detail}`,
+        'Auto login requires dependency "playwright-core". Install the CLI with dependencies and retry.',
       );
     }
+    const browser = await playwrightModule.chromium.launch(launchArgs);
+    return {
+      browser,
+      plan,
+    };
+  } catch (error) {
+    const detail = asErrorMessage(error);
+
+    if (isMissingDisplayServerError(detail)) {
+      throw new SsoFallbackError(
+        'browser_unavailable',
+        'fallback',
+        'No display server found ($DISPLAY). Use default headless mode, or run with xvfb-run if you need --show-browser.',
+      );
+    }
+
+    if (isMissingSharedLibraryError(detail)) {
+      throw new SsoFallbackError(
+        'browser_unavailable',
+        'fallback',
+        'Browser dependencies are missing. Install the required OS libraries through your system package manager, then retry.',
+      );
+    }
+
+    if (plan.source === 'bundled') {
+      throw new SsoFallbackError(
+        'browser_unavailable',
+        'fallback',
+        `${browserInstallHint()} (${detail})`,
+      );
+    }
+
+    throw new SsoFallbackError(
+      'browser_unavailable',
+      'fallback',
+      `Unable to launch browser at "${plan.executablePath}": ${detail}`,
+    );
   }
 }
 
@@ -1505,6 +2157,7 @@ async function captureSsoCredentialsInternal(
     password: string;
     onStep?: (step: SsoStep) => void;
     chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
+    requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
     onMfaNumberChallenge?: (numbers: string[]) => void;
   },
 ): Promise<LoginCredentials> {
@@ -1513,14 +2166,15 @@ async function captureSsoCredentialsInternal(
   // Browser launch plan supports env override, system browser, then bundled Chromium.
   const launch = await launchBrowserForCapture({
     headless: options.headless ?? false,
+    browserAdapter: options.browserAdapter,
   });
   const browser = launch.browser;
 
-  // New isolated browser context avoids leaking cookies between login attempts.
-  const context = await browser.newContext();
+  const targetOrigin = new URL(options.apiBaseUrl).origin;
+  // Isolated context loads only sanitized, OnTrack-only persisted state when available.
+  const context = await browser.newContext(buildContextOptionsWithStoredSession({ targetOrigin }));
   const page = await context.newPage();
   const seenPages = new Set<Page>();
-  const targetOrigin = new URL(options.apiBaseUrl).origin;
   let captured: LoginCredentials | null = null;
 
   const setCaptured = (value: LoginCredentials | null): void => {
@@ -1537,11 +2191,11 @@ async function captureSsoCredentialsInternal(
     seenPages.add(currentPage);
 
     // Immediate URL check covers flows where auth token appears in address bar.
-    setCaptured(extractCredentialsFromUrl(currentPage.url()));
+    setCaptured(extractCredentialsFromUrl(currentPage.url(), targetOrigin));
 
     currentPage.on('framenavigated', () => {
       // Re-check URL after every navigation in case redirect carries token.
-      setCaptured(extractCredentialsFromUrl(currentPage.url()));
+      setCaptured(extractCredentialsFromUrl(currentPage.url(), targetOrigin));
     });
 
     currentPage.on('request', (...args: unknown[]) => {
@@ -1554,7 +2208,7 @@ async function captureSsoCredentialsInternal(
       if (request.method() !== 'POST') {
         return;
       }
-      if (!request.url().includes('/api/auth')) {
+      if (!isTargetOnTrackAuthUrl(request.url(), targetOrigin)) {
         return;
       }
 
@@ -1578,7 +2232,7 @@ async function captureSsoCredentialsInternal(
           status: () => number;
           json: () => Promise<unknown>;
         };
-        if (!response.url().includes('/api/auth') || response.status() >= 400) {
+        if (!isTargetOnTrackAuthUrl(response.url(), targetOrigin) || response.status() >= 400) {
           return;
         }
 
@@ -1586,9 +2240,15 @@ async function captureSsoCredentialsInternal(
           const body = await response.json();
           const parsed = extractCredentialsFromAuthPayload(body);
           if (parsed) {
+            const contract = new URL(response.url()).pathname.endsWith(
+              '/api/auth/access-token',
+            )
+              ? 'access-token'
+              : 'legacy-auth';
             setCaptured({
               ...parsed,
               source: 'auth_response',
+              contract,
             });
           }
         } catch {
@@ -1616,6 +2276,11 @@ async function captureSsoCredentialsInternal(
           sawOktaVerifyChallenge: false,
           mfaSelectionDone: false,
           mfaSelectionPrompted: false,
+          selectedMfaMethodLabel: undefined,
+          expectsMfaCode: false,
+          mfaCodePrompted: false,
+          mfaCodeSubmitted: false,
+          pendingMfaCode: undefined,
           lastMfaChallengeNumbersKey: undefined,
         }
       : null;
@@ -1636,6 +2301,7 @@ async function captureSsoCredentialsInternal(
             guidedLogin.password,
             guidedState,
             guidedLogin.chooseMfaMethod,
+            guidedLogin.requestMfaCode,
             guidedLogin.onMfaNumberChallenge,
             guidedLogin.onStep,
           );
@@ -1653,7 +2319,7 @@ async function captureSsoCredentialsInternal(
           throw new SsoFallbackError(
             'unsupported_mfa',
             'fallback',
-            'Detected a non-Okta-Verify MFA challenge. This flow currently supports Okta Verify push/number only.',
+            'Detected an unsupported MFA challenge. Supported methods are Okta Verify push/number and code-entry methods (Okta Verify code / Google Authenticator).',
           );
         }
 
@@ -1664,7 +2330,7 @@ async function captureSsoCredentialsInternal(
           }
         }
 
-        setCaptured(extractCredentialsFromUrl(openPage.url()));
+        setCaptured(extractCredentialsFromUrl(openPage.url(), targetOrigin));
         if (captured) {
           break;
         }
@@ -1686,7 +2352,7 @@ async function captureSsoCredentialsInternal(
 
       const cookies = await context.cookies();
       // Cookie extraction is final in-loop fallback before next polling tick.
-      setCaptured(extractCredentialsFromCookieJar(cookies));
+      setCaptured(extractCredentialsFromCookieJar(cookies, targetOrigin));
 
       if (captured) {
         break;
@@ -1717,11 +2383,222 @@ async function captureSsoCredentialsInternal(
         'Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.',
       );
     }
+    // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
+    try {
+      await saveBrowserSessionState(context, { targetOrigin });
+    } catch {
+      // non-fatal: login should still succeed even if state persistence is blocked
+    }
   } finally {
     await browser.close();
   }
 
   return captured;
+}
+
+/**
+ * Fast-path capture from persisted browser session state only.
+ * Returns null when no reusable session is found, so caller can continue normal login flow.
+ */
+export async function captureCredentialsFromStoredBrowserSession(
+  options: AutoLoginOptions,
+): Promise<LoginCredentials | null> {
+  const timeoutMs = Math.max(3000, options.timeoutMs ?? 12_000);
+  const fromStoredState = await captureCredentialsFromPersistedStateFile(options, timeoutMs);
+  if (fromStoredState) {
+    return fromStoredState;
+  }
+
+  if (!isSystemBrowserProfileReuseEnabled()) {
+    return null;
+  }
+
+  return captureCredentialsFromSystemBrowserProfile(options, timeoutMs);
+}
+
+/** Common probe routine shared by persisted-state and live-profile session reuse paths. */
+async function probeCredentialsInOpenContext(
+  context: Pick<BrowserContext, 'cookies'>,
+  page: Page,
+  options: AutoLoginOptions,
+  timeoutMs: number,
+): Promise<LoginCredentials | null> {
+  const targetOrigin = new URL(options.apiBaseUrl).origin;
+  let capturedFromRequestHeaders: LoginCredentials | null = null;
+
+  page.on('request', (...args: unknown[]) => {
+    if (capturedFromRequestHeaders) {
+      return;
+    }
+    const request = args[0] as { headers: () => Record<string, string>; url: () => string };
+    if (!isTargetOnTrackAuthUrl(request.url(), targetOrigin)) {
+      return;
+    }
+    const maybe = extractCredentialsFromRequestHeaders(request.headers());
+    if (maybe) {
+      capturedFromRequestHeaders = maybe;
+    }
+  });
+
+  const checkCaptured = async (): Promise<LoginCredentials | null> => {
+    if (capturedFromRequestHeaders) {
+      return capturedFromRequestHeaders;
+    }
+
+    const fromUrl = extractCredentialsFromUrl(page.url(), targetOrigin);
+    if (fromUrl) {
+      return fromUrl;
+    }
+
+    try {
+      const pageOrigin = new URL(page.url()).origin;
+      if (pageOrigin === targetOrigin) {
+        const fromStorage = await extractCredentialsFromLocalStorage(page);
+        if (fromStorage) {
+          return fromStorage;
+        }
+      }
+    } catch {
+      // ignore unstable intermediate URLs
+    }
+
+    return extractCredentialsFromCookieJar(await context.cookies(), targetOrigin);
+  };
+
+  const candidates = [`${targetOrigin}/home`, options.ssoUrl];
+  for (const candidate of candidates) {
+    const remaining = timeoutMs - 1000;
+    if (remaining <= 0) {
+      break;
+    }
+    try {
+      await page.goto(candidate, {
+        waitUntil: 'domcontentloaded',
+        timeout: Math.min(remaining, 8_000),
+      });
+    } catch {
+      // Continue probing state even if navigation failed; cookies/storage may still be readable.
+    }
+
+    const immediate = await checkCaptured();
+    if (immediate) {
+      return immediate;
+    }
+  }
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const maybe = await checkCaptured();
+    if (maybe) {
+      return maybe;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  return null;
+}
+
+/** Probe saved state file created by previous automated logins. */
+async function captureCredentialsFromPersistedStateFile(
+  options: AutoLoginOptions,
+  timeoutMs: number,
+): Promise<LoginCredentials | null> {
+  const storageState = buildContextOptionsWithStoredSession({
+    targetOrigin: new URL(options.apiBaseUrl).origin,
+  });
+  if (!storageState) {
+    return null;
+  }
+
+  const launch = await launchBrowserForCapture({
+    headless: options.headless ?? true,
+  });
+  const browser = launch.browser;
+
+  try {
+    const context = await browser.newContext(storageState);
+    const page = await context.newPage();
+    const captured = await probeCredentialsInOpenContext(context, page, options, timeoutMs);
+    if (!captured) {
+      return null;
+    }
+    try {
+      await saveBrowserSessionState(context, { targetOrigin: new URL(options.apiBaseUrl).origin });
+    } catch {
+      // non-fatal persistence failure
+    }
+    return captured;
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Probe live system browser profile state to reuse already logged-in sessions. */
+async function captureCredentialsFromSystemBrowserProfile(
+  options: AutoLoginOptions,
+  timeoutMs: number,
+): Promise<LoginCredentials | null> {
+  const profileCandidates = expandSystemBrowserProfileCandidates(resolveSystemBrowserUserDataDirs(), {
+    profileOverride: process.env.ONTRACK_BROWSER_PROFILE_DIR,
+  });
+
+  if (profileCandidates.length === 0) {
+    return null;
+  }
+
+  let playwrightModule: typeof import('playwright-core');
+  try {
+    playwrightModule = await import('playwright-core');
+  } catch {
+    return null;
+  }
+
+  let launchPlan: BrowserLaunchPlan;
+  try {
+    launchPlan = resolveBrowserLaunchPlan();
+  } catch {
+    return null;
+  }
+
+  // Live profile probing only makes sense with a concrete system browser executable.
+  if (!launchPlan.executablePath) {
+    return null;
+  }
+
+  for (const candidate of profileCandidates) {
+    let context: BrowserContext | null = null;
+    try {
+      context = await playwrightModule.chromium.launchPersistentContext(candidate.userDataDir, {
+        headless: options.headless ?? true,
+        executablePath: launchPlan.executablePath,
+        args: [`--profile-directory=${candidate.profileDir}`],
+      });
+
+      const page = context.pages()[0] ?? (await context.newPage());
+      const captured = await probeCredentialsInOpenContext(
+        context,
+        page,
+        options,
+        Math.min(timeoutMs, 10_000),
+      );
+      if (captured) {
+        // Never copy a real system browser profile's full storage state into CLI state.
+        return captured;
+      }
+    } catch {
+      // Profile can be locked by a running browser or blocked by OS policy; continue next candidate.
+    } finally {
+      if (context) {
+        try {
+          await context.close();
+        } catch {
+          // ignore close failures
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 /** Browser-only credential capture (no guided username/password actions). */
@@ -1740,12 +2617,14 @@ export async function captureSsoCredentialsWithGuidedLogin(
       apiBaseUrl: options.apiBaseUrl,
       timeoutMs: options.timeoutMs,
       headless: options.headless,
+      browserAdapter: options.browserAdapter,
     },
     {
       username: options.username,
       password: options.password,
       onStep,
       chooseMfaMethod: options.chooseMfaMethod,
+      requestMfaCode: options.requestMfaCode,
       onMfaNumberChallenge: options.onMfaNumberChallenge,
     },
   );

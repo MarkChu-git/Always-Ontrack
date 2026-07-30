@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { SessionData } from './types.js';
+import { migrateLegacySession } from './auth.js';
 
 /**
  * Resolve config root using platform conventions:
@@ -30,7 +31,7 @@ export function getSessionPath(): string {
 export async function loadSession(): Promise<SessionData | null> {
   try {
     const contents = await readFile(getSessionPath(), 'utf8');
-    return JSON.parse(contents) as SessionData;
+    return migrateLegacySession(JSON.parse(contents) as SessionData);
   } catch {
     return null;
   }

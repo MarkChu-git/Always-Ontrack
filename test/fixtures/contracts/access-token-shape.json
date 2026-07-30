@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "id": "access-token-shape",
+    "schemaVersion": 1,
+    "method": "POST",
+    "route": "/auth/access-token",
+    "provenance": {
+      "observedAt": "2026-07-31",
+      "role": "student",
+      "risk": "identity-sensitive",
+      "trust": "http-observed"
+    },
+    "redactedFields": ["auth_token", "user.id"]
+  },
+  "payload": {
+    "auth_token_expiry": "2030-01-01T00:00:00.000Z",
+    "user": { "role": "Student" }
+  },
+  "shape": {
+    "type": "object",
+    "fields": {
+      "auth_token": { "type": "string" },
+      "auth_token_expiry": { "type": "string" },
+      "user": {
+        "type": "object",
+        "fields": {
+          "id": { "type": "number" },
+          "role": { "type": "string", "enum": ["Student"] }
+        }
+      }
+    }
+  }
+}

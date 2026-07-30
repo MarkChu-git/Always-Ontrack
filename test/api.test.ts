@@ -1,6 +1,7 @@
-import test from 'node:test';
+import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { OnTrackApiClient } from '../src/lib/api.js';
+import { OnTrackHttpError } from '../src/lib/auth.js';
 import type { SessionData } from '../src/lib/types.js';
 
 const originalFetch = globalThis.fetch;
@@ -21,7 +22,7 @@ function mockFetch(fn: (input: URL | RequestInfo, init?: RequestInit) => Promise
   globalThis.fetch = fn as typeof fetch;
 }
 
-test.afterEach(() => {
+afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
@@ -60,7 +61,7 @@ test('listTaskComments surfaces 401 errors', async () => {
     });
   });
 
-  await assert.rejects(() => client.listTaskComments(session, 101, 501), /401 Unauthorized: Unauthorized/);
+  await assert.rejects(() => client.listTaskComments(session, 101, 501), /401 Unauthorized/);
 });
 
 test('listInboxTasks surfaces 419 errors', async () => {
@@ -75,7 +76,53 @@ test('listInboxTasks surfaces 419 errors', async () => {
 
   await assert.rejects(
     () => client.listInboxTasks(session, 55),
-    /419 Authentication Timeout: Session expired/,
+    /419 Authentication Timeout/,
+  );
+});
+
+test('typed auth errors classify 401/419 and redact credential-like response details', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => new Response(JSON.stringify({ error: 'auth_token=do-not-expose' }), {
+    status: 419,
+    statusText: 'Authentication Timeout',
+    headers: { 'content-type': 'application/json' },
+  }));
+
+  await assert.rejects(
+    () => client.listInboxTasks(session, 55),
+    (error: unknown) => {
+      assert.ok(error instanceof OnTrackHttpError);
+      assert.equal(error.authFailure, 'expired');
+      assert.equal(error.message.includes('do-not-expose'), false);
+      return true;
+    },
+  );
+});
+
+test('remote errors never expose raw server response bodies', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const canaries = [
+    'student@example.edu',
+    '0400 000 000',
+    'Basic dXNlcjpwYXNz',
+    'api_key=production-api-key',
+  ];
+  mockFetch(async () => new Response(canaries.join(' '), {
+    status: 500,
+    statusText: 'Internal Server Error',
+    headers: { 'content-type': 'text/plain' },
+  }));
+
+  await assert.rejects(
+    () => client.listProjects(session),
+    (error: unknown) => {
+      assert.ok(error instanceof OnTrackHttpError);
+      assert.equal(error.message, '500 Internal Server Error');
+      for (const canary of canaries) {
+        assert.equal(error.message.includes(canary), false);
+      }
+      return true;
+    },
   );
 });
 
@@ -110,7 +157,7 @@ test('downloadSubmissionPdf surfaces non-200 responses', async () => {
 
   await assert.rejects(
     () => client.downloadSubmissionPdf(session, 101, 501),
-    /404 Not Found: not found/,
+    /404 Not Found/,
   );
 });
 
@@ -176,4 +223,101 @@ test('addTaskComment posts json payload', async () => {
 
   const comment = await client.addTaskComment(session, 101, 501, 'Please review this update.');
   assert.equal(comment.id, 44);
+});
+
+test('getSubmissionDetails reads the production submission details endpoint', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let requestedUrl = '';
+  mockFetch(async (input, init) => {
+    requestedUrl = String(input);
+    assert.equal(init?.method, 'GET');
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('Auth-Token'), 'token-123');
+    return new Response(JSON.stringify({ has_pdf: true, processing_pdf: false, task_status: 'submitted' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  const details = await client.getSubmissionDetails(session, 101, 501);
+  assert.ok(requestedUrl.endsWith('/projects/101/task_def_id/501/submission_details'));
+  assert.deepEqual(details, { has_pdf: true, processing_pdf: false, task_status: 'submitted' });
+});
+
+test('list prerequisite Interfaces use their distinct production paths', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const requestedUrls: string[] = [];
+  mockFetch(async (input, init) => {
+    requestedUrls.push(String(input));
+    assert.equal(init?.method, 'GET');
+    return new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  await client.listUnitTaskPrerequisites(session, 55);
+  await client.listTaskPrerequisites(session, 55, 501);
+  assert.ok(requestedUrls[0].endsWith('/units/55/task_prerequisites'));
+  assert.ok(requestedUrls[1].endsWith('/units/55/task_definitions/501/prerequisites'));
+});
+
+test('planner mutations use verified PUT paths and exact JSON bodies without retrying', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const calls: Array<{ url: string; method?: string; body?: string }> = [];
+  mockFetch(async (input, init) => {
+    calls.push({ url: String(input), method: init?.method, body: init?.body ? String(init.body) : undefined });
+    return new Response(JSON.stringify({ error: 'temporarily unavailable' }), {
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  await assert.rejects(
+    () => client.updateTaskTargetDates(session, 101, 501, '2026-08-01', '2026-08-10'),
+    /503 Service Unavailable/,
+  );
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.endsWith('/projects/101/task_def_id/501/target_dates'));
+  assert.equal(calls[0].method, 'PUT');
+  assert.equal(calls[0].body, JSON.stringify({ target_start_date: '2026-08-01', target_due_date: '2026-08-10' }));
+});
+
+test('reset and plan mutation Interfaces preserve exact bodies', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const calls: Array<{ url: string; method?: string; body?: string }> = [];
+  mockFetch(async (input, init) => {
+    calls.push({ url: String(input), method: init?.method, body: init?.body ? String(init.body) : undefined });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  await client.resetProjectTargetDates(session, 101);
+  await client.updateTaskPlan(session, 101, 501, { time_extension_days: 3 });
+  assert.ok(calls[0].url.endsWith('/projects/101/reset_target_dates'));
+  assert.equal(calls[0].method, 'PUT');
+  assert.equal(calls[0].body, undefined);
+  assert.ok(calls[1].url.endsWith('/projects/101/task_def_id/501/plan'));
+  assert.equal(calls[1].method, 'PUT');
+  assert.equal(calls[1].body, JSON.stringify({ extensions: { time_extension_days: 3 } }));
+});
+
+test('signOut uses the observed remember=false query contract', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async (input, init) => {
+    assert.equal(
+      String(input),
+      'https://ontrack.infotech.monash.edu/api/auth?remember=false',
+    );
+    assert.equal(init?.method, 'DELETE');
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  await client.signOut(session);
 });

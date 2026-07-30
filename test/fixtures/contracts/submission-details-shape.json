@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "id": "submission-details-shape",
+    "schemaVersion": 1,
+    "method": "GET",
+    "route": "/projects/:projectId/task_def_id/:taskDefId/submission_details",
+    "provenance": {
+      "observedAt": "2026-07-31",
+      "role": "student",
+      "risk": "read-only",
+      "trust": "http-observed"
+    }
+  },
+  "payload": {
+    "has_pdf": true,
+    "processing_pdf": false,
+    "submission_date": "2030-01-01T00:00:00.000Z",
+    "task_status": "working"
+  }
+}

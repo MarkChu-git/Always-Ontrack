@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
