@@ -21,7 +21,7 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 | 项目 | 当前事实 | 对设计的影响 |
 | --- | --- | --- |
 | 默认分支 | `master` | 所有 branch protection 与 PR 触发器以 `master` 为目标。 |
-| 版本 | `package.json` 为 `0.3.0` | Release tag 必须严格为 `v0.3.0` 形式，并与包版本去掉 `v` 后相同。 |
+| 版本 | `package.json` 为 `0.3.1` | Release tag 必须严格为 `v0.3.1` 形式，并与包版本去掉 `v` 后相同。 |
 | 历史 tag | 本地有带注释的 `v0.2.0`、`v0.3.0`，远端尚未发现它们 | 在启用 tag-triggered release 前，先确认并推送应保留的历史 tag。 |
 | package manager | `bun.lock`、`packageManager: bun@1.3.14`、`engines.bun: >=1.3.14` | CI 固定 Bun 1.3.14，使用 `bun install --frozen-lockfile`。 |
 | 现有 workflow | 已实现 `ci.yml`、`dependency-review.yml`、`release.yml` | 本文同时是实施说明；远端治理项按 runbook 完成。 |
@@ -37,12 +37,12 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 {
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MarkChu-git/ontrack-cli.git"
+    "url": "git+https://github.com/MarkChu-git/Always-Ontrack.git"
   },
   "bugs": {
-    "url": "https://github.com/MarkChu-git/ontrack-cli/issues"
+    "url": "https://github.com/MarkChu-git/Always-Ontrack/issues"
   },
-  "homepage": "https://github.com/MarkChu-git/ontrack-cli#readme",
+  "homepage": "https://github.com/MarkChu-git/Always-Ontrack#readme",
   "publishConfig": {
     "access": "public"
   }
@@ -285,7 +285,7 @@ git merge-base --is-ancestor "$SOURCE_SHA" origin/master
 启用条件：
 
 1. `package.json.repository.url` 与 GitHub repository 精确匹配；
-2. npm package settings 中建立 Trusted Publisher：`MarkChu-git` / `ontrack-cli` / `release.yml` / Environment `release`，允许 `npm publish`；
+2. npm package settings 中建立 Trusted Publisher：`MarkChu-git` / `Always-Ontrack` / `release.yml` / Environment `release`，允许 `npm publish`；
 3. 该 job 运行在 GitHub-hosted runner；
 4. job 声明 `permissions: { contents: read, id-token: write }`；
 5. Environment `release` 已设置维护者审批与 protected tag 限制。

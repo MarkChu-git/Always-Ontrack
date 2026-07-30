@@ -8,7 +8,7 @@ Complete these settings in the GitHub and npm UIs before enabling registry publi
 
 1. Protect `master`: require the `CI / Verify Bun CLI` and `Dependency review / Dependency review` checks, at least one review, resolved conversations, and no force pushes.
 2. Create a protected GitHub Environment named `release`. Require maintainer approval and restrict deployment branches/tags to the intended release tags.
-3. In npm package settings for `ontrack-cli`, create a Trusted Publisher with owner `MarkChu-git`, repository `ontrack-cli`, workflow file `release.yml`, and Environment `release`.
+3. In npm package settings for `ontrack-cli`, create a Trusted Publisher with owner `MarkChu-git`, repository `Always-Ontrack`, workflow file `release.yml`, and Environment `release`.
 4. Set the repository variable `PUBLISH_TO_NPM` to `true` only after step 3 is verified. Its absence or any value other than the lowercase string `true` keeps the npm job disabled.
 5. Do not configure `NPM_TOKEN`, `NODE_AUTH_TOKEN`, an automation token, or OnTrack credentials. The publish job uses GitHub OIDC and the rest of CI has no secrets.
 

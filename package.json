@@ -1,16 +1,16 @@
 {
   "name": "ontrack-cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "CLI for Monash OnTrack / Doubtfire",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MarkChu-git/ontrack-cli.git"
+    "url": "git+https://github.com/MarkChu-git/Always-Ontrack.git"
   },
   "bugs": {
-    "url": "https://github.com/MarkChu-git/ontrack-cli/issues"
+    "url": "https://github.com/MarkChu-git/Always-Ontrack/issues"
   },
-  "homepage": "https://github.com/MarkChu-git/ontrack-cli#readme",
+  "homepage": "https://github.com/MarkChu-git/Always-Ontrack#readme",
   "publishConfig": {
     "access": "public"
   },
