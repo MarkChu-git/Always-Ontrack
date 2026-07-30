@@ -76,16 +76,16 @@ It is designed to work out of the box, with no mandatory base URL setup and a co
 
 ### Requirements
 
-- Node.js `22+`
+- Bun `1.3.14+`
 - macOS, Linux, or Windows
-- Network access on first guided login (`ontrack login`) if Playwright Chromium runtime needs to be installed automatically
+- Network access when you choose to install a reviewed browser runtime manually
 
 ### Global install
 
 Recommended:
 
 ```bash
-npm install -g ontrack-cli
+bun add --global ontrack-cli
 ```
 
 After installation, the CLI is available as:
@@ -99,22 +99,22 @@ ontrack
 If you prefer to keep the package local to a workspace:
 
 ```bash
-npm install
-npm exec ontrack -- auth-method
+bun install
+bun run ontrack -- auth-method
 ```
 
 ### Run from source
 
 ```bash
-npm install
-npm run build
-node dist/cli.js auth-method
+bun install
+bun run build
+bun dist/cli.js auth-method
 ```
 
 Development mode:
 
 ```bash
-npm run dev -- auth-method
+bun run dev -- auth-method
 ```
 
 ## Quick start
@@ -275,18 +275,27 @@ ontrack login
 
 This flow:
 
-1. prompts for Monash username/password in CLI (password is hidden)
-2. launches guided SSO automation in hidden-browser (headless) mode by default
-3. shows structured login progress in terminal panels
-4. prompts MFA method selection in CLI when multiple methods are available
-5. highlights Okta Verify number challenge values in terminal output
-6. captures credentials and signs in through `/api/auth`
-7. stores a local session cache
-8. auto-installs Playwright Chromium runtime when missing (best-effort)
+1. first probes the CLI's previously saved, OnTrack-only browser state and reuses it when valid
+2. if no reusable state is found, prompts for Monash username/password in CLI (password is hidden)
+3. launches guided SSO automation in hidden-browser (headless) mode by default
+4. shows structured login progress in terminal panels
+5. prompts MFA method selection in CLI when multiple methods are available
+6. for code-based methods (`Google Authenticator` / `Enter a code`), prompts for your app code and submits it
+7. for push-based method (`Get a push notification`), highlights Okta Verify number challenge values
+8. captures credentials and signs in through `/api/auth`
+9. stores a local session cache
+10. tells you how to install a browser runtime manually if one is missing
 
 `ontrack login` now defaults to hidden-browser (headless) mode across local and server environments.  
 Use `ontrack login --show-browser` only for debugging.  
 You can still use `ontrack login --sso` as an explicit guided alias.
+
+System browser-profile reuse is disabled by default. To opt in explicitly, set
+`ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` (and, if needed,
+`ONTRACK_BROWSER_USER_DATA_DIR` / `ONTRACK_BROWSER_PROFILE_DIR`). This may open
+your selected profile for credential discovery; the CLI never copies that
+profile's complete storage state and persists only the exact OnTrack origin.
+Do not enable it for a shared or untrusted system profile.
 
 ### Browser-only capture mode: `ontrack login --auto`
 
@@ -349,8 +358,8 @@ ontrack logout
 | `ontrack` | Open the interactive command launcher | Fastest way to run common workflows by number |
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
-| `ontrack login` | Run guided Monash SSO with Okta Verify push/number (default path) | Primary login command |
-| `ontrack login --sso` | Run guided Monash SSO with Okta Verify push/number | Explicit guided alias |
+| `ontrack login` | Run guided Monash SSO with MFA method selection (push/number/code) | Primary login command |
+| `ontrack login --sso` | Run guided Monash SSO with MFA method selection (push/number/code) | Explicit guided alias |
 | `ontrack login --show-browser` | Force visible browser mode for guided SSO | Debug selector or MFA edge cases |
 | `ontrack login --hide-browser` | Keep explicit headless guided SSO | Optional explicit flag (default behavior) |
 | `ontrack login --auto` | Run browser-only capture mode | Use when you only need passive capture |
@@ -610,6 +619,10 @@ That makes them a better fit for:
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | Override the default API base URL | Defaults to Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | Set the browser executable path for SSO automation | Highest priority browser override |
+| `ONTRACK_BROWSER_STATE_PATH` | Override persisted browser session state file path | Used for cookie/localStorage reuse during login |
+| `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | Explicitly allow live browser-profile credential discovery | Disabled by default; do not enable for shared/untrusted profiles |
+| `ONTRACK_BROWSER_USER_DATA_DIR` | Override Chromium/Chrome user data root | Used only with `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` |
+| `ONTRACK_BROWSER_PROFILE_DIR` | Override profile directory name under user data root | Used only with explicit profile reuse; defaults to `Default` |
 | `FORCE_COLOR` | Force colored terminal output | Example: `FORCE_COLOR=1` |
 | `NO_COLOR` | Disable colored output | Useful for plain logs or CI |
 | `XDG_CONFIG_HOME` | Override the config root on Linux and macOS | Affects session storage |
@@ -653,31 +666,31 @@ dist/
 ### Install dependencies
 
 ```bash
-npm install
+bun install
 ```
 
 ### Build
 
 ```bash
-npm run build
+bun run build
 ```
 
 ### Run tests
 
 ```bash
-npm test
+bun test
 ```
 
 ### Development runs
 
 ```bash
-npm run dev -- tasks --project-id 87
+bun run dev -- tasks --project-id 87
 ```
 
 ### Real-account smoke verification
 
 ```bash
-npm run smoke:real -- --project-id 87 --abbr D4
+bun run smoke:real -- --project-id 87 --abbr D4
 ```
 
 This script verifies:
@@ -720,22 +733,31 @@ The repository currently includes:
   - upload argument parsing
 - [auto-login.test.ts](/Users/mark/ontrack-cli/test/auto-login.test.ts)
   - SSO credential capture helpers
+  - OnTrack origin/domain isolation
+  - private, filtered browser-state persistence
 - [discovery.test.ts](/Users/mark/ontrack-cli/test/discovery.test.ts)
   - frontend bundle route and API extraction
+- [logout.test.ts](/Users/mark/ontrack-cli/test/logout.test.ts)
+  - local cleanup when remote sign-out fails
+  - redacted failure output
 - [utils.test.ts](/Users/mark/ontrack-cli/test/utils.test.ts)
   - base URL and redirect URL utilities
+- [whoami.test.ts](/Users/mark/ontrack-cli/test/whoami.test.ts)
+  - allowlisted identity projection
+  - JSON and human-output secret regression checks
 
 Minimum recommended validation before release:
 
 ```bash
-npm test
-npm run build
+bun test
+bun run test:coverage
+bun run build
 ```
 
 If you have a valid real session, add:
 
 ```bash
-npm run smoke:real -- --project-id <id> --abbr <abbr>
+bun run smoke:real -- --project-id <id> --abbr <abbr>
 ```
 
 ## Project structure
@@ -743,7 +765,7 @@ npm run smoke:real -- --project-id <id> --abbr <abbr>
 ```text
 .
 ├── always-ontrack-logo.png      # README logo
-├── package.json                 # npm metadata and scripts
+├── package.json                 # Bun package metadata and scripts
 ├── scripts/
 │   └── smoke-real.mjs           # real-account smoke verification
 ├── src/
@@ -754,7 +776,8 @@ npm run smoke:real -- --project-id <id> --abbr <abbr>
 │       ├── discovery.ts         # frontend surface discovery and probe
 │       ├── session.ts           # local session persistence
 │       ├── types.ts             # shared types
-│       └── utils.ts             # selectors, formatting, colors, helpers
+│       ├── utils.ts             # selectors, formatting, colors, helpers
+│       └── whoami.ts            # allowlisted, secret-safe identity projection
 ├── test/                        # unit tests
 └── tsconfig.json                # TypeScript build config
 ```
@@ -790,13 +813,11 @@ Set the browser path explicitly:
 ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
 ```
 
-Or install bundled Chromium support manually:
+Or install a reviewed, pinned Playwright Chromium runtime manually:
 
 ```bash
-npx playwright install chromium
+bunx playwright@1.58.2 install chromium
 ```
-
-`ontrack login` already attempts this installation automatically on first run when possible.
 
 ### `419 Authentication Timeout`
 

@@ -76,16 +76,16 @@ ontrack <command>
 
 ### 运行环境
 
-- Node.js `22+`
+- Bun `1.3.14+`
 - macOS / Linux / Windows
-- 首次执行 `ontrack login` 建议保证网络可用（若缺少 Playwright Chromium runtime，CLI 会自动尝试安装）
+- 需要手动安装经过审核的浏览器 runtime 时，请保证网络可用
 
 ### 全局安装
 
 推荐直接全局安装:
 
 ```bash
-npm install -g ontrack-cli
+bun add --global ontrack-cli
 ```
 
 安装完成后，命令入口为:
@@ -99,22 +99,22 @@ ontrack
 如果你只想在当前项目里使用:
 
 ```bash
-npm install
-npm exec ontrack -- auth-method
+bun install
+bun run ontrack -- auth-method
 ```
 
 ### 从源码运行
 
 ```bash
-npm install
-npm run build
-node dist/cli.js auth-method
+bun install
+bun run build
+bun dist/cli.js auth-method
 ```
 
 开发模式:
 
 ```bash
-npm run dev -- auth-method
+bun run dev -- auth-method
 ```
 
 ## 快速开始
@@ -267,18 +267,26 @@ ontrack login
 
 这个流程会:
 
-1. 在 CLI 里输入 Monash username/password（密码隐藏输入）
-2. 默认使用隐藏浏览器（headless）进入引导式 SSO 自动化
-3. 在终端显示结构化登录进度面板
-4. 如果出现多个 MFA 方法，在 CLI 中给出编号选项供你选择
-5. 在 Okta Verify number challenge 时高亮显示页面数字
-6. 捕获凭据并调用 `/api/auth`
-7. 保存本地会话缓存
-8. 缺少 Chromium runtime 时自动尝试安装（best-effort）
+1. 先尝试复用 CLI 已保存且仅包含 OnTrack 的浏览器状态
+2. 如果没有可复用会话，再在 CLI 输入 Monash username/password（密码隐藏输入）
+3. 默认使用隐藏浏览器（headless）进入引导式 SSO 自动化
+4. 在终端显示结构化登录进度面板
+5. 如果出现多个 MFA 方法，在 CLI 中给出编号选项供你选择
+6. 若选择代码型方法（`Google Authenticator` / `Enter a code`），CLI 会提示输入验证码并自动提交
+7. 若选择推送型方法（`Get a push notification`），CLI 会高亮显示 Okta Verify number challenge 数字
+8. 捕获凭据并调用 `/api/auth`
+9. 保存本地会话缓存
+10. 缺少 Chromium runtime 时提示你手动安装
 
 `ontrack login` 现在默认在本地和服务器都走隐藏浏览器（headless）模式。  
 只有排查问题时才建议使用 `ontrack login --show-browser`。  
 `ontrack login --sso` 可作为显式引导式 SSO 别名。
+
+系统浏览器 profile 复用默认关闭。如确有需要，显式设置
+`ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1`，并可配合
+`ONTRACK_BROWSER_USER_DATA_DIR` / `ONTRACK_BROWSER_PROFILE_DIR`。该模式可能会
+打开所选 profile 以发现凭据；CLI 不会复制完整 profile storage state，只会保存
+精确匹配的 OnTrack origin。请勿在共享或不受信任的 profile 上启用。
 
 ### 浏览器捕获模式: `ontrack login --auto`
 
@@ -603,6 +611,10 @@ ontrack tasks --project-id 87 --json
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | 覆盖默认 API base URL | 默认值为 Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | 指定自动登录用的浏览器可执行文件 | 当自动探测浏览器失败时使用 |
+| `ONTRACK_BROWSER_STATE_PATH` | 覆盖浏览器会话状态文件路径 | 登录时用于复用 cookies/localStorage |
+| `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | 显式允许读取系统浏览器 profile 以发现凭据 | 默认关闭；请勿用于共享/不受信任 profile |
+| `ONTRACK_BROWSER_USER_DATA_DIR` | 覆盖 Chromium/Chrome 用户数据根目录 | 仅在显式启用 profile 复用时生效 |
+| `ONTRACK_BROWSER_PROFILE_DIR` | 覆盖用户数据目录下的 profile 名称 | 仅在显式启用时生效；默认 `Default` |
 | `FORCE_COLOR` | 强制终端彩色输出 | 例如 `FORCE_COLOR=1` |
 | `NO_COLOR` | 关闭彩色输出 | 适合日志或纯文本环境 |
 | `XDG_CONFIG_HOME` | 控制 Linux/macOS 配置根目录 | 影响 session 存储路径 |
@@ -646,31 +658,31 @@ dist/
 ### 安装依赖
 
 ```bash
-npm install
+bun install
 ```
 
 ### 构建
 
 ```bash
-npm run build
+bun run build
 ```
 
 ### 测试
 
 ```bash
-npm test
+bun test
 ```
 
 ### 开发调试
 
 ```bash
-npm run dev -- tasks --project-id 87
+bun run dev -- tasks --project-id 87
 ```
 
 ### 真实账号烟测
 
 ```bash
-npm run smoke:real -- --project-id 87 --abbr D4
+bun run smoke:real -- --project-id 87 --abbr D4
 ```
 
 这个脚本会验证以下流程:
@@ -713,22 +725,31 @@ npm run smoke:real -- --project-id 87 --abbr D4
   - upload 参数解析
 - [auto-login.test.ts](/Users/mark/ontrack-cli/test/auto-login.test.ts)
   - SSO credential capture 辅助逻辑
+  - OnTrack origin/domain 隔离
+  - 私有且经过滤的 browser-state 持久化
 - [discovery.test.ts](/Users/mark/ontrack-cli/test/discovery.test.ts)
   - 前端 bundle route/API 抽取逻辑
+- [logout.test.ts](/Users/mark/ontrack-cli/test/logout.test.ts)
+  - 远端注销失败时仍清理本地 session
+  - 失败输出脱敏
 - [utils.test.ts](/Users/mark/ontrack-cli/test/utils.test.ts)
   - base URL、redirect URL 等基础工具
+- [whoami.test.ts](/Users/mark/ontrack-cli/test/whoami.test.ts)
+  - allowlist 身份投影
+  - JSON 与人类输出的 secret 回归测试
 
 如果你要发版，最少建议执行:
 
 ```bash
-npm test
-npm run build
+bun test
+bun run test:coverage
+bun run build
 ```
 
 如果你已经登录真实账号，再加上:
 
 ```bash
-npm run smoke:real -- --project-id <id> --abbr <abbr>
+bun run smoke:real -- --project-id <id> --abbr <abbr>
 ```
 
 ## 项目结构
@@ -736,7 +757,7 @@ npm run smoke:real -- --project-id <id> --abbr <abbr>
 ```text
 .
 ├── always-ontrack-logo.png      # README logo
-├── package.json                 # npm metadata and scripts
+├── package.json                 # Bun package metadata and scripts
 ├── scripts/
 │   └── smoke-real.mjs           # real-account smoke verification
 ├── src/
@@ -747,7 +768,8 @@ npm run smoke:real -- --project-id <id> --abbr <abbr>
 │       ├── discovery.ts         # frontend surface discovery and probe
 │       ├── session.ts           # local session persistence
 │       ├── types.ts             # shared types
-│       └── utils.ts             # selectors, formatting, colors, helpers
+│       ├── utils.ts             # selectors, formatting, colors, helpers
+│       └── whoami.ts            # allowlist、secret-safe 身份投影
 ├── test/                        # unit tests
 └── tsconfig.json                # TypeScript build config
 ```
@@ -783,13 +805,11 @@ ontrack tasks
 ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
 ```
 
-或者手动安装 Playwright bundled Chromium:
+或者手动安装经过审核、版本固定的 Playwright Chromium runtime:
 
 ```bash
-npx playwright install chromium
+bunx playwright@1.58.2 install chromium
 ```
-
-`ontrack login` 在可行时会自动尝试安装，不必每次手动执行。
 
 ### `419 Authentication Timeout`
 

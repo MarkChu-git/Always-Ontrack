@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import {
   isHeadlessServerEnvironment,
@@ -125,4 +125,25 @@ test('redactSensitiveText masks URL query tokens and key value pairs', () => {
   assert.equal(output.includes('code=[REDACTED]'), true);
   assert.equal(output.includes('password=[REDACTED]'), true);
   assert.equal(output.includes('"access_token":"[REDACTED]"'), true);
+});
+
+test('redactSensitiveText masks auth headers and unquoted token fields without changing normal text', () => {
+  const secrets = ['header-secret', 'bearer-secret', 'bare-secret', 'json-secret'];
+  const input = [
+    'Auth-Token: header-secret',
+    'Authorization: Bearer bearer-secret',
+    'authToken: bare-secret',
+    '{"authToken":"json-secret"}',
+    'status: normal text remains visible',
+  ].join('; ');
+
+  const output = redactSensitiveText(input);
+  for (const secret of secrets) {
+    assert.equal(output.includes(secret), false, `output leaked ${secret}`);
+  }
+  assert.match(output, /Auth-Token: \[REDACTED\]/);
+  assert.match(output, /Authorization: Bearer \[REDACTED\]/);
+  assert.match(output, /authToken: \[REDACTED\]/);
+  assert.match(output, /"authToken":"\[REDACTED\]"/);
+  assert.equal(output.includes('status: normal text remains visible'), true);
 });

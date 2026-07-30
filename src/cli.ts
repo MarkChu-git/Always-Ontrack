@@ -1,13 +1,15 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
+import { toWhoAmIView } from './lib/whoami.js';
 import {
   SsoFallbackError,
   classifySsoFallback,
+  captureCredentialsFromStoredBrowserSession,
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
@@ -115,9 +117,10 @@ Notes:
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
   - "ontrack login" defaults to guided SSO (username/password + Okta Verify) in hidden-browser (headless) mode on all environments.
+  - Before prompting credentials, login reuses only its saved OnTrack browser state. Live system browser-profile reuse is disabled unless ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1.
   - Use "ontrack login --sso" to force guided SSO, or "ontrack login --auto" for browser-only capture mode.
   - Use --show-browser to force visible browser mode for debugging; --hide-browser keeps explicit headless mode.
-  - If Chromium runtime is missing, the CLI will attempt a one-time automatic install before fallback.
+  - If Chromium runtime is missing, install it manually through a reviewed dependency-management workflow.
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
   - PDF commands save files into ./downloads by default.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
@@ -1583,6 +1586,50 @@ async function handleLogin(args: string[]): Promise<void> {
         hasRedirectUrl: Boolean(redirectUrl),
       });
 
+      // Fast-path: if we already have a reusable browser session state, skip re-auth prompts.
+      if (loginMode !== 'manual') {
+        try {
+          const reused = await captureCredentialsFromStoredBrowserSession({
+            ssoUrl: redirectTo,
+            apiBaseUrl: api.base,
+            timeoutMs: 12_000,
+            headless: !showBrowser,
+          });
+
+          if (reused) {
+            try {
+              // Validate reused credentials immediately; stale tokens should not block normal SSO fallback.
+              const reusedResponse = await api.signIn({
+                auth_token: reused.authToken,
+                username: reused.username,
+                remember: true,
+              });
+              const reusedSession: SessionData = {
+                baseUrl: api.base,
+                username: reused.username,
+                authToken: reusedResponse.auth_token,
+                user: reusedResponse.user,
+                savedAt: new Date().toISOString(),
+              };
+              await saveSession(reusedSession);
+              renderTerminalEvent(
+                `Reused existing browser session (${reused.source}). Skipping interactive sign-in.`,
+                'success',
+              );
+              renderLoginSuccessPanel(reusedSession);
+              return;
+            } catch (reuseValidationError) {
+              const detail = toRedactedError(reuseValidationError).message;
+              console.log(`[warn] Reused browser session is stale or invalid: ${detail}`);
+              console.log('[info] Continuing with guided SSO login.');
+            }
+          }
+        } catch (reuseError) {
+          const detail = toRedactedError(reuseError).message;
+          console.log(`[warn] Browser session reuse probe failed: ${detail}`);
+        }
+      }
+
       // Last-resort fallback retained for edge MFA/captcha/selector issues.
       const manualRedirectCapture = async (): Promise<void> => {
         console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
@@ -1630,6 +1677,7 @@ async function handleLogin(args: string[]): Promise<void> {
           username: 'Submitting username...',
           password: 'Submitting password...',
           mfa_select: 'Multiple MFA options detected. Please choose one in CLI.',
+          mfa_code: 'Selected MFA method requires a verification code from your authenticator app.',
           mfa_wait: 'Waiting for Okta Verify push/number approval on your phone...',
           completed: 'SSO flow completed.',
         };
@@ -1680,13 +1728,29 @@ async function handleLogin(args: string[]): Promise<void> {
           return recommendedOption.id;
         };
 
+        const requestMfaCode = async (methodLabel: string): Promise<string> => {
+          renderTerminalPanel(
+            'MFA CODE REQUIRED',
+            [
+              `Method: ${methodLabel}`,
+              'Enter the current code shown in your authenticator app.',
+            ],
+            'info',
+          );
+          const code = (await prompt('Enter verification code: ')).trim();
+          if (!code) {
+            throw new Error('Verification code cannot be empty.');
+          }
+          return code;
+        };
+
         try {
           // Primary guided SSO flow (username/password + MFA selection/approval wait).
           renderTerminalPanel(
             'GUIDED MONASH SSO',
             [
               'Automation started.',
-              'Follow terminal prompts and approve the request in Okta Verify.',
+              'Follow terminal prompts for MFA: choose method, enter code, or approve push.',
             ],
             'info',
           );
@@ -1699,6 +1763,7 @@ async function handleLogin(args: string[]): Promise<void> {
               timeoutMs: ssoTimeoutSec * 1000,
               headless: !showBrowser,
               chooseMfaMethod,
+              requestMfaCode,
               onMfaNumberChallenge: (numbers) => {
                 if (numbers.length === 0) {
                   return;
@@ -1799,34 +1864,39 @@ async function handleLogin(args: string[]): Promise<void> {
 async function handleLogout(): Promise<void> {
   const session = requireSession(await loadSession());
   const api = new OnTrackApiClient(session.baseUrl);
+  let remoteSignOutError: unknown;
 
   try {
     await api.signOut(session);
   } catch (error) {
-    console.error(`Remote sign-out failed: ${(error as Error).message}`);
+    remoteSignOutError = error;
   }
 
   await clearSession();
+  if (remoteSignOutError) {
+    console.error('[warn] Local session was cleared, but remote sign-out failed. Re-authenticate if needed.');
+  }
   console.log('Session cleared.');
 }
 
 /** Show current cached identity and role info. */
 async function handleWhoAmI(args: string[]): Promise<void> {
   const session = requireSession(await loadSession());
+  const whoAmI = toWhoAmIView(session);
   if (hasFlag(args, '--json')) {
-    printJson(session);
+    printJson(whoAmI);
     return;
   }
 
   printTable([
     {
-      username: session.username,
-      id: session.user.id ?? '-',
-      role: resolveUserRole(session) ?? '-',
-      firstName: session.user.firstName ?? session.user.first_name ?? '-',
-      lastName: session.user.lastName ?? session.user.last_name ?? '-',
-      email: session.user.email ?? '-',
-      savedAt: session.savedAt,
+      username: whoAmI.username,
+      id: whoAmI.id ?? '-',
+      role: whoAmI.role ?? '-',
+      firstName: whoAmI.firstName ?? '-',
+      lastName: whoAmI.lastName ?? '-',
+      email: whoAmI.email ?? '-',
+      savedAt: whoAmI.savedAt,
     },
   ]);
 }

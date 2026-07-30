@@ -542,7 +542,9 @@ export function resolveLoginMode(options: {
 
 export const SENSITIVE_QUERY_KEYS = new Set([
   'authtoken',
+  'auth-token',
   'auth_token',
+  'authorization',
   'password',
   'passcode',
   'sessiontoken',
@@ -568,6 +570,17 @@ function redactQueryParams(rawUrl: string): string {
 }
 
 const URL_PATTERN = /https?:\/\/[^\s)"']+/gi;
+const SENSITIVE_FIELD_NAME =
+  'auth[-_]?token|password|passcode|session[-_]?token|id[-_]?token|access[-_]?token|code|state';
+const QUOTED_SENSITIVE_FIELD_PATTERN = new RegExp(
+  `("(?:${SENSITIVE_FIELD_NAME})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`,
+  'gi',
+);
+const UNQUOTED_SENSITIVE_FIELD_PATTERN = new RegExp(
+  `\\b((?:${SENSITIVE_FIELD_NAME})\\b\\s*[:=]\\s*)(?!\\[REDACTED\\])([^\\s,;}&\\]]+)`,
+  'gi',
+);
+const BEARER_AUTHORIZATION_PATTERN = /\b(authorization\s*:\s*bearer\s+)([^\s,;]+)/gi;
 
 /**
  * Redact token/password fields from free-form error strings.
@@ -576,14 +589,9 @@ const URL_PATTERN = /https?:\/\/[^\s)"']+/gi;
 export function redactSensitiveText(value: string): string {
   let output = value;
   output = output.replace(URL_PATTERN, (match) => redactQueryParams(match));
-  output = output.replace(
-    /\b(authToken|auth_token|password|passcode|sessionToken|id_token|access_token|code|state)=([^&\s]+)/gi,
-    '$1=[REDACTED]',
-  );
-  output = output.replace(
-    /("?(?:authToken|auth_token|password|passcode|sessionToken|id_token|access_token|code|state)"?\s*[:=]\s*")([^"]*)(")/gi,
-    '$1[REDACTED]$3',
-  );
+  output = output.replace(BEARER_AUTHORIZATION_PATTERN, '$1[REDACTED]');
+  output = output.replace(QUOTED_SENSITIVE_FIELD_PATTERN, '$1"[REDACTED]"');
+  output = output.replace(UNQUOTED_SENSITIVE_FIELD_PATTERN, '$1[REDACTED]');
   return output;
 }
 

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { OnTrackApiClient } from '../src/lib/api.js';
 import type { SessionData } from '../src/lib/types.js';
@@ -21,7 +21,7 @@ function mockFetch(fn: (input: URL | RequestInfo, init?: RequestInit) => Promise
   globalThis.fetch = fn as typeof fetch;
 }
 
-test.afterEach(() => {
+afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 

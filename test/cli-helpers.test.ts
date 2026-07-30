@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import type { FeedbackItem, ProjectSummary } from '../src/lib/types.js';
