@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'bun:test';
@@ -14,12 +14,20 @@ const validEntries = [
   'package/LICENSE',
   'package/README.md',
   'package/README.zh-CN.md',
+  'package/dist/auth-mcp.js',
   'package/dist/cli.js',
   'package/dist/lib/api.js',
 ];
 
 test('validateTarEntries accepts the supported package surface', () => {
   assert.doesNotThrow(() => validateTarEntries(validEntries));
+});
+
+test('validateTarEntries requires both public Agent executables', () => {
+  assert.throws(
+    () => validateTarEntries(validEntries.filter((entry) => entry !== 'package/dist/auth-mcp.js')),
+    /missing required entry: package\/dist\/auth-mcp\.js/,
+  );
 });
 
 test('validateTarEntries rejects source, tests, secrets, and path traversal', () => {
@@ -62,13 +70,31 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
   await mkdir(join(packageRoot, 'dist', 'lib'), { recursive: true });
   await writeFile(
     join(packageRoot, 'package.json'),
-    JSON.stringify({ name: 'ontrack-cli', version: '0.3.0', bin: { ontrack: './dist/cli.js' } }),
+    JSON.stringify({
+      name: 'ontrack-cli',
+      version: '0.3.0',
+      bin: {
+        ontrack: './dist/cli.js',
+        'ontrack-auth-mcp': './dist/auth-mcp.js',
+      },
+    }),
   );
   await writeFile(join(packageRoot, 'LICENSE'), 'Apache-2.0');
   await writeFile(join(packageRoot, 'README.md'), '# OnTrack');
   await writeFile(join(packageRoot, 'README.zh-CN.md'), '# OnTrack');
   await writeFile(join(packageRoot, 'dist', 'lib', 'api.js'), 'export {};');
-  await writeFile(join(packageRoot, 'dist', 'cli.js'), "console.log('ontrack help works');");
+  await writeFile(
+    join(packageRoot, 'dist', 'auth-mcp.js'),
+    '#!/usr/bin/env bun\nexport {};',
+  );
+  await writeFile(
+    join(packageRoot, 'dist', 'cli.js'),
+    "#!/usr/bin/env bun\nconsole.log('ontrack help works');",
+  );
+  await Promise.all([
+    chmod(join(packageRoot, 'dist', 'auth-mcp.js'), 0o755),
+    chmod(join(packageRoot, 'dist', 'cli.js'), 0o755),
+  ]);
 
   const tar = Bun.spawn(['tar', '-czf', archivePath, '-C', root, 'package'], { stdout: 'pipe', stderr: 'pipe' });
   assert.equal(await tar.exited, 0, await new Response(tar.stderr).text());
@@ -94,6 +120,7 @@ test('verifyPackageTarball rejects symlink entries before extraction', async () 
     await writeFile(join(packageRoot, 'LICENSE'), 'Apache-2.0');
     await writeFile(join(packageRoot, 'README.md'), '# OnTrack');
     await writeFile(join(packageRoot, 'README.zh-CN.md'), '# OnTrack');
+    await writeFile(join(packageRoot, 'dist', 'auth-mcp.js'), 'export {};');
     await writeFile(join(packageRoot, 'dist', 'cli.js'), "console.log('ontrack help works');");
     await symlink('../../README.md', join(packageRoot, 'dist', 'lib', 'api.js'));
 

@@ -14,6 +14,21 @@ test('normalizeBaseUrl converts site URLs to /api', () => {
   assert.equal(normalizeBaseUrl('https://ontrack.infotech.monash.edu/api'), 'https://ontrack.infotech.monash.edu/api');
 });
 
+test('normalizeBaseUrl rejects embedded credentials and insecure remote origins', () => {
+  assert.throws(
+    () => normalizeBaseUrl('https://student:secret@ontrack.example'),
+    /must not include embedded credentials/,
+  );
+  assert.throws(
+    () => normalizeBaseUrl('http://ontrack.example'),
+    /must use HTTPS/,
+  );
+  assert.equal(
+    normalizeBaseUrl('http://127.0.0.1:3000'),
+    'http://127.0.0.1:3000/api',
+  );
+});
+
 test('parseSsoRedirectUrl extracts auth token and username', () => {
   const parsed = parseSsoRedirectUrl(
     'https://ontrack.infotech.monash.edu/sign_in?authToken=abc123&username=student1',

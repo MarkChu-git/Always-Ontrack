@@ -11,6 +11,7 @@ import type {
   TaskSummary,
   WatchEvent,
 } from './types.js';
+import { getAgentOutputContext, wrapAgentOutput } from './agent-protocol.js';
 import { buildStudentTaskRows } from './student-task-view.js';
 import type { StudentTaskRow } from './student-task-view.js';
 
@@ -34,6 +35,17 @@ const DEFAULT_SITE_URL = 'https://ontrack.infotech.monash.edu';
 export function normalizeBaseUrl(raw?: string): string {
   const candidate = raw?.trim() || process.env.ONTRACK_BASE_URL?.trim() || DEFAULT_SITE_URL;
   const url = new URL(candidate);
+  if (url.username || url.password) {
+    throw new Error('OnTrack base URL must not include embedded credentials.');
+  }
+  const localHttp =
+    url.protocol === 'http:' &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !localHttp) {
+    throw new Error(
+      'OnTrack base URL must use HTTPS (HTTP is allowed only for loopback development).',
+    );
+  }
 
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
     url.pathname = '/api';
@@ -238,7 +250,8 @@ export function formatDate(value?: string): string {
 
 /** Stable pretty JSON printer for machine-consumable output modes. */
 export function printJson(value: unknown): void {
-  console.log(JSON.stringify(value, null, 2));
+  const context = getAgentOutputContext();
+  console.log(JSON.stringify(wrapAgentOutput(value), null, context?.streaming ? undefined : 2));
 }
 
 /**

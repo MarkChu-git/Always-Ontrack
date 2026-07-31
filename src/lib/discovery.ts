@@ -11,6 +11,7 @@ import { getTaskDefinitionId } from './utils.js';
  * - optionally probe those templates with a real session
  */
 const DEFAULT_SITE_URL = 'https://ontrack.infotech.monash.edu/home';
+const DEFAULT_SITE_ORIGIN = new URL(DEFAULT_SITE_URL).origin;
 
 const PATH_LITERAL_PATTERN = /(["'`])(\/[A-Za-z0-9_./:-]+)\1/g;
 const JS_SCRIPT_PATTERN = /<(?:script|link)\b[^>]*(?:src|href)=["']([^"']+\.js)["'][^>]*>/gi;
@@ -158,10 +159,26 @@ export function classifyDiscoveredPaths(paths: string[]): {
   };
 }
 
-/** Fetch text resources with a browser-like Accept header. */
-async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, {
+/** Resolve only exact-origin OnTrack paths; cross-origin assets are never fetched. */
+function resolveDiscoveryUrl(path: string): string {
+  const candidate = new URL(path, DEFAULT_SITE_URL);
+  if (
+    candidate.origin !== DEFAULT_SITE_ORIGIN ||
+    candidate.username ||
+    candidate.password
+  ) {
+    throw new Error('Discovery is restricted to the exact OnTrack origin.');
+  }
+  return new URL(`${candidate.pathname}${candidate.search}`, DEFAULT_SITE_ORIGIN).toString();
+}
+
+/** Fetch exact-origin text resources with a browser-like Accept header. */
+async function fetchText(path: string): Promise<string> {
+  // resolveDiscoveryUrl rebuilds against a compile-time origin after exact-origin validation.
+  // codeql[js/request-forgery]
+  const response = await fetch(resolveDiscoveryUrl(path), {
     method: 'GET',
+    redirect: 'error',
     headers: {
       Accept: 'text/html, application/javascript, text/javascript, */*',
     },
@@ -178,20 +195,35 @@ async function fetchText(url: string): Promise<string> {
  * Crawl index + JS bundles to build a route/API discovery snapshot.
  * This is read-only and does not require an authenticated session.
  */
-export async function discoverOnTrackSurface(siteUrl: string = DEFAULT_SITE_URL): Promise<DiscoveryResult> {
+export async function discoverOnTrackSurface(): Promise<DiscoveryResult> {
   const fetchedAt = new Date().toISOString();
-  const html = await fetchText(siteUrl);
+  const html = await fetchText(DEFAULT_SITE_URL);
   const assetPaths = extractJavascriptAssetPaths(html);
-  const assetUrls = assetPaths.map((path) => new URL(path, siteUrl).toString());
+  const assetUrls = assetPaths.map((path) => {
+    try {
+      return resolveDiscoveryUrl(path);
+    } catch {
+      return null;
+    }
+  });
 
   const assets: DiscoveryAsset[] = [];
   const allPaths = new Set<string>();
 
-  const settled = await Promise.allSettled(assetUrls.map((url) => fetchText(url)));
+  const settled = await Promise.allSettled(
+    assetUrls.map((url) =>
+      url
+        ? fetchText(url)
+        : Promise.reject(new Error('Cross-origin discovery asset was not fetched.')),
+    ),
+  );
   for (let index = 0; index < settled.length; index += 1) {
     const result = settled[index];
     const assetUrl = assetUrls[index];
     if (result.status === 'fulfilled') {
+      if (!assetUrl) {
+        throw new Error('Cross-origin discovery asset unexpectedly resolved.');
+      }
       assets.push({
         url: assetUrl,
         status: 'ok',
@@ -203,7 +235,7 @@ export async function discoverOnTrackSurface(siteUrl: string = DEFAULT_SITE_URL)
     }
 
     assets.push({
-      url: assetUrl,
+      url: assetUrl ?? '[cross-origin asset omitted]',
       status: 'error',
       detail: result.reason instanceof Error ? result.reason.message : String(result.reason),
     });
@@ -211,7 +243,7 @@ export async function discoverOnTrackSurface(siteUrl: string = DEFAULT_SITE_URL)
 
   const classified = classifyDiscoveredPaths([...allPaths]);
   return {
-    siteUrl,
+    siteUrl: DEFAULT_SITE_URL,
     fetchedAt,
     assets,
     uiRoutes: classified.uiRoutes,

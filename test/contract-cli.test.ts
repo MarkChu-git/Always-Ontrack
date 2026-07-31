@@ -257,7 +257,7 @@ test('plan writes are dry-run by default and exact PUTs only with --confirm', as
         'set-dates',
         '--project-id',
         '101',
-        '--task-id',
+        '--task-definition-id',
         '501',
         '--start',
         '2026-03-04',
@@ -285,6 +285,50 @@ test('plan writes are dry-run by default and exact PUTs only with --confirm', as
         target: '2026-03-11',
       });
       assert.equal(JSON.stringify(confirmedOutput).includes('"result"'), false);
+
+      const agentWithoutKey = await runCli(
+        [...args.filter((value) => value !== '--json'), '--confirm', '--output', 'agent-json'],
+        configRoot,
+      );
+      assert.equal(agentWithoutKey.exitCode, 6);
+      assert.equal(putCount, 1);
+      assert.equal(
+        (JSON.parse(agentWithoutKey.stdout).error as Record<string, unknown>).code,
+        'CONFIRMATION_REQUIRED',
+      );
+
+      const normalizedAgentArgs = [
+        'plan',
+        'set-dates',
+        '--project-id',
+        '101',
+        '--task-definition-id',
+        '501',
+        '--start',
+        '2026-03-05',
+        '--target',
+        '2026-03-12',
+        '--confirm',
+        '--idempotency-key',
+        'plan-101-P1-2026-03-12',
+        '--output',
+        'agent-json',
+      ];
+      const firstAgentWrite = await runCli(normalizedAgentArgs, configRoot);
+      assert.equal(firstAgentWrite.exitCode, 0, firstAgentWrite.stderr);
+      assert.equal(putCount, 2);
+      const firstAgentEnvelope = JSON.parse(firstAgentWrite.stdout);
+      assert.equal(firstAgentEnvelope.data.idempotency.replayed, false);
+
+      const replayedAgentWrite = await runCli(normalizedAgentArgs, configRoot);
+      assert.equal(replayedAgentWrite.exitCode, 0, replayedAgentWrite.stderr);
+      assert.equal(putCount, 2);
+      const replayedAgentEnvelope = JSON.parse(replayedAgentWrite.stdout);
+      assert.equal(replayedAgentEnvelope.data.idempotency.replayed, true);
+      assert.equal(
+        replayedAgentEnvelope.data.operationId,
+        firstAgentEnvelope.data.operationId,
+      );
 
       const resetArgs = [
         'plan',
@@ -317,7 +361,7 @@ test('plan writes are dry-run by default and exact PUTs only with --confirm', as
   );
 });
 
-test('submission is dry-run by default and server rejection is failed without retry', async () => {
+test('submission is dry-run by default and a 5xx write outcome stays blocked as unknown', async () => {
   let uploadAttempts = 0;
   await withFixtureServer(
     (request, response) => {
@@ -407,8 +451,34 @@ test('submission is dry-run by default and server rejection is failed without re
       );
       assert.equal(confirmed.exitCode, 1);
       assert.equal(uploadAttempts, 1);
-      assert.match(confirmed.stderr, /rejected/i);
+      assert.match(confirmed.stderr, /outcome is unknown/i);
       assert.doesNotMatch(confirmed.stderr, /temporary rejection/i);
+
+      const agentArgs = [
+        'submission',
+        'upload',
+        '--project-id',
+        '101',
+        '--task-definition-id',
+        '501',
+        '--file',
+        filePath,
+        '--confirm',
+        '--idempotency-key',
+        'submission-101-P1-503',
+        '--output',
+        'agent-json',
+      ];
+      const agentUnknown = await runCli(agentArgs, configRoot);
+      assert.equal(agentUnknown.exitCode, 8);
+      assert.equal(uploadAttempts, 2);
+      assert.equal(
+        (JSON.parse(agentUnknown.stdout).error as Record<string, unknown>).code,
+        'IDEMPOTENCY_OUTCOME_UNKNOWN',
+      );
+      const blockedReplay = await runCli(agentArgs, configRoot);
+      assert.equal(blockedReplay.exitCode, 8);
+      assert.equal(uploadAttempts, 2);
     },
   );
 });
@@ -682,7 +752,10 @@ test('feedback and cross-task watch terminate on a mid-poll 419 without leaking 
         configRoot,
       );
       assert.equal(feedback.exitCode, 1);
-      assert.match(feedback.stderr, /saved credential \(expired\).*login/is);
+      assert.match(
+        feedback.stderr,
+        /saved credential \(expired\).*auth ensure/is,
+      );
       assert.doesNotMatch(feedback.stderr, /student@example|raw-watch-secret|Basic/i);
 
       const watch = await runCli(
@@ -697,7 +770,7 @@ test('feedback and cross-task watch terminate on a mid-poll 419 without leaking 
         configRoot,
       );
       assert.equal(watch.exitCode, 1);
-      assert.match(watch.stderr, /saved credential \(expired\).*login/is);
+      assert.match(watch.stderr, /saved credential \(expired\).*auth ensure/is);
       assert.doesNotMatch(watch.stderr, /student@example|raw-watch-secret|Basic/i);
     },
   );

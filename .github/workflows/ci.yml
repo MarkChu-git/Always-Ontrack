@@ -58,6 +58,8 @@ jobs:
         run: |
           bun dist/cli.js --help
           bun dist/cli.js auth-method --help
+          test -x dist/auth-mcp.js
+          bun dist/cli.js capabilities --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.schema_version !== "ontrack.agent/v1") process.exit(1)'
 
       - name: Pack one release candidate
         run: |
