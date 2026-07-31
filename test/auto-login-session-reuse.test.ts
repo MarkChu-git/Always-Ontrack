@@ -1,7 +1,15 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildContextOptionsWithStoredSession,
@@ -45,7 +53,7 @@ async function withBrowserState(
   let environmentChanged = false;
   const previousStoragePath = process.env.ONTRACK_BROWSER_STATE_PATH;
   try {
-    tempRoot = await mkdtemp(join(tmpdir(), prefix));
+    tempRoot = await mkdtemp(join(homedir(), `.${prefix}`));
     const storagePath = join(tempRoot, "browser-state.json");
     process.env.ONTRACK_BROWSER_STATE_PATH = storagePath;
     environmentChanged = true;
@@ -154,6 +162,51 @@ test("buildContextOptionsWithStoredSession ignores expired persistent cookies bu
       );
     },
   );
+});
+
+test("stored browser capture rejects a state symlink that escapes the operator home", async () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const externalRoot = await mkdtemp(
+    join(tmpdir(), "ontrack-browser-state-escape-"),
+  );
+  try {
+    const externalStatePath = join(externalRoot, "browser-state.json");
+    await writeFile(
+      externalStatePath,
+      JSON.stringify({
+        cookies: [sessionCookie("outside-home")],
+        origins: [],
+      }),
+      "utf8",
+    );
+
+    await withBrowserState(
+      "ontrack-browser-state-link-",
+      async (storagePath) => {
+        let browserLaunches = 0;
+        await symlink(externalStatePath, storagePath);
+
+        await assert.rejects(
+          () =>
+            captureCredentialsFromStoredBrowserSession(
+              captureOptions({
+                launch: async () => {
+                  browserLaunches += 1;
+                  throw new Error("browser must not launch");
+                },
+              }),
+            ),
+          /outside the local operator home/,
+        );
+        assert.equal(browserLaunches, 0);
+      },
+    );
+  } finally {
+    await rm(externalRoot, { recursive: true, force: true });
+  }
 });
 
 test("stored browser capture skips launch for empty state and invalidates a stale state after one bounded probe", async () => {

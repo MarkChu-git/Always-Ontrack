@@ -5,13 +5,14 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type {
   Browser,
@@ -730,6 +731,32 @@ export function resolveBrowserSessionStatePath(
   }
 
   return join(home, ".config", "ontrack-cli", "browser-state.json");
+}
+
+/**
+ * Canonicalize an existing browser-state file and keep silent reuse inside the
+ * local operator's home directory. This rejects traversal and symlink escape
+ * before any atomic rename/link operation receives the configured path.
+ */
+function resolveTrustedExistingBrowserSessionStatePath(): string | null {
+  const trustedRoot = realpathSync(homedir());
+  let storagePath: string;
+  try {
+    storagePath = realpathSync(resolve(resolveBrowserSessionStatePath()));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+
+  const trustedPrefix = `${trustedRoot}${sep}`;
+  if (storagePath !== trustedRoot && !storagePath.startsWith(trustedPrefix)) {
+    throw new Error(
+      "Refusing to reuse browser state outside the local operator home.",
+    );
+  }
+  return storagePath;
 }
 
 /** Remove the persisted OnTrack-only browser state used by silent renewal. */
@@ -2878,7 +2905,7 @@ function restoreClaimedBrowserSessionState(
   try {
     // Both paths are trusted siblings in the private CLI state directory.
     // codeql[js/path-injection]
-    linkSync(claimedPath, storagePath); // lgtm[js/path-injection]
+    linkSync(claimedPath, storagePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       // Keep the claim recoverable when restoration failed for another reason.
@@ -2906,7 +2933,7 @@ function claimBrowserSessionState(
   try {
     // Both paths are trusted siblings in the private CLI state directory.
     // codeql[js/path-injection]
-    renameSync(storagePath, claimedPath); // lgtm[js/path-injection]
+    renameSync(storagePath, claimedPath);
   } catch {
     return null;
   }
@@ -2939,13 +2966,13 @@ async function publishCapturedBrowserSessionState(
       storagePath: candidatePath,
       targetOrigin,
     });
-    if (!existsSync(candidatePath)) { // lgtm[js/path-injection]
+    if (!existsSync(candidatePath)) {
       return false;
     }
     try {
       // A hard link atomically publishes only when storagePath is absent.
       // codeql[js/path-injection]
-      linkSync(candidatePath, storagePath); // lgtm[js/path-injection]
+      linkSync(candidatePath, storagePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
@@ -2967,7 +2994,10 @@ async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
-  const storagePath = resolveBrowserSessionStatePath();
+  const storagePath = resolveTrustedExistingBrowserSessionStatePath();
+  if (!storagePath) {
+    return null;
+  }
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   const claim = claimBrowserSessionState(storagePath, targetOrigin);
   if (!claim) {
