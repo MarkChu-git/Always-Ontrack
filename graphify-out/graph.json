@@ -43,7 +43,7 @@
       "_origin": "ast",
       "id": "package",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "package.json"
     },
     {
@@ -54,7 +54,7 @@
       "_origin": "ast",
       "id": "package_name",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "name"
     },
     {
@@ -65,7 +65,7 @@
       "_origin": "ast",
       "id": "package_version",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "version"
     },
     {
@@ -76,7 +76,7 @@
       "_origin": "ast",
       "id": "package_description",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "description"
     },
     {
@@ -87,7 +87,7 @@
       "_origin": "ast",
       "id": "package_license",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "license"
     },
     {
@@ -131,7 +131,7 @@
       "_origin": "ast",
       "id": "package_bugs",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "bugs"
     },
     {
@@ -142,7 +142,7 @@
       "_origin": "ast",
       "id": "package_bugs_url",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "url"
     },
     {
@@ -153,7 +153,7 @@
       "_origin": "ast",
       "id": "package_homepage",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "homepage"
     },
     {
@@ -164,7 +164,7 @@
       "_origin": "ast",
       "id": "package_publishconfig",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "publishconfig"
     },
     {
@@ -175,7 +175,7 @@
       "_origin": "ast",
       "id": "package_publishconfig_access",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "access"
     },
     {
@@ -186,7 +186,7 @@
       "_origin": "ast",
       "id": "package_type",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "type"
     },
     {
@@ -196,8 +196,8 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "package_bin",
-      "community": 15,
-      "community_name": "Package Metadata",
+      "community": 53,
+      "community_name": "CLI Binary Entrypoints",
       "norm_label": "bin"
     },
     {
@@ -207,8 +207,8 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "package_bin_ontrack",
-      "community": 15,
-      "community_name": "Package Metadata",
+      "community": 53,
+      "community_name": "CLI Binary Entrypoints",
       "norm_label": "ontrack"
     },
     {
@@ -218,8 +218,8 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "package_bin_ontrack_auth_mcp",
-      "community": 15,
-      "community_name": "Package Metadata",
+      "community": 53,
+      "community_name": "CLI Binary Entrypoints",
       "norm_label": "ontrack-auth-mcp"
     },
     {
@@ -384,7 +384,7 @@
       "_origin": "ast",
       "id": "package_engines",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "engines"
     },
     {
@@ -395,7 +395,7 @@
       "_origin": "ast",
       "id": "package_engines_bun",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "bun"
     },
     {
@@ -406,7 +406,7 @@
       "_origin": "ast",
       "id": "package_packagemanager",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "packagemanager"
     },
     {
@@ -538,7 +538,7 @@
       "_origin": "ast",
       "id": "package_files",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "files"
     },
     {
@@ -549,7 +549,7 @@
       "_origin": "ast",
       "id": "ref_dist",
       "community": 15,
-      "community_name": "Package Metadata",
+      "community_name": "Package Manifest Metadata",
       "norm_label": "dist"
     },
     {
@@ -850,21 +850,10 @@
       "norm_label": "hashedfile"
     },
     {
-      "label": "parseRoot()",
-      "file_type": "code",
-      "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L24",
-      "_origin": "ast",
-      "id": "scripts_check_skill_lock_parseroot",
-      "community": 51,
-      "community_name": "Skill Lock Verification",
-      "norm_label": "parseroot()"
-    },
-    {
       "label": "isRecord()",
       "file_type": "code",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L32",
+      "source_location": "L24",
       "_origin": "ast",
       "id": "scripts_check_skill_lock_isrecord",
       "community": 51,
@@ -875,7 +864,7 @@
       "label": "parseLock()",
       "file_type": "code",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L36",
+      "source_location": "L28",
       "_origin": "ast",
       "id": "scripts_check_skill_lock_parselock",
       "community": 51,
@@ -886,7 +875,7 @@
       "label": "collectFiles()",
       "file_type": "code",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L68",
+      "source_location": "L60",
       "_origin": "ast",
       "id": "scripts_check_skill_lock_collectfiles",
       "community": 51,
@@ -897,7 +886,7 @@
       "label": "computeSkillFolderHash()",
       "file_type": "code",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L98",
+      "source_location": "L90",
       "_origin": "ast",
       "id": "scripts_check_skill_lock_computeskillfolderhash",
       "community": 51,
@@ -908,7 +897,7 @@
       "label": "listInstalledSkillNames()",
       "file_type": "code",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L110",
+      "source_location": "L102",
       "_origin": "ast",
       "id": "scripts_check_skill_lock_listinstalledskillnames",
       "community": 51,
@@ -919,7 +908,7 @@
       "label": "main()",
       "file_type": "code",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L124",
+      "source_location": "L116",
       "_origin": "ast",
       "id": "scripts_check_skill_lock_main",
       "community": 51,
@@ -1329,8 +1318,8 @@
       "source_location": "L136",
       "_origin": "ast",
       "id": "src_cli_sessionfromaccesstokencapture",
-      "community": 14,
-      "community_name": "Auth Session Capture",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "sessionfromaccesstokencapture()"
     },
     {
@@ -1340,8 +1329,8 @@
       "source_location": "L159",
       "_origin": "ast",
       "id": "src_cli_help",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "help()"
     },
     {
@@ -1428,8 +1417,8 @@
       "source_location": "L311",
       "_origin": "ast",
       "id": "src_cli_panelvisiblelength",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "panelvisiblelength()"
     },
     {
@@ -1439,8 +1428,8 @@
       "source_location": "L316",
       "_origin": "ast",
       "id": "src_cli_paneltonecode",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "paneltonecode()"
     },
     {
@@ -1450,8 +1439,8 @@
       "source_location": "L327",
       "_origin": "ast",
       "id": "src_cli_panelbodycode",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "panelbodycode()"
     },
     {
@@ -1461,8 +1450,8 @@
       "source_location": "L338",
       "_origin": "ast",
       "id": "src_cli_renderterminalpanel",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "renderterminalpanel()"
     },
     {
@@ -1505,8 +1494,8 @@
       "source_location": "L437",
       "_origin": "ast",
       "id": "src_cli_optionalflagargs",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "optionalflagargs()"
     },
     {
@@ -1516,8 +1505,8 @@
       "source_location": "L446",
       "_origin": "ast",
       "id": "src_cli_promptrequired",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "promptrequired()"
     },
     {
@@ -1527,8 +1516,8 @@
       "source_location": "L457",
       "_origin": "ast",
       "id": "src_cli_prompttaskselectorflags",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "prompttaskselectorflags()"
     },
     {
@@ -1549,8 +1538,8 @@
       "source_location": "L473",
       "_origin": "ast",
       "id": "src_cli_parsetaskselectortokens",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "parsetaskselectortokens()"
     },
     {
@@ -1560,8 +1549,8 @@
       "source_location": "L498",
       "_origin": "ast",
       "id": "src_cli_buildtaskselectorargs",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "buildtaskselectorargs()"
     },
     {
@@ -1571,8 +1560,8 @@
       "source_location": "L511",
       "_origin": "ast",
       "id": "src_cli_prompttaskbatchselectorflags",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "prompttaskbatchselectorflags()"
     },
     {
@@ -1582,8 +1571,8 @@
       "source_location": "L543",
       "_origin": "ast",
       "id": "src_cli_prompttaskselectorfromtasklist",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "prompttaskselectorfromtasklist()"
     },
     {
@@ -1593,8 +1582,8 @@
       "source_location": "L842",
       "_origin": "ast",
       "id": "src_cli_promptguidedtaskselector",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "promptguidedtaskselector()"
     },
     {
@@ -1604,8 +1593,8 @@
       "source_location": "L879",
       "_origin": "ast",
       "id": "src_cli_expandhomepath",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "expandhomepath()"
     },
     {
@@ -1615,8 +1604,8 @@
       "source_location": "L891",
       "_origin": "ast",
       "id": "src_cli_promptguidedoutputdirectory",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "promptguidedoutputdirectory()"
     },
     {
@@ -1626,8 +1615,8 @@
       "source_location": "L913",
       "_origin": "ast",
       "id": "src_cli_promptuploadfiles",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "promptuploadfiles()"
     },
     {
@@ -1637,8 +1626,8 @@
       "source_location": "L927",
       "_origin": "ast",
       "id": "src_cli_runwelcomeaction",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "runwelcomeaction()"
     },
     {
@@ -1648,8 +1637,8 @@
       "source_location": "L1062",
       "_origin": "ast",
       "id": "src_cli_handlewelcome",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "handlewelcome()"
     },
     {
@@ -1659,8 +1648,8 @@
       "source_location": "L1107",
       "_origin": "ast",
       "id": "src_cli_requiresession",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "requiresession()"
     },
     {
@@ -1670,8 +1659,8 @@
       "source_location": "L1169",
       "_origin": "ast",
       "id": "src_cli_createauthenticatedapi",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "createauthenticatedapi()"
     },
     {
@@ -1681,8 +1670,8 @@
       "source_location": "L1184",
       "_origin": "ast",
       "id": "src_cli_flattentasks",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "flattentasks()"
     },
     {
@@ -1692,8 +1681,8 @@
       "source_location": "L1189",
       "_origin": "ast",
       "id": "src_cli_taskidentityjson",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "taskidentityjson()"
     },
     {
@@ -1703,8 +1692,8 @@
       "source_location": "L1206",
       "_origin": "ast",
       "id": "src_cli_parseoptionalinteger",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "parseoptionalinteger()"
     },
     {
@@ -1769,8 +1758,8 @@
       "source_location": "L1281",
       "_origin": "ast",
       "id": "src_cli_isforbiddenerror",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 1,
+      "community_name": "OnTrack API Client",
       "norm_label": "isforbiddenerror()"
     },
     {
@@ -1868,8 +1857,8 @@
       "source_location": "L1403",
       "_origin": "ast",
       "id": "src_cli_loadprojectswithtaskmetadata",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "loadprojectswithtaskmetadata()"
     },
     {
@@ -1879,8 +1868,8 @@
       "source_location": "L1511",
       "_origin": "ast",
       "id": "src_cli_buildinboxfallbacktasksfromprojectdetails",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "buildinboxfallbacktasksfromprojectdetails()"
     },
     {
@@ -1890,8 +1879,8 @@
       "source_location": "L1533",
       "_origin": "ast",
       "id": "src_cli_listunitswithfallback",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 1,
+      "community_name": "OnTrack API Client",
       "norm_label": "listunitswithfallback()"
     },
     {
@@ -1901,8 +1890,8 @@
       "source_location": "L1562",
       "_origin": "ast",
       "id": "src_cli_handleauthmethod",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleauthmethod()"
     },
     {
@@ -1912,8 +1901,8 @@
       "source_location": "L1578",
       "_origin": "ast",
       "id": "src_cli_readcliversion",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 6,
+      "community_name": "Agent Command Specifications",
       "norm_label": "readcliversion()"
     },
     {
@@ -1923,8 +1912,8 @@
       "source_location": "L1586",
       "_origin": "ast",
       "id": "src_cli_handlecapabilities",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 6,
+      "community_name": "Agent Command Specifications",
       "norm_label": "handlecapabilities()"
     },
     {
@@ -1934,8 +1923,8 @@
       "source_location": "L1591",
       "_origin": "ast",
       "id": "src_cli_handleschema",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleschema()"
     },
     {
@@ -1945,8 +1934,8 @@
       "source_location": "L1607",
       "_origin": "ast",
       "id": "src_cli_handleauthstatus",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleauthstatus()"
     },
     {
@@ -1956,8 +1945,8 @@
       "source_location": "L1618",
       "_origin": "ast",
       "id": "src_cli_handleauthensure",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleauthensure()"
     },
     {
@@ -1967,8 +1956,8 @@
       "source_location": "L1670",
       "_origin": "ast",
       "id": "src_cli_handlelogin",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "handlelogin()"
     },
     {
@@ -1978,8 +1967,8 @@
       "source_location": "L2056",
       "_origin": "ast",
       "id": "src_cli_handlelogout",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlelogout()"
     },
     {
@@ -1989,8 +1978,8 @@
       "source_location": "L2107",
       "_origin": "ast",
       "id": "src_cli_handlewhoami",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlewhoami()"
     },
     {
@@ -2000,8 +1989,8 @@
       "source_location": "L2129",
       "_origin": "ast",
       "id": "src_cli_handleprojects",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleprojects()"
     },
     {
@@ -2022,8 +2011,8 @@
       "source_location": "L2171",
       "_origin": "ast",
       "id": "src_cli_handleprojectshow",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleprojectshow()"
     },
     {
@@ -2033,8 +2022,8 @@
       "source_location": "L2204",
       "_origin": "ast",
       "id": "src_cli_handleunits",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleunits()"
     },
     {
@@ -2055,8 +2044,8 @@
       "source_location": "L2235",
       "_origin": "ast",
       "id": "src_cli_handleunitshow",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleunitshow()"
     },
     {
@@ -2066,8 +2055,8 @@
       "source_location": "L2267",
       "_origin": "ast",
       "id": "src_cli_handleunittasks",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "handleunittasks()"
     },
     {
@@ -2077,8 +2066,8 @@
       "source_location": "L2300",
       "_origin": "ast",
       "id": "src_cli_handletasks",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "handletasks()"
     },
     {
@@ -2154,8 +2143,8 @@
       "source_location": "L2544",
       "_origin": "ast",
       "id": "src_cli_handlediscover",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlediscover()"
     },
     {
@@ -2165,8 +2154,8 @@
       "source_location": "L2631",
       "_origin": "ast",
       "id": "src_cli_handleinbox",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "handleinbox()"
     },
     {
@@ -2176,8 +2165,8 @@
       "source_location": "L2724",
       "_origin": "ast",
       "id": "src_cli_handletaskshow",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "handletaskshow()"
     },
     {
@@ -2188,7 +2177,7 @@
       "_origin": "ast",
       "id": "src_cli_resolveselectedstudenttask",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "resolveselectedstudenttask()"
     },
     {
@@ -2198,8 +2187,8 @@
       "source_location": "L2801",
       "_origin": "ast",
       "id": "src_cli_handletaskprerequisites",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handletaskprerequisites()"
     },
     {
@@ -2220,8 +2209,8 @@
       "source_location": "L2872",
       "_origin": "ast",
       "id": "src_cli_handleplanshow",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleplanshow()"
     },
     {
@@ -2330,8 +2319,8 @@
       "source_location": "L3288",
       "_origin": "ast",
       "id": "src_cli_handleprojectcommand",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleprojectcommand()"
     },
     {
@@ -2341,8 +2330,8 @@
       "source_location": "L3299",
       "_origin": "ast",
       "id": "src_cli_handleunitcommand",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handleunitcommand()"
     },
     {
@@ -2418,8 +2407,8 @@
       "source_location": "L3400",
       "_origin": "ast",
       "id": "src_cli_handlefeedbacklist",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlefeedbacklist()"
     },
     {
@@ -2429,8 +2418,8 @@
       "source_location": "L3466",
       "_origin": "ast",
       "id": "src_cli_handlefeedbackwatch",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlefeedbackwatch()"
     },
     {
@@ -2440,8 +2429,8 @@
       "source_location": "L3604",
       "_origin": "ast",
       "id": "src_cli_handlepdfdownload",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlepdfdownload()"
     },
     {
@@ -2462,8 +2451,8 @@
       "source_location": "L3964",
       "_origin": "ast",
       "id": "src_cli_handlesubmissionstatus",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlesubmissionstatus()"
     },
     {
@@ -2473,8 +2462,8 @@
       "source_location": "L3994",
       "_origin": "ast",
       "id": "src_cli_filterprojectsforwatch",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "filterprojectsforwatch()"
     },
     {
@@ -2484,8 +2473,8 @@
       "source_location": "L4010",
       "_origin": "ast",
       "id": "src_cli_rethrowwatchauthfailure",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "rethrowwatchauthfailure()"
     },
     {
@@ -2495,8 +2484,8 @@
       "source_location": "L4017",
       "_origin": "ast",
       "id": "src_cli_buildwatchsnapshot",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "buildwatchsnapshot()"
     },
     {
@@ -2517,8 +2506,8 @@
       "source_location": "L4088",
       "_origin": "ast",
       "id": "src_cli_handlewatch",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlewatch()"
     },
     {
@@ -2528,8 +2517,8 @@
       "source_location": "L4210",
       "_origin": "ast",
       "id": "src_cli_handletaskcommand",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handletaskcommand()"
     },
     {
@@ -2539,8 +2528,8 @@
       "source_location": "L4225",
       "_origin": "ast",
       "id": "src_cli_handlefeedbackcommand",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlefeedbackcommand()"
     },
     {
@@ -2550,8 +2539,8 @@
       "source_location": "L4240",
       "_origin": "ast",
       "id": "src_cli_handlepdfcommand",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlepdfcommand()"
     },
     {
@@ -2561,8 +2550,8 @@
       "source_location": "L4255",
       "_origin": "ast",
       "id": "src_cli_handlesubmissioncommand",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "handlesubmissioncommand()"
     },
     {
@@ -2572,8 +2561,8 @@
       "source_location": "L4274",
       "_origin": "ast",
       "id": "src_cli_main",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "main()"
     },
     {
@@ -2737,8 +2726,8 @@
       "source_location": "L137",
       "_origin": "ast",
       "id": "src_lib_agent_protocol_getagentoutputcontext",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "getagentoutputcontext()"
     },
     {
@@ -2759,8 +2748,8 @@
       "source_location": "L152",
       "_origin": "ast",
       "id": "src_lib_agent_protocol_agentprotocolerror",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "agentprotocolerror"
     },
     {
@@ -2770,8 +2759,8 @@
       "source_location": "L160",
       "_origin": "ast",
       "id": "src_lib_agent_protocol_agentprotocolerror_constructor",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": ".constructor()"
     },
     {
@@ -3002,7 +2991,7 @@
       "_origin": "ast",
       "id": "src_lib_api_proberesult",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "proberesult"
     },
     {
@@ -3365,7 +3354,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "auth-broker.ts"
     },
     {
@@ -3376,7 +3365,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokeroptions",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "ontrackauthbrokeroptions"
     },
     {
@@ -3387,7 +3376,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "ontrackauthbrokerdependencies"
     },
     {
@@ -3398,7 +3387,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_loadsession",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".loadsession()"
     },
     {
@@ -3409,7 +3398,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_savesession",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".savesession()"
     },
     {
@@ -3420,7 +3409,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_withrefreshlock",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".withrefreshlock()"
     },
     {
@@ -3431,7 +3420,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_getauthmethod",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".getauthmethod()"
     },
     {
@@ -3442,7 +3431,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_capturestoredsession",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".capturestoredsession()"
     },
     {
@@ -3453,7 +3442,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_captureinteractivesession",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".captureinteractivesession()"
     },
     {
@@ -3464,7 +3453,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_exchangelegacycredential",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".exchangelegacycredential()"
     },
     {
@@ -3475,7 +3464,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbrokerdependencies_now",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": ".now()"
     },
     {
@@ -3486,7 +3475,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_authstatusview",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "authstatusview"
     },
     {
@@ -3496,8 +3485,8 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker",
-      "community": 8,
-      "community_name": "OnTrack Auth Broker",
+      "community": 13,
+      "community_name": "Auth MCP Server",
       "norm_label": "ontrackauthbroker"
     },
     {
@@ -3507,8 +3496,8 @@
       "source_location": "L55",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker_ensure",
-      "community": 8,
-      "community_name": "OnTrack Auth Broker",
+      "community": 16,
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".ensure()"
     },
     {
@@ -3518,8 +3507,8 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker_status",
-      "community": 8,
-      "community_name": "OnTrack Auth Broker",
+      "community": 13,
+      "community_name": "Auth MCP Server",
       "norm_label": ".status()"
     },
     {
@@ -3529,8 +3518,8 @@
       "source_location": "L57",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker_currentsession",
-      "community": 8,
-      "community_name": "OnTrack Auth Broker",
+      "community": 13,
+      "community_name": "Auth MCP Server",
       "norm_label": ".currentsession()"
     },
     {
@@ -3541,7 +3530,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_defaultdependencies",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "defaultdependencies()"
     },
     {
@@ -3552,7 +3541,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_sessionfromcapture",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "sessionfromcapture()"
     },
     {
@@ -3563,7 +3552,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_broker_createontrackauthbroker",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "createontrackauthbroker()"
     },
     {
@@ -3574,7 +3563,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "auth-runtime.ts"
     },
     {
@@ -3585,7 +3574,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authinteractionmode",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "authinteractionmode"
     },
     {
@@ -3595,8 +3584,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authensureoptions",
-      "community": 8,
-      "community_name": "OnTrack Auth Broker",
+      "community": 16,
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "authensureoptions"
     },
     {
@@ -3606,8 +3595,8 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeresult",
-      "community": 8,
-      "community_name": "OnTrack Auth Broker",
+      "community": 16,
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "authruntimeresult"
     },
     {
@@ -3618,7 +3607,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "authruntimeadapter"
     },
     {
@@ -3629,7 +3618,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter_loadsession",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".loadsession()"
     },
     {
@@ -3640,7 +3629,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter_savesession",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".savesession()"
     },
     {
@@ -3651,7 +3640,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter_withrefreshlock",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".withrefreshlock()"
     },
     {
@@ -3662,7 +3651,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter_silentrefresh",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".silentrefresh()"
     },
     {
@@ -3673,7 +3662,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter_begininteractivelogin",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".begininteractivelogin()"
     },
     {
@@ -3684,7 +3673,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeadapter_now",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".now()"
     },
     {
@@ -3695,7 +3684,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntime",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "authruntime"
     },
     {
@@ -3706,7 +3695,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntime_ensure",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": ".ensure()"
     },
     {
@@ -3717,7 +3706,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_isfreshenough",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "isfreshenough()"
     },
     {
@@ -3728,7 +3717,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_ready",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "ready()"
     },
     {
@@ -3739,7 +3728,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_credentialversionchanged",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "credentialversionchanged()"
     },
     {
@@ -3750,7 +3739,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authrequired",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "authrequired()"
     },
     {
@@ -3761,7 +3750,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_refreshfailure",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "refreshfailure()"
     },
     {
@@ -3772,7 +3761,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_runtime_createauthruntime",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "createauthruntime()"
     },
     {
@@ -3782,8 +3771,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_auth",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "auth.ts"
     },
     {
@@ -3793,8 +3782,8 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "src_lib_auth_authfailurekind",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "authfailurekind"
     },
     {
@@ -3805,7 +3794,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_sessionusability",
       "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community_name": "Auth Runtime Lifecycle",
       "norm_label": "sessionusability"
     },
     {
@@ -3815,8 +3804,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "src_lib_auth_ontrackhttperror",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "ontrackhttperror"
     },
     {
@@ -3826,8 +3815,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "src_lib_auth_ontrackhttperror_constructor",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": ".constructor()"
     },
     {
@@ -3837,8 +3826,8 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "src_lib_auth_classifyauthfailure",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "classifyauthfailure()"
     },
     {
@@ -3848,8 +3837,8 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "src_lib_auth_migratelegacysession",
-      "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "migratelegacysession()"
     },
     {
@@ -3860,7 +3849,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_createsessionfromaccesstoken",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "createsessionfromaccesstoken()"
     },
     {
@@ -3871,7 +3860,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "auto-login.ts"
     },
     {
@@ -3882,7 +3871,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_logincredentials",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "logincredentials"
     },
     {
@@ -3893,7 +3882,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssologinoptions",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "ssologinoptions"
     },
     {
@@ -3904,7 +3893,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_mfamethodoption",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "mfamethodoption"
     },
     {
@@ -3915,7 +3904,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssostep",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "ssostep"
     },
     {
@@ -3926,7 +3915,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssofallbackreason",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "ssofallbackreason"
     },
     {
@@ -3959,7 +3948,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_browserlaunchplan",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "browserlaunchplan"
     },
     {
@@ -4024,8 +4013,8 @@
       "source_location": "L139",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromurl",
-      "community": 10,
-      "community_name": "Auto Login Tests",
+      "community": 25,
+      "community_name": "SSO Credential Capture",
       "norm_label": "extractcredentialsfromurl()"
     },
     {
@@ -4157,7 +4146,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_browserstorageentry",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "browserstorageentry"
     },
     {
@@ -4212,7 +4201,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_autologinoptions",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "autologinoptions"
     },
     {
@@ -4266,8 +4255,8 @@
       "source_location": "L884",
       "_origin": "ast",
       "id": "src_lib_auto_login_issystembrowserprofilereuseenabled",
-      "community": 14,
-      "community_name": "Auth Session Capture",
+      "community": 10,
+      "community_name": "Auto Login Tests",
       "norm_label": "issystembrowserprofilereuseenabled()"
     },
     {
@@ -4300,7 +4289,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_browserstoragestate",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "browserstoragestate"
     },
     {
@@ -4377,7 +4366,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_savebrowsersessionstateoptions",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "savebrowsersessionstateoptions"
     },
     {
@@ -4410,7 +4399,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_username_selectors",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "username_selectors"
     },
     {
@@ -4421,7 +4410,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_password_selectors",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "password_selectors"
     },
     {
@@ -4432,7 +4421,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_primary_submit_selectors",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "primary_submit_selectors"
     },
     {
@@ -4443,7 +4432,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_sso_entry_selectors",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "sso_entry_selectors"
     },
     {
@@ -4454,7 +4443,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_sso_entry_labels",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "sso_entry_labels"
     },
     {
@@ -4465,7 +4454,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_username_continue_labels",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "username_continue_labels"
     },
     {
@@ -4476,7 +4465,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_password_submit_labels",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "password_submit_labels"
     },
     {
@@ -4487,7 +4476,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_known_mfa_methods",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "known_mfa_methods"
     },
     {
@@ -4498,7 +4487,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_blocked_link_hosts",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "blocked_link_hosts"
     },
     {
@@ -4531,7 +4520,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_interactionscope",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "interactionscope"
     },
     {
@@ -4542,7 +4531,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_scoperef",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "scoperef"
     },
     {
@@ -4553,7 +4542,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_detectedmfaoption",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "detectedmfaoption"
     },
     {
@@ -4564,7 +4553,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_guidedssoruntimestate",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "guidedssoruntimestate"
     },
     {
@@ -4575,7 +4564,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_mfa_challenge_number_selectors",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "mfa_challenge_number_selectors"
     },
     {
@@ -4586,7 +4575,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_mfa_code_input_selectors",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "mfa_code_input_selectors"
     },
     {
@@ -4597,7 +4586,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_mfa_code_submit_labels",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "mfa_code_submit_labels"
     },
     {
@@ -4608,7 +4597,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_iscodebasedmfalabel",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "iscodebasedmfalabel()"
     },
     {
@@ -4618,8 +4607,8 @@
       "source_location": "L1332",
       "_origin": "ast",
       "id": "src_lib_auto_login_collectscopes",
-      "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community": 25,
+      "community_name": "SSO Credential Capture",
       "norm_label": "collectscopes()"
     },
     {
@@ -4630,7 +4619,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_canuseselector",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "canuseselector()"
     },
     {
@@ -4641,7 +4630,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_fillfirstvisible",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "fillfirstvisible()"
     },
     {
@@ -4652,7 +4641,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clicklikelyactioncontrol",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "clicklikelyactioncontrol()"
     },
     {
@@ -4663,7 +4652,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_issafeactionlink",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "issafeactionlink()"
     },
     {
@@ -4674,7 +4663,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clickfirstvisible",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "clickfirstvisible()"
     },
     {
@@ -4795,7 +4784,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_hasanyselectorinscopes",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "hasanyselectorinscopes()"
     },
     {
@@ -4806,7 +4795,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_normalizemfalabel",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "normalizemfalabel()"
     },
     {
@@ -4817,7 +4806,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_escaperegex",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "escaperegex()"
     },
     {
@@ -4828,7 +4817,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_extractmfaoptionlabel",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "extractmfaoptionlabel()"
     },
     {
@@ -4839,7 +4828,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_collectselectcontrols",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "collectselectcontrols()"
     },
     {
@@ -4850,7 +4839,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_findvisibleactioncontrol",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "findvisibleactioncontrol()"
     },
     {
@@ -4861,7 +4850,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_countknownmfamethodmentions",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "countknownmfamethodmentions()"
     },
     {
@@ -4872,7 +4861,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_collectknownmfamethodoptions",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "collectknownmfamethodoptions()"
     },
     {
@@ -4883,7 +4872,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_collectmfaselectionoptions",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "collectmfaselectionoptions()"
     },
     {
@@ -4894,7 +4883,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clickdetectedmfaoption",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "clickdetectedmfaoption()"
     },
     {
@@ -4905,7 +4894,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_maybehandlemfamethodselection",
       "community": 7,
-      "community_name": "Okta MFA Model",
+      "community_name": "Okta MFA Auto Login",
       "norm_label": "maybehandlemfamethodselection()"
     },
     {
@@ -4916,7 +4905,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_maybehandlemfacodeentry",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "maybehandlemfacodeentry()"
     },
     {
@@ -4927,7 +4916,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_fillmfacodeinputs",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "fillmfacodeinputs()"
     },
     {
@@ -4938,7 +4927,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_submitafterfieldfill",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "submitafterfieldfill()"
     },
     {
@@ -4949,7 +4938,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_advanceguidedssoonpage",
       "community": 20,
-      "community_name": "Guided SSO Page Flow",
+      "community_name": "Guided SSO Page Automation",
       "norm_label": "advanceguidedssoonpage()"
     },
     {
@@ -4981,8 +4970,8 @@
       "source_location": "L2725",
       "_origin": "ast",
       "id": "src_lib_auto_login_capturecredentialsfromstoredbrowsersession",
-      "community": 14,
-      "community_name": "Auth Session Capture",
+      "community": 10,
+      "community_name": "Auto Login Tests",
       "norm_label": "capturecredentialsfromstoredbrowsersession()"
     },
     {
@@ -5025,8 +5014,8 @@
       "source_location": "L2949",
       "_origin": "ast",
       "id": "src_lib_auto_login_capturessocredentials",
-      "community": 14,
-      "community_name": "Auth Session Capture",
+      "community": 23,
+      "community_name": "Browser Launch Capture",
       "norm_label": "capturessocredentials()"
     },
     {
@@ -5047,8 +5036,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_command_input",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "command-input.ts"
     },
     {
@@ -5058,8 +5047,8 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "src_lib_command_input_unsafe_keys",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "unsafe_keys"
     },
     {
@@ -5069,8 +5058,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "src_lib_command_input_agent_global_flags",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "agent_global_flags"
     },
     {
@@ -5080,8 +5069,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "src_lib_command_input_grouped_agent_commands",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "grouped_agent_commands"
     },
     {
@@ -5091,8 +5080,8 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "src_lib_command_input_structuredinputerror",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "structuredinputerror"
     },
     {
@@ -5102,8 +5091,8 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "src_lib_command_input_structuredinputerror_constructor",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": ".constructor()"
     },
     {
@@ -5113,8 +5102,8 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "src_lib_command_input_structuredinputdependencies",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "structuredinputdependencies"
     },
     {
@@ -5124,8 +5113,8 @@
       "source_location": "L34",
       "_origin": "ast",
       "id": "src_lib_command_input_readprocessstdin",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "readprocessstdin()"
     },
     {
@@ -5135,8 +5124,8 @@
       "source_location": "L47",
       "_origin": "ast",
       "id": "src_lib_command_input_readflagvalue",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "readflagvalue()"
     },
     {
@@ -5146,8 +5135,8 @@
       "source_location": "L67",
       "_origin": "ast",
       "id": "src_lib_command_input_removeflagpair",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "removeflagpair()"
     },
     {
@@ -5157,8 +5146,8 @@
       "source_location": "L73",
       "_origin": "ast",
       "id": "src_lib_command_input_parseobject",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "parseobject()"
     },
     {
@@ -5168,8 +5157,8 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "src_lib_command_input_encodefield",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "encodefield()"
     },
     {
@@ -5179,8 +5168,8 @@
       "source_location": "L143",
       "_origin": "ast",
       "id": "src_lib_command_input_mergestructuredcommandinput",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "mergestructuredcommandinput()"
     },
     {
@@ -5190,8 +5179,8 @@
       "source_location": "L200",
       "_origin": "ast",
       "id": "src_lib_command_input_flagoccurrences",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "flagoccurrences()"
     },
     {
@@ -5201,8 +5190,8 @@
       "source_location": "L205",
       "_origin": "ast",
       "id": "src_lib_command_input_validateagentcommandarguments",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "validateagentcommandarguments()"
     },
     {
@@ -5213,7 +5202,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "command-spec.ts"
     },
     {
@@ -5224,7 +5213,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_agentcommandrisk",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "agentcommandrisk"
     },
     {
@@ -5235,7 +5224,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_commandinputtype",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "commandinputtype"
     },
     {
@@ -5246,7 +5235,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_commandinputfield",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "commandinputfield"
     },
     {
@@ -5257,7 +5246,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_agentcommandspec",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "agentcommandspec"
     },
     {
@@ -5268,7 +5257,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_stringfield",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "stringfield()"
     },
     {
@@ -5279,7 +5268,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_integerfield",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "integerfield()"
     },
     {
@@ -5290,7 +5279,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_booleanfield",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "booleanfield()"
     },
     {
@@ -5301,7 +5290,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_stringarrayfield",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "stringarrayfield()"
     },
     {
@@ -5312,7 +5301,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_jsonschemaforfields",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "jsonschemaforfields()"
     },
     {
@@ -5323,7 +5312,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_spec",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "spec()"
     },
     {
@@ -5334,7 +5323,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_jsontaskselector",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "jsontaskselector"
     },
     {
@@ -5345,7 +5334,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_onetaskselector",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "onetaskselector"
     },
     {
@@ -5356,7 +5345,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_agent_command_specs",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "agent_command_specs"
     },
     {
@@ -5367,7 +5356,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_command_spec_map",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "command_spec_map"
     },
     {
@@ -5378,7 +5367,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_getcommandspec",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "getcommandspec()"
     },
     {
@@ -5389,7 +5378,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_grouped_paths",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "grouped_paths"
     },
     {
@@ -5400,7 +5389,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_top_level_paths",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "top_level_paths"
     },
     {
@@ -5411,7 +5400,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_resolvecommandpath",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "resolvecommandpath()"
     },
     {
@@ -5422,7 +5411,7 @@
       "_origin": "ast",
       "id": "src_lib_command_spec_buildcapabilities",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "buildcapabilities()"
     },
     {
@@ -5862,7 +5851,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "discovery.ts"
     },
     {
@@ -5873,7 +5862,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_api_hints",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "api_hints"
     },
     {
@@ -5884,7 +5873,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_discoveryasset",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "discoveryasset"
     },
     {
@@ -5895,7 +5884,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_discoveryresult",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "discoveryresult"
     },
     {
@@ -5906,7 +5895,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_probeitem",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "probeitem"
     },
     {
@@ -5917,7 +5906,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_probeapiclient",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "probeapiclient"
     },
     {
@@ -5927,8 +5916,8 @@
       "source_location": "L58",
       "_origin": "ast",
       "id": "src_lib_discovery_probeapiclient_listprojects",
-      "community": 1,
-      "community_name": "OnTrack API Client",
+      "community": 9,
+      "community_name": "API Endpoint Discovery",
       "norm_label": ".listprojects()"
     },
     {
@@ -5939,7 +5928,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_probeapiclient_probeget",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": ".probeget()"
     },
     {
@@ -5950,7 +5939,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_normalizepath",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "normalizepath()"
     },
     {
@@ -5961,7 +5950,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_isapitemplate",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "isapitemplate()"
     },
     {
@@ -5972,7 +5961,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_extractjavascriptassetpaths",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "extractjavascriptassetpaths()"
     },
     {
@@ -5983,7 +5972,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_extractdiscoveredpaths",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "extractdiscoveredpaths()"
     },
     {
@@ -5994,7 +5983,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_classifydiscoveredpaths",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "classifydiscoveredpaths()"
     },
     {
@@ -6005,7 +5994,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_resolvediscoveryurl",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "resolvediscoveryurl()"
     },
     {
@@ -6016,7 +6005,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_fetchtext",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "fetchtext()"
     },
     {
@@ -6027,7 +6016,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_discoverontracksurface",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "discoverontracksurface()"
     },
     {
@@ -6038,7 +6027,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_probecontext",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "probecontext"
     },
     {
@@ -6049,7 +6038,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_toprobecontext",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "toprobecontext()"
     },
     {
@@ -6060,7 +6049,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_param_resolver",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "param_resolver"
     },
     {
@@ -6071,7 +6060,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_materializeendpoint",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "materializeendpoint()"
     },
     {
@@ -6082,7 +6071,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_statusdetail",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "statusdetail()"
     },
     {
@@ -6093,7 +6082,7 @@
       "_origin": "ast",
       "id": "src_lib_discovery_probediscoveredapitemplates",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "probediscoveredapitemplates()"
     },
     {
@@ -6103,8 +6092,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_execution_journal",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "execution-journal.ts"
     },
     {
@@ -6114,8 +6103,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "src_lib_execution_journal_executionstate",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "executionstate"
     },
     {
@@ -6125,8 +6114,8 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "src_lib_execution_journal_executionrecord",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "executionrecord"
     },
     {
@@ -6136,8 +6125,8 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "src_lib_execution_journal_executionclaim",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "executionclaim"
     },
     {
@@ -6147,8 +6136,8 @@
       "source_location": "L38",
       "_origin": "ast",
       "id": "src_lib_execution_journal_executionjournaloptions",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "executionjournaloptions"
     },
     {
@@ -6158,8 +6147,8 @@
       "source_location": "L44",
       "_origin": "ast",
       "id": "src_lib_execution_journal_configroot",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "configroot()"
     },
     {
@@ -6169,8 +6158,8 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "src_lib_execution_journal_journalroot",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "journalroot()"
     },
     {
@@ -6180,8 +6169,8 @@
       "source_location": "L58",
       "_origin": "ast",
       "id": "src_lib_execution_journal_digest",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "digest()"
     },
     {
@@ -6191,8 +6180,8 @@
       "source_location": "L62",
       "_origin": "ast",
       "id": "src_lib_execution_journal_stablevalue",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "stablevalue()"
     },
     {
@@ -6202,8 +6191,8 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "src_lib_execution_journal_executionfingerprint",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "executionfingerprint()"
     },
     {
@@ -6213,8 +6202,8 @@
       "source_location": "L83",
       "_origin": "ast",
       "id": "src_lib_execution_journal_validateidempotencykey",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "validateidempotencykey()"
     },
     {
@@ -6224,8 +6213,8 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "src_lib_execution_journal_recordpath",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "recordpath()"
     },
     {
@@ -6235,8 +6224,8 @@
       "source_location": "L98",
       "_origin": "ast",
       "id": "src_lib_execution_journal_lockpath",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "lockpath()"
     },
     {
@@ -6246,8 +6235,8 @@
       "source_location": "L102",
       "_origin": "ast",
       "id": "src_lib_execution_journal_atomicwrite",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "atomicwrite()"
     },
     {
@@ -6257,8 +6246,8 @@
       "source_location": "L131",
       "_origin": "ast",
       "id": "src_lib_execution_journal_readrecord",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "readrecord()"
     },
     {
@@ -6268,8 +6257,8 @@
       "source_location": "L177",
       "_origin": "ast",
       "id": "src_lib_execution_journal_withexecutionjournallock",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "withexecutionjournallock()"
     },
     {
@@ -6279,8 +6268,8 @@
       "source_location": "L250",
       "_origin": "ast",
       "id": "src_lib_execution_journal_claimexecution",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "claimexecution()"
     },
     {
@@ -6290,8 +6279,8 @@
       "source_location": "L319",
       "_origin": "ast",
       "id": "src_lib_execution_journal_updateexecution",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "updateexecution()"
     },
     {
@@ -6302,7 +6291,7 @@
       "_origin": "ast",
       "id": "src_lib_planner",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "planner.ts"
     },
     {
@@ -6313,7 +6302,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plandatesource",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plandatesource"
     },
     {
@@ -6324,7 +6313,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plandatekind",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plandatekind"
     },
     {
@@ -6335,7 +6324,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plandatevalue",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plandatevalue"
     },
     {
@@ -6346,7 +6335,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plannerprerequisite",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plannerprerequisite"
     },
     {
@@ -6357,7 +6346,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plannerview",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plannerview"
     },
     {
@@ -6368,7 +6357,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_rawtaskprerequisite",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "rawtaskprerequisite"
     },
     {
@@ -6379,7 +6368,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plandatechange",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plandatechange"
     },
     {
@@ -6390,7 +6379,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_plannermutation",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plannermutation"
     },
     {
@@ -6401,7 +6390,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_recordvalue",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "recordvalue()"
     },
     {
@@ -6412,7 +6401,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_integervalue",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "integervalue()"
     },
     {
@@ -6423,7 +6412,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_stringvalue",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "stringvalue()"
     },
     {
@@ -6434,7 +6423,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_datefrom",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "datefrom()"
     },
     {
@@ -6445,7 +6434,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_gradedaterow",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "gradedaterow()"
     },
     {
@@ -6456,7 +6445,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_personaldate",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "personaldate()"
     },
     {
@@ -6467,7 +6456,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_defaultdate",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "defaultdate()"
     },
     {
@@ -6478,7 +6467,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_parsedateonly",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "parsedateonly()"
     },
     {
@@ -6489,7 +6478,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_prerequisitefortask",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "prerequisitefortask()"
     },
     {
@@ -6500,7 +6489,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_buildplannerviews",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "buildplannerviews()"
     },
     {
@@ -6511,7 +6500,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_validateplandatechange",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "validateplandatechange()"
     },
     {
@@ -6522,7 +6511,7 @@
       "_origin": "ast",
       "id": "src_lib_planner_buildtargetdatemutation",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "buildtargetdatemutation()"
     },
     {
@@ -6532,8 +6521,8 @@
       "source_location": "L256",
       "_origin": "ast",
       "id": "src_lib_planner_buildresettargetdatesmutation",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 2,
+      "community_name": "Task Planner Models",
       "norm_label": "buildresettargetdatesmutation()"
     },
     {
@@ -6544,7 +6533,7 @@
       "_origin": "ast",
       "id": "src_lib_session",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "session.ts"
     },
     {
@@ -6555,7 +6544,7 @@
       "_origin": "ast",
       "id": "src_lib_session_getconfigroot",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "getconfigroot()"
     },
     {
@@ -6566,7 +6555,7 @@
       "_origin": "ast",
       "id": "src_lib_session_getsessionpath",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "getsessionpath()"
     },
     {
@@ -6577,7 +6566,7 @@
       "_origin": "ast",
       "id": "src_lib_session_sessionpathoptions",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "sessionpathoptions"
     },
     {
@@ -6588,7 +6577,7 @@
       "_origin": "ast",
       "id": "src_lib_session_sessionrefreshlockoptions",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "sessionrefreshlockoptions"
     },
     {
@@ -6599,7 +6588,7 @@
       "_origin": "ast",
       "id": "src_lib_session_sessionlockowner",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "sessionlockowner"
     },
     {
@@ -6610,7 +6599,7 @@
       "_origin": "ast",
       "id": "src_lib_session_resolvesessionpath",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "resolvesessionpath()"
     },
     {
@@ -6621,7 +6610,7 @@
       "_origin": "ast",
       "id": "src_lib_session_resolvesessionrefreshlockpath",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "resolvesessionrefreshlockpath()"
     },
     {
@@ -6632,7 +6621,7 @@
       "_origin": "ast",
       "id": "src_lib_session_wait",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "wait()"
     },
     {
@@ -6643,7 +6632,7 @@
       "_origin": "ast",
       "id": "src_lib_session_isnodeerror",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "isnodeerror()"
     },
     {
@@ -6654,7 +6643,7 @@
       "_origin": "ast",
       "id": "src_lib_session_recoverstalerefreshlock",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "recoverstalerefreshlock()"
     },
     {
@@ -6665,7 +6654,7 @@
       "_origin": "ast",
       "id": "src_lib_session_acquiredsessionrefreshlock",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "acquiredsessionrefreshlock"
     },
     {
@@ -6676,7 +6665,7 @@
       "_origin": "ast",
       "id": "src_lib_session_acquiresessionrefreshlock",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "acquiresessionrefreshlock()"
     },
     {
@@ -6686,8 +6675,8 @@
       "source_location": "L222",
       "_origin": "ast",
       "id": "src_lib_session_loadsession",
-      "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "loadsession()"
     },
     {
@@ -6697,8 +6686,8 @@
       "source_location": "L234",
       "_origin": "ast",
       "id": "src_lib_session_savesession",
-      "community": 14,
-      "community_name": "Auth Session Capture",
+      "community": 11,
+      "community_name": "Session Lock Management",
       "norm_label": "savesession()"
     },
     {
@@ -6709,7 +6698,7 @@
       "_origin": "ast",
       "id": "src_lib_session_clearsession",
       "community": 11,
-      "community_name": "Session Persistence Locks",
+      "community_name": "Session Lock Management",
       "norm_label": "clearsession()"
     },
     {
@@ -6719,8 +6708,8 @@
       "source_location": "L277",
       "_origin": "ast",
       "id": "src_lib_session_withsessionrefreshlock",
-      "community": 14,
-      "community_name": "Auth Session Capture",
+      "community": 11,
+      "community_name": "Session Lock Management",
       "norm_label": "withsessionrefreshlock()"
     },
     {
@@ -6731,7 +6720,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "student-task-view.ts"
     },
     {
@@ -6742,7 +6731,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskvisibility",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "studenttaskvisibility"
     },
     {
@@ -6753,7 +6742,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskreference",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "studenttaskreference"
     },
     {
@@ -6764,7 +6753,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskdates",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "studenttaskdates"
     },
     {
@@ -6774,8 +6763,8 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskview",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 50,
+      "community_name": "Task Summary Models",
       "norm_label": "studenttaskview"
     },
     {
@@ -6797,7 +6786,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_buildstudenttaskviewoptions",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "buildstudenttaskviewoptions"
     },
     {
@@ -6808,7 +6797,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskviewselector",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "studenttaskviewselector"
     },
     {
@@ -6819,7 +6808,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_recordvalue",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "recordvalue()"
     },
     {
@@ -6830,7 +6819,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_integervalue",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "integervalue()"
     },
     {
@@ -6841,7 +6830,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_stringvalue",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "stringvalue()"
     },
     {
@@ -6852,7 +6841,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_arrayvalue",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "arrayvalue()"
     },
     {
@@ -6863,7 +6852,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_projecttargetgrade",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "projecttargetgrade()"
     },
     {
@@ -6874,7 +6863,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_definitiontargetgrade",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "definitiontargetgrade()"
     },
     {
@@ -6885,7 +6874,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_definitiontutorialstream",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "definitiontutorialstream()"
     },
     {
@@ -6896,7 +6885,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_taskdefinitionid",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "taskdefinitionid()"
     },
     {
@@ -6907,7 +6896,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_unittaskdefinitions",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "unittaskdefinitions()"
     },
     {
@@ -6918,7 +6907,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_embeddeddefinition",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "embeddeddefinition()"
     },
     {
@@ -6929,7 +6918,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_definitionsforproject",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "definitionsforproject()"
     },
     {
@@ -6940,7 +6929,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_tutorialcontext",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "tutorialcontext"
     },
     {
@@ -6951,7 +6940,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_enrolledtutorialstreams",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "enrolledtutorialstreams()"
     },
     {
@@ -6962,7 +6951,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_visibilityfor",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "visibilityfor()"
     },
     {
@@ -6973,7 +6962,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_taskdates",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "taskdates()"
     },
     {
@@ -6984,7 +6973,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_includevisibility",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "includevisibility()"
     },
     {
@@ -6995,7 +6984,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_buildstudenttaskviews",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "buildstudenttaskviews()"
     },
     {
@@ -7006,7 +6995,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_buildstudenttaskrows",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "buildstudenttaskrows()"
     },
     {
@@ -7017,7 +7006,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_normalizedabbreviation",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "normalizedabbreviation()"
     },
     {
@@ -7028,7 +7017,7 @@
       "_origin": "ast",
       "id": "src_lib_student_task_view_resolvestudenttaskviews",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "resolvestudenttaskviews()"
     },
     {
@@ -7038,8 +7027,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submission-lifecycle.ts"
     },
     {
@@ -7049,8 +7038,8 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissionpdfstate",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissionpdfstate"
     },
     {
@@ -7060,8 +7049,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissiondetails",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissiondetails"
     },
     {
@@ -7071,8 +7060,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissionfileinput",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissionfileinput"
     },
     {
@@ -7082,8 +7071,8 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_preparedsubmissionfile",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "preparedsubmissionfile"
     },
     {
@@ -7094,7 +7083,7 @@
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_preparedsubmission",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "preparedsubmission"
     },
     {
@@ -7104,8 +7093,8 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissionattemptstate",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissionattemptstate"
     },
     {
@@ -7115,8 +7104,8 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissionjournalentry",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissionjournalentry"
     },
     {
@@ -7126,8 +7115,8 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissionattempt",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissionattempt"
     },
     {
@@ -7137,8 +7126,8 @@
       "source_location": "L63",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_submissionattemptevent",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissionattemptevent"
     },
     {
@@ -7148,8 +7137,8 @@
       "source_location": "L71",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_recordvalue",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "recordvalue()"
     },
     {
@@ -7159,8 +7148,8 @@
       "source_location": "L77",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_stringvalue",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "stringvalue()"
     },
     {
@@ -7170,8 +7159,8 @@
       "source_location": "L81",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_booleanvalue",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "booleanvalue()"
     },
     {
@@ -7181,8 +7170,8 @@
       "source_location": "L85",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_uploadrequirements",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "uploadrequirements()"
     },
     {
@@ -7192,8 +7181,8 @@
       "source_location": "L97",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_requirementkeys",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "requirementkeys()"
     },
     {
@@ -7203,8 +7192,8 @@
       "source_location": "L103",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_parsesubmissiondetails",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "parsesubmissiondetails()"
     },
     {
@@ -7214,8 +7203,8 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_issubmissionobserved",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "issubmissionobserved()"
     },
     {
@@ -7225,8 +7214,8 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_validatesubmissionmode",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "validatesubmissionmode()"
     },
     {
@@ -7236,8 +7225,8 @@
       "source_location": "L152",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_validatefileinputs",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "validatefileinputs()"
     },
     {
@@ -7247,8 +7236,8 @@
       "source_location": "L167",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_preparesubmission",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "preparesubmission()"
     },
     {
@@ -7258,8 +7247,8 @@
       "source_location": "L220",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_journalentry",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "journalentry()"
     },
     {
@@ -7269,8 +7258,8 @@
       "source_location": "L236",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_createsubmissionattempt",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "createsubmissionattempt()"
     },
     {
@@ -7280,8 +7269,8 @@
       "source_location": "L261",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_withtransition",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "withtransition()"
     },
     {
@@ -7291,8 +7280,8 @@
       "source_location": "L280",
       "_origin": "ast",
       "id": "src_lib_submission_lifecycle_transitionsubmissionattempt",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "transitionsubmissionattempt()"
     },
     {
@@ -7302,8 +7291,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_types",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "types.ts"
     },
     {
@@ -7314,7 +7303,7 @@
       "_origin": "ast",
       "id": "src_lib_types_authmethodresponse",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "authmethodresponse"
     },
     {
@@ -7324,8 +7313,8 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "src_lib_types_ontrackuser",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "ontrackuser"
     },
     {
@@ -7336,7 +7325,7 @@
       "_origin": "ast",
       "id": "src_lib_types_signinresponse",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "signinresponse"
     },
     {
@@ -7346,8 +7335,8 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "src_lib_types_accesstokenresponse",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "accesstokenresponse"
     },
     {
@@ -7357,8 +7346,8 @@
       "source_location": "L55",
       "_origin": "ast",
       "id": "src_lib_types_credentialsource",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "credentialsource"
     },
     {
@@ -7390,8 +7379,8 @@
       "source_location": "L104",
       "_origin": "ast",
       "id": "src_lib_types_taskuploadrequirement",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "taskuploadrequirement"
     },
     {
@@ -7401,8 +7390,8 @@
       "source_location": "L116",
       "_origin": "ast",
       "id": "src_lib_types_taskdefinitionsummary",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 50,
+      "community_name": "Task Summary Models",
       "norm_label": "taskdefinitionsummary"
     },
     {
@@ -7412,8 +7401,8 @@
       "source_location": "L134",
       "_origin": "ast",
       "id": "src_lib_types_tasksummary",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 50,
+      "community_name": "Task Summary Models",
       "norm_label": "tasksummary"
     },
     {
@@ -7423,8 +7412,8 @@
       "source_location": "L189",
       "_origin": "ast",
       "id": "src_lib_types_inboxtask",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 50,
+      "community_name": "Task Summary Models",
       "norm_label": "inboxtask"
     },
     {
@@ -7434,8 +7423,8 @@
       "source_location": "L205",
       "_origin": "ast",
       "id": "src_lib_types_projectsummary",
-      "community": 1,
-      "community_name": "OnTrack API Client",
+      "community": 45,
+      "community_name": "Student Task View",
       "norm_label": "projectsummary"
     },
     {
@@ -7456,8 +7445,8 @@
       "source_location": "L237",
       "_origin": "ast",
       "id": "src_lib_types_taskbatchselector",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "taskbatchselector"
     },
     {
@@ -7489,8 +7478,8 @@
       "source_location": "L282",
       "_origin": "ast",
       "id": "src_lib_types_watcheventtype",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "watcheventtype"
     },
     {
@@ -7500,8 +7489,8 @@
       "source_location": "L285",
       "_origin": "ast",
       "id": "src_lib_types_watchevent",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "watchevent"
     },
     {
@@ -7522,8 +7511,8 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "src_lib_utils_normalizebaseurl",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "normalizebaseurl()"
     },
     {
@@ -7544,8 +7533,8 @@
       "source_location": "L80",
       "_origin": "ast",
       "id": "src_lib_utils_prompt",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "prompt()"
     },
     {
@@ -7577,8 +7566,8 @@
       "source_location": "L168",
       "_origin": "ast",
       "id": "src_lib_utils_openexternal",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "openexternal()"
     },
     {
@@ -7599,8 +7588,8 @@
       "source_location": "L202",
       "_origin": "ast",
       "id": "src_lib_utils_getflagvalue",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "getflagvalue()"
     },
     {
@@ -7621,8 +7610,8 @@
       "source_location": "L233",
       "_origin": "ast",
       "id": "src_lib_utils_hasflag",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "hasflag()"
     },
     {
@@ -7632,8 +7621,8 @@
       "source_location": "L238",
       "_origin": "ast",
       "id": "src_lib_utils_formatdate",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "formatdate()"
     },
     {
@@ -7643,8 +7632,8 @@
       "source_location": "L252",
       "_origin": "ast",
       "id": "src_lib_utils_printjson",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "printjson()"
     },
     {
@@ -7764,8 +7753,8 @@
       "source_location": "L400",
       "_origin": "ast",
       "id": "src_lib_utils_printtable",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "printtable()"
     },
     {
@@ -7775,8 +7764,8 @@
       "source_location": "L446",
       "_origin": "ast",
       "id": "src_lib_utils_tointeger",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "tointeger()"
     },
     {
@@ -7786,8 +7775,8 @@
       "source_location": "L462",
       "_origin": "ast",
       "id": "src_lib_utils_tostringvalue",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "tostringvalue()"
     },
     {
@@ -7797,8 +7786,8 @@
       "source_location": "L472",
       "_origin": "ast",
       "id": "src_lib_utils_parseintegerflagvalue",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 8,
+      "community_name": "CLI Command Handlers",
       "norm_label": "parseintegerflagvalue()"
     },
     {
@@ -7907,8 +7896,8 @@
       "source_location": "L634",
       "_origin": "ast",
       "id": "src_lib_utils_toredactederror",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "toredactederror()"
     },
     {
@@ -7929,8 +7918,8 @@
       "source_location": "L644",
       "_origin": "ast",
       "id": "src_lib_utils_gettaskdefinitionid",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "gettaskdefinitionid()"
     },
     {
@@ -7940,8 +7929,8 @@
       "source_location": "L653",
       "_origin": "ast",
       "id": "src_lib_utils_gettaskabbreviation",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "gettaskabbreviation()"
     },
     {
@@ -7951,8 +7940,8 @@
       "source_location": "L662",
       "_origin": "ast",
       "id": "src_lib_utils_gettaskname",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "gettaskname()"
     },
     {
@@ -7962,8 +7951,8 @@
       "source_location": "L667",
       "_origin": "ast",
       "id": "src_lib_utils_gettaskduedate",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "gettaskduedate()"
     },
     {
@@ -7973,8 +7962,8 @@
       "source_location": "L672",
       "_origin": "ast",
       "id": "src_lib_utils_gettaskcompletiondate",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "gettaskcompletiondate()"
     },
     {
@@ -7984,8 +7973,8 @@
       "source_location": "L677",
       "_origin": "ast",
       "id": "src_lib_utils_gettaskstatus",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "gettaskstatus()"
     },
     {
@@ -7995,8 +7984,8 @@
       "source_location": "L682",
       "_origin": "ast",
       "id": "src_lib_utils_issametask",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "issametask()"
     },
     {
@@ -8006,8 +7995,8 @@
       "source_location": "L689",
       "_origin": "ast",
       "id": "src_lib_utils_findtaskbydefinitionid",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "findtaskbydefinitionid()"
     },
     {
@@ -8017,8 +8006,8 @@
       "source_location": "L700",
       "_origin": "ast",
       "id": "src_lib_utils_findtaskbylegacyid",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "findtaskbylegacyid()"
     },
     {
@@ -8028,8 +8017,8 @@
       "source_location": "L721",
       "_origin": "ast",
       "id": "src_lib_utils_findtaskbyabbr",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "findtaskbyabbr()"
     },
     {
@@ -8061,8 +8050,8 @@
       "source_location": "L769",
       "_origin": "ast",
       "id": "src_lib_utils_parsetaskbatchselectorargs",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 3,
+      "community_name": "Shared Utility Helpers",
       "norm_label": "parsetaskbatchselectorargs()"
     },
     {
@@ -8072,8 +8061,8 @@
       "source_location": "L822",
       "_origin": "ast",
       "id": "src_lib_utils_parsetaskselectorargs",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 3,
+      "community_name": "Shared Utility Helpers",
       "norm_label": "parsetaskselectorargs()"
     },
     {
@@ -8083,8 +8072,8 @@
       "source_location": "L843",
       "_origin": "ast",
       "id": "src_lib_utils_toresolvedtaskselector",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "toresolvedtaskselector()"
     },
     {
@@ -8094,8 +8083,8 @@
       "source_location": "L869",
       "_origin": "ast",
       "id": "src_lib_utils_resolvetaskselector",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "resolvetaskselector()"
     },
     {
@@ -8105,8 +8094,8 @@
       "source_location": "L926",
       "_origin": "ast",
       "id": "src_lib_utils_resolvetaskbatchselector",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "resolvetaskbatchselector()"
     },
     {
@@ -8116,8 +8105,8 @@
       "source_location": "L1000",
       "_origin": "ast",
       "id": "src_lib_utils_filtertasksbystatus",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "filtertasksbystatus()"
     },
     {
@@ -8204,8 +8193,8 @@
       "source_location": "L1069",
       "_origin": "ast",
       "id": "src_lib_utils_getfeedbacktext",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "getfeedbacktext()"
     },
     {
@@ -8248,8 +8237,8 @@
       "source_location": "L1133",
       "_origin": "ast",
       "id": "src_lib_utils_getlatestfeedbacktimestamp",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "getlatestfeedbacktimestamp()"
     },
     {
@@ -8270,8 +8259,8 @@
       "source_location": "L1173",
       "_origin": "ast",
       "id": "src_lib_utils_makewatchtaskkey",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "makewatchtaskkey()"
     },
     {
@@ -8281,8 +8270,8 @@
       "source_location": "L1178",
       "_origin": "ast",
       "id": "src_lib_utils_towatchstatemap",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 3,
+      "community_name": "Shared Utility Helpers",
       "norm_label": "towatchstatemap()"
     },
     {
@@ -8292,8 +8281,8 @@
       "source_location": "L1186",
       "_origin": "ast",
       "id": "src_lib_utils_diffwatchstates",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 3,
+      "community_name": "Shared Utility Helpers",
       "norm_label": "diffwatchstates()"
     },
     {
@@ -8336,8 +8325,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_welcome",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "welcome.ts"
     },
     {
@@ -8347,8 +8336,8 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "src_lib_welcome_welcomemenuitem",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "welcomemenuitem"
     },
     {
@@ -8358,8 +8347,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "src_lib_welcome_base_welcome_menu",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "base_welcome_menu"
     },
     {
@@ -8369,8 +8358,8 @@
       "source_location": "L115",
       "_origin": "ast",
       "id": "src_lib_welcome_getwelcomemenuitems",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "getwelcomemenuitems()"
     },
     {
@@ -8380,8 +8369,8 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "src_lib_welcome_parsewelcomeselection",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "parsewelcomeselection()"
     },
     {
@@ -8490,8 +8479,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_api_test",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "api.test.ts"
     },
     {
@@ -8501,8 +8490,8 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "test_api_test_session",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "session"
     },
     {
@@ -8512,8 +8501,8 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "test_api_test_mockfetch",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "mockfetch()"
     },
     {
@@ -8524,7 +8513,7 @@
       "_origin": "ast",
       "id": "test_auth_broker_test",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "auth-broker.test.ts"
     },
     {
@@ -8535,7 +8524,7 @@
       "_origin": "ast",
       "id": "test_auth_broker_test_expiredsession",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "expiredsession"
     },
     {
@@ -8546,7 +8535,7 @@
       "_origin": "ast",
       "id": "test_auth_broker_test_dependencies",
       "community": 14,
-      "community_name": "Auth Session Capture",
+      "community_name": "Auth Broker Service",
       "norm_label": "dependencies()"
     },
     {
@@ -8578,8 +8567,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_auth_runtime_test",
-      "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community": 11,
+      "community_name": "Session Lock Management",
       "norm_label": "auth-runtime.test.ts"
     },
     {
@@ -8589,8 +8578,8 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "test_auth_runtime_test_basesession",
-      "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community": 11,
+      "community_name": "Session Lock Management",
       "norm_label": "basesession"
     },
     {
@@ -8600,8 +8589,8 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "test_auth_runtime_test_freshsession",
-      "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community": 11,
+      "community_name": "Session Lock Management",
       "norm_label": "freshsession()"
     },
     {
@@ -8611,8 +8600,8 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "test_auth_runtime_test_createadapter",
-      "community": 16,
-      "community_name": "Auth Runtime Orchestration",
+      "community": 11,
+      "community_name": "Session Lock Management",
       "norm_label": "createadapter()"
     },
     {
@@ -8622,8 +8611,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_auth_test",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "auth.test.ts"
     },
     {
@@ -8633,8 +8622,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "test_auth_test_legacy",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 49,
+      "community_name": "Core Domain Types",
       "norm_label": "legacy"
     },
     {
@@ -8787,8 +8776,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_command_input_test",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "command-input.test.ts"
     },
     {
@@ -8798,8 +8787,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "test_command_input_test_taskshow",
-      "community": 6,
-      "community_name": "Agent Command Specs",
+      "community": 47,
+      "community_name": "Structured Command Input",
       "norm_label": "taskshow"
     },
     {
@@ -8810,7 +8799,7 @@
       "_origin": "ast",
       "id": "test_command_spec_test",
       "community": 6,
-      "community_name": "Agent Command Specs",
+      "community_name": "Agent Command Specifications",
       "norm_label": "command-spec.test.ts"
     },
     {
@@ -8909,7 +8898,7 @@
       "_origin": "ast",
       "id": "test_discovery_test",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "discovery.test.ts"
     },
     {
@@ -8920,7 +8909,7 @@
       "_origin": "ast",
       "id": "test_discovery_test_session",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "session"
     },
     {
@@ -8931,7 +8920,7 @@
       "_origin": "ast",
       "id": "test_discovery_test_listprojects",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "listprojects()"
     },
     {
@@ -8942,7 +8931,7 @@
       "_origin": "ast",
       "id": "test_discovery_test_probeget",
       "community": 9,
-      "community_name": "API Path Discovery",
+      "community_name": "API Endpoint Discovery",
       "norm_label": "probeget()"
     },
     {
@@ -8952,8 +8941,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_execution_journal_test",
-      "community": 4,
-      "community_name": "Agent Protocol Schema",
+      "community": 48,
+      "community_name": "Execution Journal",
       "norm_label": "execution-journal.test.ts"
     },
     {
@@ -8975,7 +8964,7 @@
       "_origin": "ast",
       "id": "test_planner_test",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "planner.test.ts"
     },
     {
@@ -8986,7 +8975,7 @@
       "_origin": "ast",
       "id": "test_planner_test_plannerproject",
       "community": 2,
-      "community_name": "Task Planner Model",
+      "community_name": "Task Planner Models",
       "norm_label": "plannerproject()"
     },
     {
@@ -8997,7 +8986,7 @@
       "_origin": "ast",
       "id": "test_student_task_view_test",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "student-task-view.test.ts"
     },
     {
@@ -9008,7 +8997,7 @@
       "_origin": "ast",
       "id": "test_student_task_view_test_emptyinstanceproject",
       "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community_name": "Student Task View",
       "norm_label": "emptyinstanceproject()"
     },
     {
@@ -9018,8 +9007,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_submission_lifecycle_test",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submission-lifecycle.test.ts"
     },
     {
@@ -9029,8 +9018,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "test_submission_lifecycle_test_submissiontask",
-      "community": 45,
-      "community_name": "Student Task Domain Types",
+      "community": 46,
+      "community_name": "Submission Lifecycle",
       "norm_label": "submissiontask()"
     },
     {
@@ -9062,8 +9051,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_utils_coverage_test",
-      "community": 3,
-      "community_name": "Shared Utility Helpers",
+      "community": 19,
+      "community_name": "Task Utility Helpers",
       "norm_label": "utils-coverage.test.ts"
     },
     {
@@ -9106,8 +9095,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_welcome_test",
-      "community": 0,
-      "community_name": "CLI Terminal Interface",
+      "community": 38,
+      "community_name": "Welcome Login Menu",
       "norm_label": "welcome.test.ts"
     },
     {
@@ -10855,7 +10844,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L68",
+      "source_location": "L60",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock",
@@ -10866,7 +10855,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L98",
+      "source_location": "L90",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock",
@@ -10888,7 +10877,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L32",
+      "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock",
@@ -10899,7 +10888,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L110",
+      "source_location": "L102",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock",
@@ -10910,7 +10899,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L124",
+      "source_location": "L116",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock",
@@ -10921,22 +10910,11 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L36",
+      "source_location": "L28",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock",
       "target": "scripts_check_skill_lock_parselock",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L24",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "scripts_check_skill_lock",
-      "target": "scripts_check_skill_lock_parseroot",
       "confidence_score": 1.0
     },
     {
@@ -10966,19 +10944,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L125",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "scripts_check_skill_lock_main",
-      "target": "scripts_check_skill_lock_parseroot",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L37",
+      "source_location": "L29",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock_parselock",
@@ -10990,7 +10956,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L129",
+      "source_location": "L124",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock_main",
@@ -11002,7 +10968,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L99",
+      "source_location": "L91",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock_computeskillfolderhash",
@@ -11014,7 +10980,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L147",
+      "source_location": "L142",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock_main",
@@ -11026,7 +10992,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/check-skill-lock.ts",
-      "source_location": "L133",
+      "source_location": "L128",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_check_skill_lock_main",
@@ -37580,5 +37546,5 @@
       "source_file": "docs/CI_CD_DESIGN.md"
     }
   ],
-  "built_at_commit": "bcc360e2d8648757abda15805a49dcac1c54eed8"
+  "built_at_commit": "6ca7c78a7273c8559c8cb140299cabb16dbb1ec8"
 }
