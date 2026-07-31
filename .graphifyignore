@@ -1,0 +1,38 @@
+# Agent tooling is installed alongside the product but is not product architecture.
+.agents/
+.codex/
+.pi/
+AGENTS.md
+docs/agents/
+skills-lock.json
+
+# Generated knowledge-graph artifacts are rebuilt locally.
+graphify-out/
+
+# User/course artifacts are not part of the CLI codebase and must not be indexed.
+downloads/
+always-ontrack-logo.png
+
+# Credentials and browser-auth artifacts must never enter the graph.
+**/.env*
+!**/.env.example
+**/.npmrc
+**/.auth/
+**/playwright/.auth/
+**/*storage-state*.json
+**/*browser-state*.json
+**/*session-state*.json
+**/ontrack-cli/session.json
+**/ontrack-cli/.session.json.tmp-*
+**/test-results/
+**/playwright-report/
+**/traces/
+**/trace.zip
+**/*.trace.zip
+**/*.pem
+**/*.key
+
+# Build and dependency outputs.
+node_modules/
+dist/
+coverage/

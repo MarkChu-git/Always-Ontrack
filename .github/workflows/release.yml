@@ -76,6 +76,7 @@ jobs:
 
       - name: Typecheck, test, audit, and build
         run: |
+          bun run skills:check
           bun run typecheck
           bun run test:coverage
           bun audit

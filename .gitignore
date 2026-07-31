@@ -1,5 +1,37 @@
 node_modules/
 dist/
 coverage/
+test-results/
+playwright-report/
+traces/
+downloads/
+always-ontrack-logo.png
+
+# Local credentials and browser-auth artifacts.
+**/.env*
+!**/.env.example
+**/.npmrc
+**/.auth/
+**/playwright/.auth/
+**/*storage-state*.json
+**/*browser-state*.json
+**/*session-state*.json
+**/ontrack-cli/session.json
+**/ontrack-cli/.session.json.tmp-*
+**/trace.zip
+**/*.trace.zip
+**/*.pem
+**/*.key
+
+# Graphify's portable core graph is committed; machine-local state is not.
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/manifest.json
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.needs_update
+graphify-out/memory/
+graphify-out/reflections/
+graphify-out/20??-??-??/
 .DS_Store
 npm-debug.log*
