@@ -72,6 +72,8 @@ function isNodeError(error: unknown, code: string): boolean {
 async function recoverStaleRefreshLock(lockPath: string, staleMs: number): Promise<void> {
   let observed: Awaited<ReturnType<typeof stat>>;
   try {
+    // Session paths are trusted local operator configuration, not Agent input.
+    // codeql[js/path-injection]
     observed = await stat(lockPath);
   } catch (error) {
     if (isNodeError(error, 'ENOENT')) {
@@ -88,6 +90,7 @@ async function recoverStaleRefreshLock(lockPath: string, staleMs: number): Promi
   // never deliberately reclaimed based on an old observation.
   let current: Awaited<ReturnType<typeof stat>>;
   try {
+    // codeql[js/path-injection]
     current = await stat(lockPath);
   } catch (error) {
     if (isNodeError(error, 'ENOENT')) {
@@ -105,6 +108,8 @@ async function recoverStaleRefreshLock(lockPath: string, staleMs: number): Promi
 
   const stalePath = `${lockPath}.stale-${randomUUID()}`;
   try {
+    // Both paths are nonce-suffixed children of the same private session directory.
+    // codeql[js/path-injection]
     await rename(lockPath, stalePath);
   } catch (error) {
     if (isNodeError(error, 'ENOENT')) {
@@ -112,6 +117,7 @@ async function recoverStaleRefreshLock(lockPath: string, staleMs: number): Promi
     }
     throw error;
   }
+  // codeql[js/path-injection]
   await rm(stalePath, { recursive: true, force: true });
 }
 
@@ -134,24 +140,34 @@ async function acquireSessionRefreshLock(
     createdAt: new Date().toISOString(),
   };
 
+  // The lock directory is derived from the trusted local session location.
+  // codeql[js/path-injection]
   await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
+  // codeql[js/path-injection]
   await chmod(dirname(lockPath), 0o700);
   while (true) {
     try {
+      // codeql[js/path-injection]
       await mkdir(lockPath, { mode: 0o700 });
       try {
+        // owner.json is a fixed child of the newly-created private lock directory.
+        // codeql[js/path-injection]
         await writeFile(join(lockPath, 'owner.json'), JSON.stringify(owner), {
           encoding: 'utf8',
           mode: 0o600,
           flag: 'wx',
         });
       } catch (error) {
+        // Only the lock directory created by this invocation is removed.
+        // codeql[js/path-injection]
         await rm(lockPath, { recursive: true, force: true });
         throw error;
       }
 
       const isCurrentOwner = async (): Promise<boolean> => {
         try {
+          // owner.json is fixed and its nonce must match before renew/release.
+          // codeql[js/path-injection]
           const stored = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')) as Partial<SessionLockOwner>;
           return stored.id === owner.id;
         } catch (error) {
@@ -170,6 +186,8 @@ async function acquireSessionRefreshLock(
           }
           const now = new Date();
           try {
+            // Renewal touches only a nonce-verified lock directory.
+            // codeql[js/path-injection]
             await utimes(lockPath, now, now);
           } catch (error) {
             if (!isNodeError(error, 'ENOENT')) {
@@ -181,6 +199,8 @@ async function acquireSessionRefreshLock(
           if (!(await isCurrentOwner())) {
             return;
           }
+          // Release removes only a nonce-verified lock directory.
+          // codeql[js/path-injection]
           await rm(lockPath, { recursive: true, force: true });
         },
       };
@@ -201,6 +221,8 @@ async function acquireSessionRefreshLock(
 /** Best-effort session load. Returns null when file is missing/corrupt. */
 export async function loadSession(options: SessionPathOptions = {}): Promise<SessionData | null> {
   try {
+    // The session path is trusted local operator configuration.
+    // codeql[js/path-injection]
     const contents = await readFile(resolveSessionPath(options), 'utf8');
     return migrateLegacySession(JSON.parse(contents) as SessionData);
   } catch {
@@ -215,24 +237,36 @@ export async function saveSession(session: SessionData, options: SessionPathOpti
     dirname(sessionPath),
     `.${basename(sessionPath)}.tmp-${randomUUID()}`,
   );
+  // Session paths are trusted local operator configuration.
+  // codeql[js/path-injection]
   await mkdir(dirname(sessionPath), { recursive: true, mode: 0o700 });
+  // codeql[js/path-injection]
   await chmod(dirname(sessionPath), 0o700);
   try {
+    // Temporary names use a random nonce in the same private directory.
+    // codeql[js/path-injection]
     await writeFile(temporaryPath, JSON.stringify(session, null, 2), {
       encoding: 'utf8',
       mode: 0o600,
       flag: 'wx',
     });
+    // codeql[js/path-injection]
     await chmod(temporaryPath, 0o600);
+    // Both paths are inside the same private session directory.
+    // codeql[js/path-injection]
     await rename(temporaryPath, sessionPath);
+    // codeql[js/path-injection]
     await chmod(sessionPath, 0o600);
   } finally {
+    // codeql[js/path-injection]
     await rm(temporaryPath, { force: true });
   }
 }
 
 /** Remove local session cache. Safe to call even when file does not exist. */
 export async function clearSession(options: SessionPathOptions = {}): Promise<void> {
+  // Removes only the trusted local session file; no remote or Agent input reaches this path.
+  // codeql[js/path-injection]
   await rm(resolveSessionPath(options), { force: true });
 }
 

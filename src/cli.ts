@@ -180,7 +180,7 @@ Usage:
   ontrack unit tasks --unit-id ID [--status STATUS] [--json]
   ontrack tasks [--project-id ID] [--status STATUS] [--json]
   ontrack doctor [--json]
-  ontrack discover [--site-url URL] [--base-url URL] [--probe] [--limit N] [--json]
+  ontrack discover [--probe] [--limit N] [--json]
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
@@ -2532,12 +2532,6 @@ async function handleDoctor(args: string[]): Promise<void> {
   );
 }
 
-/** Convert API base URL to browser site `/home` URL for discovery scraping. */
-function defaultSiteUrlFromBase(baseUrl: string): string {
-  const parsed = new URL(baseUrl);
-  return new URL('/home', `${parsed.origin}/`).toString();
-}
-
 /** Optional truncation helper for discovery output lists. */
 function applyLimit<T>(items: T[], limit?: number): T[] {
   if (limit === undefined) {
@@ -2561,8 +2555,7 @@ async function handleDiscover(args: string[]): Promise<void> {
     // Probe mode requires authenticated session and checks endpoint accessibility.
     const session = await requireSession();
     const api = createAuthenticatedApi(session);
-    const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(session.baseUrl);
-    const discovery = await discoverOnTrackSurface(siteUrl);
+    const discovery = await discoverOnTrackSurface();
     const apiTemplates = applyLimit(discovery.apiTemplates, limit);
     const projects = await loadProjectsWithTaskMetadata(api, session);
     const firstProject = projects[0];
@@ -2609,9 +2602,7 @@ async function handleDiscover(args: string[]): Promise<void> {
   }
 
   // Non-probe mode is fully public/static: scrape route/api literals from web assets only.
-  const baseUrl = normalizeBaseUrl(getFlagValue(args, '--base-url'));
-  const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(baseUrl);
-  const discovery = await discoverOnTrackSurface(siteUrl);
+  const discovery = await discoverOnTrackSurface();
   const uiRoutes = applyLimit(discovery.uiRoutes, limit);
   const apiTemplates = applyLimit(discovery.apiTemplates, limit);
 

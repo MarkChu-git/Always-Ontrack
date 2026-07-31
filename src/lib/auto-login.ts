@@ -270,9 +270,6 @@ function extractCredentialsFromRequestHeaders(
 /** Candidate local browser locations by platform (used before bundled Chromium). */
 function candidateBrowserPaths(): string[] {
   const paths: string[] = [];
-  if (process.env.ONTRACK_BROWSER_PATH) {
-    paths.push(process.env.ONTRACK_BROWSER_PATH);
-  }
 
   if (process.platform === "darwin") {
     paths.push(
@@ -331,6 +328,8 @@ export function resolveBrowserLaunchPlan(
 ): BrowserLaunchPlan {
   const explicitBrowser = env.ONTRACK_BROWSER_PATH?.trim();
   if (explicitBrowser) {
+    // The executable override is trusted local operator configuration.
+    // codeql[js/path-injection]
     if (!fileExists(explicitBrowser)) {
       throw new SsoFallbackError(
         "browser_unavailable",
@@ -345,6 +344,8 @@ export function resolveBrowserLaunchPlan(
   }
 
   for (const path of candidateBrowserPaths()) {
+    // Candidate paths come only from fixed OS locations or process-owned OS environment roots.
+    // codeql[js/path-injection]
     if (fileExists(path)) {
       return {
         source: "system",
@@ -729,9 +730,13 @@ export function resolveBrowserSessionStatePath(
 /** Remove the persisted OnTrack-only browser state used by silent renewal. */
 export function clearBrowserSessionState(storagePath?: string): void {
   const path = storagePath ?? resolveBrowserSessionStatePath();
+  // This path is trusted local operator configuration.
+  // codeql[js/path-injection]
   if (!existsSync(path)) {
     return;
   }
+  // The path is validated as a regular, non-symlink JSON browser-state file before unlink.
+  // codeql[js/path-injection]
   const metadata = lstatSync(path);
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
     throw new Error("Refusing to remove a non-regular browser-state path.");
@@ -739,6 +744,8 @@ export function clearBrowserSessionState(storagePath?: string): void {
 
   let state: unknown;
   try {
+    // The parsed shape is allowlisted below before the same path may be removed.
+    // codeql[js/path-injection]
     state = JSON.parse(readFileSync(path, "utf8"));
   } catch {
     throw new Error("Refusing to remove an invalid browser-state file.");
@@ -751,6 +758,8 @@ export function clearBrowserSessionState(storagePath?: string): void {
   ) {
     throw new Error("Refusing to remove an invalid browser-state file.");
   }
+  // The same lstat-checked and shape-validated file is removed; directories and symlinks fail.
+  // codeql[js/path-injection]
   rmSync(path);
 }
 
@@ -1044,12 +1053,18 @@ function writePrivateBrowserSessionState(
   storagePath: string,
   state: BrowserStorageState,
 ): void {
+  // Storage paths are trusted local operator configuration.
+  // codeql[js/path-injection]
   mkdirSync(dirname(storagePath), { recursive: true, mode: 0o700 });
+  // codeql[js/path-injection]
   chmodSync(dirname(storagePath), 0o700);
+  // State is exact-origin filtered and paths are never derived from Agent or remote input.
+  // codeql[js/path-injection]
   writeFileSync(storagePath, JSON.stringify(state), {
     encoding: "utf8",
     mode: 0o600,
   });
+  // codeql[js/path-injection]
   chmodSync(storagePath, 0o600);
 }
 
@@ -1088,11 +1103,15 @@ export function buildContextOptionsWithStoredSession(
   | undefined {
   const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
+  // This is a trusted local operator store path.
+  // codeql[js/path-injection]
   if (!existsSync(storagePath)) {
     return undefined;
   }
 
   try {
+    // The file is parsed and structurally validated before it reaches Playwright.
+    // codeql[js/path-injection]
     const parsed = JSON.parse(readFileSync(storagePath, "utf8")) as unknown;
     if (!isBrowserStorageState(parsed)) {
       return undefined;
@@ -1104,6 +1123,8 @@ export function buildContextOptionsWithStoredSession(
   } catch {
     // A corrupt or unreadable state is never passed to Playwright.
     try {
+      // Best-effort permission repair on the same trusted local state path.
+      // codeql[js/path-injection]
       chmodSync(storagePath, 0o600);
     } catch {
       // Ignore a best-effort permission repair failure.

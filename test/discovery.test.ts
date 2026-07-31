@@ -28,22 +28,45 @@ test('discovery extraction normalizes paths and separates UI from API templates'
 });
 
 test('surface discovery records successful and failed assets without network access', async () => {
-  globalThis.fetch = (async (input: URL | RequestInfo) => {
+  const fetchedUrls: string[] = [];
+  globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
     const url = String(input);
-    if (url === 'https://example.test/home') {
-      return new Response('<script src="/ok.js"></script><script src="/bad.js"></script>');
+    fetchedUrls.push(url);
+    assert.equal(init?.redirect, 'error');
+    if (url === 'https://ontrack.infotech.monash.edu/home') {
+      return new Response(
+        [
+          '<script src="/ok.js"></script>',
+          '<script src="/bad.js"></script>',
+          '<script src="https://attacker.example/evil.js"></script>',
+          '<script src="//attacker.example/protocol-relative.js"></script>',
+          '<script src="http://ontrack.infotech.monash.edu/insecure.js"></script>',
+          '<script src="https://user:pass@ontrack.infotech.monash.edu/credentialed.js"></script>',
+        ].join(''),
+      );
     }
     if (url.endsWith('/ok.js')) {
       return new Response("'/tasks' '/api/projects/:projectId'");
     }
     return new Response('missing', { status: 404, statusText: 'Not Found' });
   }) as typeof fetch;
-  const result = await discoverOnTrackSurface('https://example.test/home');
-  assert.equal(result.assets.length, 2);
+  const result = await discoverOnTrackSurface();
+  assert.equal(result.assets.length, 6);
   assert.equal(result.assets[0].status, 'ok');
   assert.deepEqual(result.uiRoutes, ['/tasks']);
   assert.deepEqual(result.apiTemplates, ['/api/projects/:projectId']);
   assert.match(result.assets[1].detail || '', /404 Not Found/);
+  assert.equal(result.assets[2].status, 'error');
+  assert.match(result.assets[2].detail || '', /Cross-origin/);
+  assert.equal(result.assets[3].status, 'error');
+  assert.equal(result.assets[4].status, 'error');
+  assert.equal(result.assets[5].status, 'error');
+  assert.deepEqual(fetchedUrls, [
+    'https://ontrack.infotech.monash.edu/home',
+    'https://ontrack.infotech.monash.edu/ok.js',
+    'https://ontrack.infotech.monash.edu/bad.js',
+  ]);
+  assert.equal(result.siteUrl, 'https://ontrack.infotech.monash.edu/home');
 });
 
 test('probing materializes known params and reports unresolved/error result states', async () => {

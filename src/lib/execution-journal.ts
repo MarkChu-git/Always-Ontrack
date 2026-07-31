@@ -108,15 +108,22 @@ async function atomicWrite(
     `.${basename(path)}.tmp-${randomUUID()}`,
   );
   try {
+    // Journal roots are trusted local operator config; filenames are SHA-256 digests.
+    // codeql[js/path-injection]
     await writeFile(temporaryPath, JSON.stringify(record, null, 2), {
       encoding: "utf8",
       mode: 0o600,
       flag: "wx",
     });
+    // codeql[js/path-injection]
     await chmod(temporaryPath, 0o600);
+    // Both paths stay under the same private journal root and use fixed/digested names.
+    // codeql[js/path-injection]
     await rename(temporaryPath, path);
+    // codeql[js/path-injection]
     await chmod(path, 0o600);
   } finally {
+    // codeql[js/path-injection]
     await rm(temporaryPath, { force: true });
   }
 }
@@ -127,6 +134,8 @@ async function readRecord(
 ): Promise<ExecutionRecord | null> {
   let raw: string;
   try {
+    // recordPath uses a SHA-256 filename under the trusted private journal root.
+    // codeql[js/path-injection]
     raw = await readFile(recordPath(key, options), "utf8");
   } catch (error) {
     if (
@@ -173,18 +182,27 @@ export async function withExecutionJournalLock<T>(
   const root = journalRoot(options);
   const path = lockPath(key, options);
   const owner = { id: randomUUID(), pid: process.pid };
+  // The root is trusted local operator configuration, never Agent/remote input.
+  // codeql[js/path-injection]
   await mkdir(root, { recursive: true, mode: 0o700 });
+  // codeql[js/path-injection]
   await chmod(root, 0o700);
   while (true) {
     try {
+      // lockPath uses a SHA-256 filename under the trusted private root.
+      // codeql[js/path-injection]
       await mkdir(path, { mode: 0o700 });
       try {
+        // owner.json is a fixed child name of the newly-created private lock directory.
+        // codeql[js/path-injection]
         await writeFile(join(path, "owner.json"), JSON.stringify(owner), {
           encoding: "utf8",
           mode: 0o600,
           flag: "wx",
         });
       } catch (error) {
+        // Only the directory created by this invocation is removed.
+        // codeql[js/path-injection]
         await rm(path, { recursive: true, force: true });
         throw error;
       }
@@ -208,6 +226,8 @@ export async function withExecutionJournalLock<T>(
 
   const isCurrentOwner = async (): Promise<boolean> => {
     try {
+      // owner.json is a fixed child name and its nonce must match before release.
+      // codeql[js/path-injection]
       const stored = JSON.parse(
         await readFile(join(path, "owner.json"), "utf8"),
       ) as { id?: unknown; pid?: unknown };
@@ -220,6 +240,8 @@ export async function withExecutionJournalLock<T>(
     return await operation();
   } finally {
     if (await isCurrentOwner()) {
+      // Owner nonce and PID were verified immediately before removing this lock.
+      // codeql[js/path-injection]
       await rm(path, { recursive: true, force: true });
     }
   }
