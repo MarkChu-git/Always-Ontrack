@@ -181,6 +181,8 @@ token，再尝试从受限浏览器状态静默刷新。如果 Monash 策略要�
 challenge，它会返回结构化 human handoff。用户在场时可以改用
 `interaction: "if_required"`，此时最多开启一次可见浏览器流程；用户完成
 Monash 控制的验证后，Agent 继续工作。
+默认剩余有效期门槛为 60 秒；特定操作需要更长时间时，可传入
+`min_ttl_seconds`（或 CLI 的 `--min-ttl-seconds`）。
 
 CLI 使用同一个生命周期。读请求被拒绝时最多静默刷新并安全重放一次；写请求
 永远不会被自动重放。
@@ -717,7 +719,7 @@ ontrack tasks --project-id 87 --json
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | 覆盖默认 API base URL | 默认值为 Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | 指定自动登录用的浏览器可执行文件 | 当自动探测浏览器失败时使用 |
-| `ONTRACK_BROWSER_STATE_PATH` | 覆盖浏览器会话状态文件路径 | 登录时用于复用 cookies/localStorage |
+| `ONTRACK_BROWSER_STATE_PATH` | 覆盖浏览器会话状态文件路径 | 静默复用仅接受 canonical 路径仍位于当前 operator home 内的文件 |
 | `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | 显式允许读取系统浏览器 profile 以发现凭据 | 默认关闭；请勿用于共享/不受信任 profile |
 | `ONTRACK_BROWSER_USER_DATA_DIR` | 覆盖 Chromium/Chrome 用户数据根目录 | 仅在显式启用 profile 复用时生效 |
 | `ONTRACK_BROWSER_PROFILE_DIR` | 覆盖用户数据目录下的 profile 名称 | 仅在显式启用时生效；默认 `Default` |

@@ -1,14 +1,21 @@
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  realpathSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type {
   Browser,
@@ -693,6 +700,8 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
+  /** Trusted adapter seam for isolating live-profile policy in tests. */
+  systemBrowserProfileReuseEnabled?: () => boolean;
 }
 
 /** Candidate system browser profile location used for direct session reuse probe. */
@@ -727,9 +736,310 @@ export function resolveBrowserSessionStatePath(
   return join(home, ".config", "ontrack-cli", "browser-state.json");
 }
 
+let browserSessionStatePathForTests: string | undefined;
+
+/** @internal Isolate browser-state filesystem tests without production env paths. */
+export function setBrowserSessionStatePathForTests(
+  storagePath: string | undefined,
+): void {
+  browserSessionStatePathForTests = storagePath
+    ? resolve(storagePath)
+    : undefined;
+}
+
+/**
+ * Credential-bearing browser state always uses one operator-owned path. It
+ * intentionally ignores environment path overrides so Agent or service
+ * configuration cannot redirect authentication file I/O.
+ */
+function resolveManagedBrowserSessionStatePath(): string {
+  if (browserSessionStatePathForTests) {
+    return browserSessionStatePathForTests;
+  }
+  const home = homedir();
+  return process.platform === "win32"
+    ? join(home, "AppData", "Roaming", "ontrack-cli", "browser-state.json")
+    : join(home, ".config", "ontrack-cli", "browser-state.json");
+}
+
+/**
+ * Resolve the private directory containing an existing browser-state file.
+ * The filename is fixed and the directory is canonicalized inside the local
+ * operator's home before any atomic state operation receives it.
+ */
+function resolveTrustedExistingBrowserSessionStateLocation(
+  targetOrigin: string,
+): {
+  stateDirectory: string;
+  storagePath: string;
+  directoryDevice: number;
+  directoryInode: number;
+} | null {
+  const trustedRoot = realpathSync(homedir());
+  const configuredPath = resolve(resolveManagedBrowserSessionStatePath());
+  if (basename(configuredPath) !== "browser-state.json") {
+    throw new Error(
+      "Refusing to reuse a browser-state file with an unexpected name.",
+    );
+  }
+
+  let stateDirectory: string;
+  try {
+    stateDirectory = realpathSync(dirname(configuredPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+
+  const trustedPrefix = `${trustedRoot}${sep}`;
+  if (
+    stateDirectory !== trustedRoot &&
+    !stateDirectory.startsWith(trustedPrefix)
+  ) {
+    throw new Error(
+      "Refusing to reuse browser state outside the local operator home.",
+    );
+  }
+  const directoryMetadata = lstatSync(stateDirectory);
+  if (
+    !directoryMetadata.isDirectory() ||
+    directoryMetadata.isSymbolicLink() ||
+    (process.platform !== "win32" && (directoryMetadata.mode & 0o077) !== 0) ||
+    (typeof process.getuid === "function" &&
+      directoryMetadata.uid !== process.getuid())
+  ) {
+    throw new Error(
+      "Refusing to reuse browser state from a non-private directory.",
+    );
+  }
+  const storagePath = join(stateDirectory, "browser-state.json");
+  const location: TrustedBrowserSessionStateLocation = {
+    stateDirectory,
+    storagePath,
+    directoryDevice: directoryMetadata.dev,
+    directoryInode: directoryMetadata.ino,
+  };
+  let storageMetadata: ReturnType<typeof lstatSync>;
+  try {
+    storageMetadata = lstatSync(storagePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (!recoverOrphanedBrowserSessionState(location, targetOrigin)) {
+        return null;
+      }
+      // The recovered generation was already descriptor-validated. A
+      // concurrent process may claim it immediately; the atomic rename below
+      // treats that normal hand-off as a cache miss instead of surfacing ENOENT.
+      return location;
+    } else {
+      throw error;
+    }
+  }
+  if (!storageMetadata.isFile() || storageMetadata.isSymbolicLink()) {
+    throw new Error(
+      "Refusing to reuse a non-regular browser-state file.",
+    );
+  }
+  return location;
+}
+
+interface TrustedBrowserSessionStateLocation {
+  stateDirectory: string;
+  storagePath: string;
+  directoryDevice: number;
+  directoryInode: number;
+}
+
+const ORPHANED_BROWSER_STATE_MIN_AGE_MS = 5_000;
+
+function assertTrustedBrowserSessionStateDirectory(
+  location: TrustedBrowserSessionStateLocation,
+): void {
+  const canonicalDirectory = realpathSync(location.stateDirectory);
+  const metadata = lstatSync(canonicalDirectory);
+  if (
+    canonicalDirectory !== location.stateDirectory ||
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    metadata.dev !== location.directoryDevice ||
+    metadata.ino !== location.directoryInode ||
+    (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) ||
+    (typeof process.getuid === "function" && metadata.uid !== process.getuid())
+  ) {
+    throw new Error(
+      "Browser-state directory identity or private permissions changed.",
+    );
+  }
+}
+
+function recoverOrphanedBrowserSessionState(
+  location: TrustedBrowserSessionStateLocation,
+  targetOrigin: string,
+): boolean {
+  assertTrustedBrowserSessionStateDirectory(location);
+  const orphanCutoff = Date.now() - ORPHANED_BROWSER_STATE_MIN_AGE_MS;
+  const candidates = readdirSync(location.stateDirectory)
+    .filter((name) =>
+      /^browser-state\.json\.probe-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        name,
+      ),
+    )
+    .flatMap((name) => {
+      const path = join(location.stateDirectory, name);
+      try {
+        const metadata = lstatSync(path);
+        return metadata.isFile() &&
+          !metadata.isSymbolicLink() &&
+          metadata.mtimeMs <= orphanCutoff
+          ? [{
+              path,
+              modifiedAt: metadata.mtimeMs,
+              dev: metadata.dev,
+              ino: metadata.ino,
+            }]
+          : [];
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.modifiedAt - left.modifiedAt);
+
+  for (const candidate of candidates) {
+    assertTrustedBrowserSessionStateDirectory(location);
+    let descriptor: number | undefined;
+    let state: BrowserStorageState | undefined;
+    try {
+      const pathMetadata = lstatSync(candidate.path);
+      descriptor = openSync(
+        candidate.path,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      );
+      const descriptorMetadata = fstatSync(descriptor);
+      if (
+        pathMetadata.isFile() &&
+        !pathMetadata.isSymbolicLink() &&
+        descriptorMetadata.isFile() &&
+        pathMetadata.dev === descriptorMetadata.dev &&
+        pathMetadata.ino === descriptorMetadata.ino
+      ) {
+        const parsed = JSON.parse(readFileSync(descriptor, "utf8")) as unknown;
+        if (isBrowserStorageState(parsed)) {
+          const filtered = filterBrowserSessionState(parsed, targetOrigin);
+          if (hasReusableBrowserSessionState(filtered)) {
+            state = filtered;
+          }
+        }
+      }
+    } catch {
+      state = undefined;
+    } finally {
+      if (descriptor !== undefined) {
+        closeSync(descriptor);
+      }
+    }
+    if (state) {
+      writeBrowserSessionStateIfAbsent(location, state);
+    }
+    removeBrowserSessionStateEntryIfSame(
+      location,
+      candidate.path,
+      candidate,
+    );
+    if (state) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function removeBrowserSessionStateEntryIfSame(
+  location: TrustedBrowserSessionStateLocation,
+  path: string,
+  expected: {
+    dev: number;
+    ino: number;
+  },
+): boolean {
+  assertTrustedBrowserSessionStateDirectory(location);
+  let current: ReturnType<typeof lstatSync>;
+  try {
+    current = lstatSync(path);
+  } catch {
+    return false;
+  }
+  if (
+    current.isSymbolicLink() ||
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino
+  ) {
+    return false;
+  }
+  rmSync(path);
+  return true;
+}
+
+function writeBrowserSessionStateIfAbsent(
+  location: TrustedBrowserSessionStateLocation,
+  state: BrowserStorageState,
+): void {
+  const serialized = JSON.stringify(state);
+  assertTrustedBrowserSessionStateDirectory(location);
+  let descriptor: number;
+  try {
+    descriptor = openSync(
+      location.storagePath,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // A concurrent process already published a newer generation.
+      return;
+    }
+    throw new Error(
+      `Unable to restore private browser state: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  const descriptorMetadata = fstatSync(descriptor);
+  let writeFailure: unknown;
+  try {
+    writeFileSync(descriptor, serialized, "utf8");
+  } catch (error) {
+    writeFailure = error;
+  }
+  try {
+    closeSync(descriptor);
+  } catch (error) {
+    writeFailure ??= error;
+  }
+  if (writeFailure !== undefined) {
+    const removed = removeBrowserSessionStateEntryIfSame(
+      location,
+      location.storagePath,
+      descriptorMetadata,
+    );
+    throw new Error(
+      `Unable to write private browser state${
+        removed ? "" : " and safely remove the partial file"
+      }: ${
+        writeFailure instanceof Error
+          ? writeFailure.message
+          : String(writeFailure)
+      }`,
+    );
+  }
+}
+
 /** Remove the persisted OnTrack-only browser state used by silent renewal. */
 export function clearBrowserSessionState(storagePath?: string): void {
-  const path = storagePath ?? resolveBrowserSessionStatePath();
+  const path = storagePath ?? resolveManagedBrowserSessionStatePath();
   // This path is trusted local operator configuration.
   // codeql[js/path-injection]
   if (!existsSync(path)) {
@@ -761,6 +1071,46 @@ export function clearBrowserSessionState(storagePath?: string): void {
   // The same lstat-checked and shape-validated file is removed; directories and symlinks fail.
   // codeql[js/path-injection]
   rmSync(path);
+}
+
+/**
+ * Clear the managed browser credential store plus a safe legacy configured
+ * location from pre-managed releases. Legacy cleanup is restricted to the
+ * current operator home and never follows a final-component symlink.
+ */
+export function clearAllBrowserSessionState(): void {
+  clearBrowserSessionState();
+  const managedPath = resolve(resolveManagedBrowserSessionStatePath());
+  const legacyPath = resolve(resolveBrowserSessionStatePath());
+  const trustedRoot = realpathSync(homedir());
+  const trustedPrefix = `${trustedRoot}${sep}`;
+  if (
+    legacyPath === managedPath ||
+    basename(legacyPath) !== "browser-state.json"
+  ) {
+    return;
+  }
+  let legacyDirectory: string;
+  try {
+    legacyDirectory = realpathSync(dirname(legacyPath));
+  } catch {
+    return;
+  }
+  if (
+    legacyDirectory !== trustedRoot &&
+    !legacyDirectory.startsWith(trustedPrefix)
+  ) {
+    return;
+  }
+  const canonicalLegacyPath = join(
+    legacyDirectory,
+    "browser-state.json",
+  );
+  try {
+    clearBrowserSessionState(canonicalLegacyPath);
+  } catch {
+    // Legacy cleanup is best effort and must not undo managed-state removal.
+  }
 }
 
 /**
@@ -1038,15 +1388,25 @@ function filterBrowserSessionState(
 ): BrowserStorageState {
   const target = new URL(targetOrigin);
   const targetHostname = target.hostname.toLowerCase();
+  const nowSeconds = Date.now() / 1000;
   const cookies = state.cookies.filter(
     (cookie) =>
-      cookie.domain.trim().toLowerCase().replace(/^\./, "") === targetHostname,
+      cookie.domain.trim().toLowerCase().replace(/^\./, "") === targetHostname &&
+      (cookie.expires === -1 || cookie.expires > nowSeconds),
   );
   const origins = state.origins.filter(
     (origin) => origin.origin === target.origin,
   );
 
   return { cookies, origins };
+}
+
+function hasReusableBrowserSessionState(state: BrowserStorageState): boolean {
+  const hasLocalStorage = state.origins.some(
+    (origin) => origin.localStorage.length > 0,
+  );
+
+  return state.cookies.length > 0 || hasLocalStorage;
 }
 
 function writePrivateBrowserSessionState(
@@ -1080,13 +1440,17 @@ export async function saveBrowserSessionState(
   },
   options: SaveBrowserSessionStateOptions = {},
 ): Promise<void> {
-  const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
+  const storagePath =
+    options.storagePath ?? resolveManagedBrowserSessionStatePath();
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
   const state = await context.storageState();
   const filtered = filterBrowserSessionState(
     isBrowserStorageState(state) ? state : { cookies: [], origins: [] },
     targetOrigin,
   );
+  if (!hasReusableBrowserSessionState(filtered)) {
+    return;
+  }
   writePrivateBrowserSessionState(storagePath, filtered);
 }
 
@@ -1101,7 +1465,8 @@ export function buildContextOptionsWithStoredSession(
       storageState: BrowserStorageState;
     }
   | undefined {
-  const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
+  const storagePath =
+    options.storagePath ?? resolveManagedBrowserSessionStatePath();
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
   // This is a trusted local operator store path.
   // codeql[js/path-injection]
@@ -1117,6 +1482,9 @@ export function buildContextOptionsWithStoredSession(
       return undefined;
     }
     const filtered = filterBrowserSessionState(parsed, targetOrigin);
+    if (!hasReusableBrowserSessionState(filtered)) {
+      return undefined;
+    }
     // Migrate legacy full-state files before a browser context ever receives them.
     writePrivateBrowserSessionState(storagePath, filtered);
     return { storageState: filtered };
@@ -2725,20 +3093,27 @@ async function captureSsoCredentialsInternal(
 export async function captureCredentialsFromStoredBrowserSession(
   options: AutoLoginOptions,
 ): Promise<LoginCredentials | null> {
-  const timeoutMs = Math.max(3000, options.timeoutMs ?? 12_000);
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 12_000);
+  const deadline = Date.now() + timeoutMs;
   const fromStoredState = await captureCredentialsFromPersistedStateFile(
     options,
-    timeoutMs,
+    Math.max(0, deadline - Date.now()),
   );
   if (fromStoredState) {
     return fromStoredState;
   }
 
-  if (!isSystemBrowserProfileReuseEnabled()) {
+  const profileReuseEnabled =
+    options.systemBrowserProfileReuseEnabled?.() ??
+    isSystemBrowserProfileReuseEnabled();
+  if (!profileReuseEnabled) {
     return null;
   }
 
-  return captureCredentialsFromSystemBrowserProfile(options, timeoutMs);
+  return captureCredentialsFromSystemBrowserProfile(
+    options,
+    Math.max(0, deadline - Date.now()),
+  );
 }
 
 /** Common probe routine shared by persisted-state and live-profile session reuse paths. */
@@ -2749,6 +3124,7 @@ async function probeCredentialsInOpenContext(
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
   const targetOrigin = new URL(options.apiBaseUrl).origin;
+  const deadline = Date.now() + timeoutMs;
   let capturedFromRequestHeaders: LoginCredentials | null = null;
 
   page.on("request", (...args: unknown[]) => {
@@ -2798,7 +3174,7 @@ async function probeCredentialsInOpenContext(
 
   const candidates = [`${targetOrigin}/home`, options.ssoUrl];
   for (const candidate of candidates) {
-    const remaining = timeoutMs - 1000;
+    const remaining = deadline - Date.now();
     if (remaining <= 0) {
       break;
     }
@@ -2817,16 +3193,147 @@ async function probeCredentialsInOpenContext(
     }
   }
 
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() < deadline) {
     const maybe = await checkCaptured();
     if (maybe) {
       return maybe;
     }
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(400, remaining)));
+    }
   }
 
   return null;
+}
+
+interface ClaimedBrowserSessionState {
+  location: TrustedBrowserSessionStateLocation;
+  contextOptions: {
+    storageState: BrowserStorageState;
+  };
+}
+
+/**
+ * Restore a validated in-memory generation without overwriting a concurrently
+ * published state. Exclusive creation never follows an existing symlink.
+ */
+function restoreClaimedBrowserSessionState(
+  claim: ClaimedBrowserSessionState,
+): void {
+  writeBrowserSessionStateIfAbsent(
+    claim.location,
+    claim.contextOptions.storageState,
+  );
+}
+
+/**
+ * Atomically move one persisted state generation out of the shared path before
+ * reading it through a no-follow descriptor. The random directory entry is
+ * removed before browser launch, leaving only an in-memory validated state.
+ */
+function claimBrowserSessionState(
+  targetOrigin: string,
+): ClaimedBrowserSessionState | null {
+  const location =
+    resolveTrustedExistingBrowserSessionStateLocation(targetOrigin);
+  if (!location) {
+    return null;
+  }
+  const claimedPath = join(
+    location.stateDirectory,
+    `browser-state.json.probe-${randomUUID()}`,
+  );
+  assertTrustedBrowserSessionStateDirectory(location);
+  try {
+    renameSync(location.storagePath, claimedPath);
+  } catch {
+    return null;
+  }
+
+  let descriptor: number | undefined;
+  let filtered: BrowserStorageState | undefined;
+  try {
+    assertTrustedBrowserSessionStateDirectory(location);
+    const pathMetadata = lstatSync(claimedPath);
+    if (!pathMetadata.isFile() || pathMetadata.isSymbolicLink()) {
+      throw new Error("Claimed browser state is not a regular file.");
+    }
+    descriptor = openSync(
+      claimedPath,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+    const descriptorMetadata = fstatSync(descriptor);
+    if (
+      !descriptorMetadata.isFile() ||
+      descriptorMetadata.dev !== pathMetadata.dev ||
+      descriptorMetadata.ino !== pathMetadata.ino
+    ) {
+      throw new Error("Claimed browser state is not a regular file.");
+    }
+    const parsed = JSON.parse(readFileSync(descriptor, "utf8")) as unknown;
+    if (!isBrowserStorageState(parsed)) {
+      throw new Error("Claimed browser state is invalid.");
+    }
+    filtered = filterBrowserSessionState(parsed, targetOrigin);
+    if (!hasReusableBrowserSessionState(filtered)) {
+      throw new Error("Claimed browser state is empty or expired.");
+    }
+  } catch {
+    filtered = undefined;
+  } finally {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
+  }
+  try {
+    // This locally generated random entry is retired before any browser process
+    // starts. Unlinking a raced symlink removes the link, never its target.
+    assertTrustedBrowserSessionStateDirectory(location);
+    const metadata = lstatSync(claimedPath);
+    if (metadata.isSymbolicLink()) {
+      rmSync(claimedPath, { force: true });
+    } else if (
+      !removeBrowserSessionStateEntryIfSame(location, claimedPath, metadata)
+    ) {
+      throw new Error("Claimed browser state identity changed.");
+    }
+  } catch {
+    throw new Error(
+      "Unable to retire claimed browser state before browser launch.",
+    );
+  }
+  if (!filtered) {
+    return null;
+  }
+  return {
+    location,
+    contextOptions: { storageState: filtered },
+  };
+}
+
+/**
+ * Publish captured browser state only when no concurrent generation already
+ * exists. The state is filtered in memory and written through an exclusively
+ * created descriptor, so an existing file or symlink is never followed.
+ */
+async function publishCapturedBrowserSessionState(
+  context: {
+    storageState: () => Promise<unknown>;
+  },
+  location: TrustedBrowserSessionStateLocation,
+  targetOrigin: string,
+): Promise<boolean> {
+  const state = await context.storageState();
+  const filtered = filterBrowserSessionState(
+    isBrowserStorageState(state) ? state : { cookies: [], origins: [] },
+    targetOrigin,
+  );
+  if (!hasReusableBrowserSessionState(filtered)) {
+    return false;
+  }
+  writeBrowserSessionStateIfAbsent(location, filtered);
+  return true;
 }
 
 /** Probe saved state file created by previous automated logins. */
@@ -2834,36 +3341,59 @@ async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
-  const storageState = buildContextOptionsWithStoredSession({
-    targetOrigin: new URL(options.apiBaseUrl).origin,
-  });
-  if (!storageState) {
+  const targetOrigin = new URL(options.apiBaseUrl).origin;
+  const claim = claimBrowserSessionState(targetOrigin);
+  if (!claim) {
     return null;
   }
 
-  const launch = await launchBrowserForCapture({
-    headless: options.headless ?? true,
-  });
+  let launch: Awaited<ReturnType<typeof launchBrowserForCapture>>;
+  try {
+    launch = await launchBrowserForCapture({
+      headless: options.headless ?? true,
+      browserAdapter: options.browserAdapter,
+    });
+  } catch (error) {
+    restoreClaimedBrowserSessionState(claim);
+    throw error;
+  }
   const browser = launch.browser;
 
   try {
-    const context = await browser.newContext(storageState);
-    const page = await context.newPage();
-    const captured = await probeCredentialsInOpenContext(
-      context,
-      page,
-      options,
-      timeoutMs,
-    );
+    let context: BrowserContext;
+    let captured: LoginCredentials | null;
+    try {
+      context = await browser.newContext(claim.contextOptions);
+      const page = await context.newPage();
+      captured = await probeCredentialsInOpenContext(
+        context,
+        page,
+        options,
+        timeoutMs,
+      );
+    } catch (error) {
+      restoreClaimedBrowserSessionState(claim);
+      throw error;
+    }
     if (!captured) {
+      // A state that cannot renew credentials remains retired, while any
+      // concurrent replacement at the canonical path stays untouched.
       return null;
     }
     try {
-      await saveBrowserSessionState(context, {
-        targetOrigin: new URL(options.apiBaseUrl).origin,
-      });
+      const published = await publishCapturedBrowserSessionState(
+        context,
+        claim.location,
+        targetOrigin,
+      );
+      if (!published) {
+        restoreClaimedBrowserSessionState(claim);
+        return captured;
+      }
     } catch {
-      // non-fatal persistence failure
+      // Preserve the in-memory claimed generation when a fresh state cannot publish.
+      restoreClaimedBrowserSessionState(claim);
+      return captured;
     }
     return captured;
   } finally {
@@ -2906,7 +3436,12 @@ async function captureCredentialsFromSystemBrowserProfile(
     return null;
   }
 
+  const deadline = Date.now() + timeoutMs;
   for (const candidate of profileCandidates) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
     let context: BrowserContext | null = null;
     try {
       context = await playwrightModule.chromium.launchPersistentContext(
@@ -2923,7 +3458,7 @@ async function captureCredentialsFromSystemBrowserProfile(
         context,
         page,
         options,
-        Math.min(timeoutMs, 10_000),
+        Math.min(remaining, 10_000),
       );
       if (captured) {
         // Never copy a real system browser profile's full storage state into CLI state.

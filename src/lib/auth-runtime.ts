@@ -1,4 +1,5 @@
 import { sessionUsability } from './auth.js';
+import { AUTH_REFRESH_LOCK_TIMEOUT } from './session.js';
 import type { SessionData } from './types.js';
 
 export type AuthInteractionMode = 'never' | 'if_required';
@@ -48,7 +49,8 @@ export interface AuthRuntime {
   ensure(options?: AuthEnsureOptions): Promise<AuthRuntimeResult>;
 }
 
-const DEFAULT_MIN_TTL_SECONDS = 600;
+/** Default expiry margin for routine commands; callers may request a longer margin explicitly. */
+export const DEFAULT_AUTH_MIN_TTL_SECONDS = 60;
 
 function isFreshEnough(
   session: SessionData | null,
@@ -114,16 +116,32 @@ function refreshFailure(): AuthRuntimeResult {
   };
 }
 
+function isRefreshLockTimeout(error: unknown): boolean {
+  return (
+    Boolean(error) &&
+    typeof error === 'object' &&
+    (error as { code?: unknown }).code === AUTH_REFRESH_LOCK_TIMEOUT
+  );
+}
+
+function inFlightKey(
+  minTtlSeconds: number,
+  interaction: AuthInteractionMode,
+  forceRefresh: boolean,
+): string {
+  return `${minTtlSeconds}:${interaction}:${forceRefresh}`;
+}
+
 /**
  * Create one process-local auth coordinator. Concurrent callers share exactly
  * one refresh/handoff operation; the injected file lock extends that guarantee
  * to other CLI processes.
  */
 export function createAuthRuntime(adapter: AuthRuntimeAdapter): AuthRuntime {
-  let inFlight: Promise<AuthRuntimeResult> | undefined;
+  const inFlight = new Map<string, Promise<AuthRuntimeResult>>();
 
   const ensure = async (options: AuthEnsureOptions = {}): Promise<AuthRuntimeResult> => {
-    const minTtlSeconds = options.minTtlSeconds ?? DEFAULT_MIN_TTL_SECONDS;
+    const minTtlSeconds = options.minTtlSeconds ?? DEFAULT_AUTH_MIN_TTL_SECONDS;
     if (!Number.isFinite(minTtlSeconds) || minTtlSeconds < 0) {
       return {
         status: 'error',
@@ -139,8 +157,14 @@ export function createAuthRuntime(adapter: AuthRuntimeAdapter): AuthRuntime {
       return ready(cached, false);
     }
 
-    if (!inFlight) {
-      inFlight = adapter.withRefreshLock(async (): Promise<AuthRuntimeResult> => {
+    const key = inFlightKey(minTtlSeconds, interaction, forceRefresh);
+    const active = inFlight.get(key);
+    if (active) {
+      return active;
+    }
+
+    let pending: Promise<AuthRuntimeResult>;
+    pending = adapter.withRefreshLock(async (): Promise<AuthRuntimeResult> => {
         // A different process could have refreshed while this process waited for the lock.
         const insideLock = await adapter.loadSession();
         if (
@@ -186,12 +210,27 @@ export function createAuthRuntime(adapter: AuthRuntimeAdapter): AuthRuntime {
         }
         return ready(refreshed, true);
       })
-        .catch(() => refreshFailure())
-        .finally(() => {
-          inFlight = undefined;
-        });
-    }
-    return inFlight;
+      .catch(async (error) => {
+        if (!isRefreshLockTimeout(error)) {
+          return refreshFailure();
+        }
+        try {
+          const afterTimeout = await adapter.loadSession();
+          if (isFreshEnough(afterTimeout, minTtlSeconds, now())) {
+            return ready(afterTimeout, false);
+          }
+          return authRequired();
+        } catch {
+          return refreshFailure();
+        }
+      })
+      .finally(() => {
+        if (inFlight.get(key) === pending) {
+          inFlight.delete(key);
+        }
+      });
+    inFlight.set(key, pending);
+    return pending;
   };
 
   return { ensure };

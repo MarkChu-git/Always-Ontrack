@@ -186,6 +186,8 @@ reuses a valid token, then attempts a silent refresh from the restricted browser
 state. If Monash policy requires a number challenge, it returns a structured
 human handoff. `interaction: "if_required"` may open one visible browser flow;
 the Agent resumes after the user completes the Monash-controlled step.
+The default remaining-validity margin is 60 seconds; pass `min_ttl_seconds` (or
+CLI `--min-ttl-seconds`) to require a longer margin for a specific operation.
 
 The CLI applies the same lifecycle automatically. A rejected read may silently
 refresh and replay once. Mutations are never automatically replayed.
@@ -734,7 +736,6 @@ That makes them a better fit for:
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | Override the default API base URL | Defaults to Monash OnTrack API |
 | `ONTRACK_BROWSER_PATH` | Set the browser executable path for SSO automation | Highest priority browser override |
-| `ONTRACK_BROWSER_STATE_PATH` | Override persisted browser session state file path | Used for cookie/localStorage reuse during login |
 | `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | Explicitly allow live browser-profile credential discovery | Disabled by default; do not enable for shared/untrusted profiles |
 | `ONTRACK_BROWSER_USER_DATA_DIR` | Override Chromium/Chrome user data root | Used only with `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` |
 | `ONTRACK_BROWSER_PROFILE_DIR` | Override profile directory name under user data root | Used only with explicit profile reuse; defaults to `Default` |
@@ -759,9 +760,11 @@ The CLI creates the directory automatically and writes the session file with str
 The exact-origin browser state used for silent renewal is stored separately:
 
 - macOS / Linux: `~/.config/ontrack-cli/browser-state.json`
-- Windows: `%APPDATA%\ontrack-cli\browser-state.json`
+- Windows: `%USERPROFILE%\AppData\Roaming\ontrack-cli\browser-state.json`
 
 The directory is restricted to `0700` and the file to `0600` where supported.
+The path is fixed under the operator home and cannot be redirected by
+environment variables.
 The Auth MCP consumes this state internally but never returns it to its caller.
 
 ### Agent execution journal

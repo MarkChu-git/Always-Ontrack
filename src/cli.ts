@@ -16,7 +16,7 @@ import {
   SsoFallbackError,
   classifySsoFallback,
   captureCredentialsFromStoredBrowserSession,
-  clearBrowserSessionState,
+  clearAllBrowserSessionState,
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
@@ -112,7 +112,10 @@ import {
   validateAgentCommandArguments,
 } from './lib/command-input.js';
 import { createOnTrackAuthBroker } from './lib/auth-broker.js';
-import type { AuthInteractionMode } from './lib/auth-runtime.js';
+import {
+  DEFAULT_AUTH_MIN_TTL_SECONDS,
+  type AuthInteractionMode,
+} from './lib/auth-runtime.js';
 import {
   claimExecution,
   updateExecution,
@@ -1118,7 +1121,7 @@ async function requireSession(): Promise<SessionData> {
   const baseUrl = existing?.baseUrl ?? normalizeBaseUrl();
   const broker = createOnTrackAuthBroker({ baseUrl });
   const result = await broker.ensure({
-    minTtlSeconds: 600,
+    minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
     interaction: 'never',
   });
   if (result.status === 'ready') {
@@ -1621,7 +1624,9 @@ async function handleAuthEnsure(args: string[]): Promise<void> {
   const baseUrl = requestedBaseUrl
     ? normalizeBaseUrl(requestedBaseUrl)
     : (existing?.baseUrl ?? normalizeBaseUrl());
-  const minTtlSeconds = parseOptionalInteger(args, '--min-ttl-seconds') ?? 600;
+  const minTtlSeconds =
+    parseOptionalInteger(args, '--min-ttl-seconds') ??
+    DEFAULT_AUTH_MIN_TTL_SECONDS;
   const rawInteraction =
     parseOptionalString(args, '--interaction') ?? 'never';
   if (rawInteraction !== 'never' && rawInteraction !== 'if_required') {
@@ -2071,7 +2076,7 @@ async function handleLogout(args: string[] = []): Promise<void> {
   if (!session) {
     await Promise.all([
       clearSession(),
-      Promise.resolve().then(() => clearBrowserSessionState()),
+      Promise.resolve().then(() => clearAllBrowserSessionState()),
     ]);
     if (hasFlag(args, '--json')) {
       printJson({ status: 'signed_out' });
@@ -2091,7 +2096,7 @@ async function handleLogout(args: string[] = []): Promise<void> {
 
   await Promise.all([
     clearSession(),
-    Promise.resolve().then(() => clearBrowserSessionState()),
+    Promise.resolve().then(() => clearAllBrowserSessionState()),
   ]);
   if (remoteSignOutError) {
     console.error('[warn] Local session was cleared, but remote sign-out failed. Re-authenticate if needed.');
