@@ -16,7 +16,7 @@ import {
   SsoFallbackError,
   classifySsoFallback,
   captureCredentialsFromStoredBrowserSession,
-  clearBrowserSessionState,
+  clearAllBrowserSessionState,
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
@@ -2076,7 +2076,7 @@ async function handleLogout(args: string[] = []): Promise<void> {
   if (!session) {
     await Promise.all([
       clearSession(),
-      Promise.resolve().then(() => clearBrowserSessionState()),
+      Promise.resolve().then(() => clearAllBrowserSessionState()),
     ]);
     if (hasFlag(args, '--json')) {
       printJson({ status: 'signed_out' });
@@ -2096,7 +2096,7 @@ async function handleLogout(args: string[] = []): Promise<void> {
 
   await Promise.all([
     clearSession(),
-    Promise.resolve().then(() => clearBrowserSessionState()),
+    Promise.resolve().then(() => clearAllBrowserSessionState()),
   ]);
   if (remoteSignOutError) {
     console.error('[warn] Local session was cleared, but remote sign-out failed. Re-authenticate if needed.');

@@ -7,7 +7,7 @@ import {
 } from './lib/auth-broker.js';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from './lib/auth-runtime.js';
 import { clearSession } from './lib/session.js';
-import { clearBrowserSessionState } from './lib/auto-login.js';
+import { clearAllBrowserSessionState } from './lib/auto-login.js';
 import { normalizeBaseUrl } from './lib/utils.js';
 
 const nextActionSchema = z.object({
@@ -35,7 +35,7 @@ function defaultDependencies(): AuthMcpDependencies {
   return {
     createBroker: (baseUrl) => createOnTrackAuthBroker({ baseUrl }),
     clearSession: () => clearSession(),
-    clearBrowserSessionState: async () => clearBrowserSessionState(),
+    clearBrowserSessionState: async () => clearAllBrowserSessionState(),
   };
 }
 

@@ -1074,6 +1074,46 @@ export function clearBrowserSessionState(storagePath?: string): void {
 }
 
 /**
+ * Clear the managed browser credential store plus a safe legacy configured
+ * location from pre-managed releases. Legacy cleanup is restricted to the
+ * current operator home and never follows a final-component symlink.
+ */
+export function clearAllBrowserSessionState(): void {
+  clearBrowserSessionState();
+  const managedPath = resolve(resolveManagedBrowserSessionStatePath());
+  const legacyPath = resolve(resolveBrowserSessionStatePath());
+  const trustedRoot = realpathSync(homedir());
+  const trustedPrefix = `${trustedRoot}${sep}`;
+  if (
+    legacyPath === managedPath ||
+    basename(legacyPath) !== "browser-state.json"
+  ) {
+    return;
+  }
+  let legacyDirectory: string;
+  try {
+    legacyDirectory = realpathSync(dirname(legacyPath));
+  } catch {
+    return;
+  }
+  if (
+    legacyDirectory !== trustedRoot &&
+    !legacyDirectory.startsWith(trustedPrefix)
+  ) {
+    return;
+  }
+  const canonicalLegacyPath = join(
+    legacyDirectory,
+    "browser-state.json",
+  );
+  try {
+    clearBrowserSessionState(canonicalLegacyPath);
+  } catch {
+    // Legacy cleanup is best effort and must not undo managed-state removal.
+  }
+}
+
+/**
  * Resolve likely Chromium-family user-data roots from platform conventions.
  * Used to reuse an already logged-in browser profile before asking user credentials.
  */
