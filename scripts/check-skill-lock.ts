@@ -21,14 +21,6 @@ const SHA1_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
-function parseRoot(args: readonly string[]): string {
-  if (args.length === 0) return process.cwd();
-  if (args.length === 2 && args[0] === "--root" && args[1]) {
-    return resolve(args[1]);
-  }
-  throw new Error("Usage: bun scripts/check-skill-lock.ts [--root <path>]");
-}
-
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -122,7 +114,10 @@ async function listInstalledSkillNames(
 }
 
 async function main(): Promise<void> {
-  const root = parseRoot(process.argv.slice(2));
+  if (process.argv.length !== 2) {
+    throw new Error("Usage: bun scripts/check-skill-lock.ts");
+  }
+  const root = process.cwd();
   const lockValue: unknown = JSON.parse(
     await readFile(resolve(root, "skills-lock.json"), "utf8"),
   );

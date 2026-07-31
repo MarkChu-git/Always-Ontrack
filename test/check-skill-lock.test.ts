@@ -55,7 +55,8 @@ describe("project skill lock checker", () => {
     );
 
     const result = Bun.spawnSync({
-      cmd: [process.execPath, scriptPath, "--root", root],
+      cmd: [process.execPath, scriptPath],
+      cwd: root,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -71,7 +72,8 @@ describe("project skill lock checker", () => {
     const root = await makeFixture("0".repeat(64));
 
     const result = Bun.spawnSync({
-      cmd: [process.execPath, scriptPath, "--root", root],
+      cmd: [process.execPath, scriptPath],
+      cwd: root,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -97,7 +99,8 @@ describe("project skill lock checker", () => {
     );
 
     const result = Bun.spawnSync({
-      cmd: [process.execPath, scriptPath, "--root", root],
+      cmd: [process.execPath, scriptPath],
+      cwd: root,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -116,7 +119,8 @@ describe("project skill lock checker", () => {
     );
 
     const result = Bun.spawnSync({
-      cmd: [process.execPath, scriptPath, "--root", root],
+      cmd: [process.execPath, scriptPath],
+      cwd: root,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -125,6 +129,25 @@ describe("project skill lock checker", () => {
     expect(result.stdout.toString()).toBe("");
     expect(result.stderr.toString()).toBe(
       "Skill lock verification failed: Skill example must pin a full commit and a SHA-256 directory hash\n",
+    );
+  });
+
+  test("rejects caller-controlled root arguments", async () => {
+    const root = await makeFixture(
+      "32558c601120f0fa81b3c4745f32d8dee5187a5a96fe7b28ff70fb3d7a032933",
+    );
+
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, scriptPath, "--root", root],
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toBe(
+      "Skill lock verification failed: Usage: bun scripts/check-skill-lock.ts\n",
     );
   });
 });
