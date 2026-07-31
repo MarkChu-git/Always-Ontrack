@@ -11,6 +11,7 @@ import {
 const SSO_URL = "https://identity.example/sso";
 const API_BASE_URL = "https://ontrack.infotech.monash.edu/api";
 const TARGET_ORIGIN = "https://ontrack.infotech.monash.edu";
+let browserStateEnvironmentTail = Promise.resolve();
 
 function sessionCookie(
   value: string,
@@ -33,16 +34,41 @@ async function withBrowserState(
   prefix: string,
   run: (storagePath: string) => Promise<void>,
 ): Promise<void> {
-  const tempRoot = await mkdtemp(join(tmpdir(), prefix));
+  const previousEnvironmentUser = browserStateEnvironmentTail;
+  let releaseEnvironment: (() => void) | undefined;
+  browserStateEnvironmentTail = new Promise<void>((resolve) => {
+    releaseEnvironment = resolve;
+  });
+  await previousEnvironmentUser;
+
+  let tempRoot: string | undefined;
+  let environmentChanged = false;
+  const previousStoragePath = process.env.ONTRACK_BROWSER_STATE_PATH;
   try {
-    await run(join(tempRoot, "browser-state.json"));
+    tempRoot = await mkdtemp(join(tmpdir(), prefix));
+    const storagePath = join(tempRoot, "browser-state.json");
+    process.env.ONTRACK_BROWSER_STATE_PATH = storagePath;
+    environmentChanged = true;
+    await run(storagePath);
   } finally {
-    await rm(tempRoot, { recursive: true, force: true });
+    try {
+      if (environmentChanged) {
+        if (previousStoragePath === undefined) {
+          delete process.env.ONTRACK_BROWSER_STATE_PATH;
+        } else {
+          process.env.ONTRACK_BROWSER_STATE_PATH = previousStoragePath;
+        }
+      }
+      if (tempRoot) {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
+    } finally {
+      releaseEnvironment?.();
+    }
   }
 }
 
 function captureOptions(
-  storagePath: string,
   browserAdapter: {
     launch: () => Promise<unknown>;
   },
@@ -52,7 +78,6 @@ function captureOptions(
     apiBaseUrl: API_BASE_URL,
     timeoutMs: 25,
     headless: true,
-    browserStatePath: storagePath,
     systemBrowserProfileReuseEnabled: () => false,
     browserAdapter: browserAdapter as never,
   };
@@ -160,7 +185,7 @@ test("stored browser capture skips launch for empty state and invalidates a stal
           };
         },
       };
-      const options = captureOptions(storagePath, browserAdapter);
+      const options = captureOptions(browserAdapter);
 
       await writeFile(
         storagePath,
@@ -227,7 +252,7 @@ test("failed stored browser probe never deletes a concurrently refreshed state g
       );
       assert.equal(
         await captureCredentialsFromStoredBrowserSession(
-          captureOptions(storagePath, {
+          captureOptions({
             launch: async () => ({
               newContext: async () => context,
               close: async () => undefined,
@@ -257,7 +282,7 @@ test("stored browser capture restores its claimed state when context creation fa
       await assert.rejects(
         () =>
           captureCredentialsFromStoredBrowserSession(
-            captureOptions(storagePath, {
+            captureOptions({
               launch: async () => ({
                 newContext: async () => {
                   throw new Error("context creation failed");
@@ -322,7 +347,7 @@ test("successful stored browser probe never overwrites a concurrent state genera
       );
       assert.deepEqual(
         await captureCredentialsFromStoredBrowserSession(
-          captureOptions(storagePath, {
+          captureOptions({
             launch: async () => ({
               newContext: async () => context,
               close: async () => undefined,
@@ -374,7 +399,7 @@ test("successful stored browser capture restores its claimed state when no fresh
       await writeFile(storagePath, JSON.stringify(original), "utf8");
       assert.deepEqual(
         await captureCredentialsFromStoredBrowserSession(
-          captureOptions(storagePath, {
+          captureOptions({
             launch: async () => ({
               newContext: async () => context,
               close: async () => undefined,

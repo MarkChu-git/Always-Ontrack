@@ -696,8 +696,6 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
-  /** Explicit persisted-state path for isolated adapters and tests. */
-  browserStatePath?: string;
   /** Trusted adapter seam for isolating live-profile policy in tests. */
   systemBrowserProfileReuseEnabled?: () => boolean;
 }
@@ -2969,8 +2967,7 @@ async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
-  const storagePath =
-    options.browserStatePath ?? resolveBrowserSessionStatePath();
+  const storagePath = resolveBrowserSessionStatePath();
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   const claim = claimBrowserSessionState(storagePath, targetOrigin);
   if (!claim) {
