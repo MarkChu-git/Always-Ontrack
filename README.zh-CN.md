@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  Monash OnTrack / Doubtfire 的命令行客户端
+  面向 Agent 的 Monash OnTrack / Doubtfire CLI 与鉴权 MCP
 </p>
 
 `ontrack-cli` 把 Monash OnTrack 中常见的登录、查看任务、跟踪反馈、下载 PDF、上传 submission 等操作统一到一个命令面里:
@@ -20,12 +20,13 @@ ontrack <command>
 
 `https://ontrack.infotech.monash.edu/api`
 
-不需要用户先做复杂配置，安装后即可直接使用。
+主要接口是版本化、可发现 Schema 的 Agent 协议；人类表格与交互启动器继续复用同一执行引擎。
 
 ## 目录
 
 - [功能概览](#功能概览)
 - [安装](#安装)
+- [Agent-first 使用方式](#agent-first-使用方式)
 - [快速开始](#快速开始)
 - [核心概念](#核心概念)
 - [登录与会话](#登录与会话)
@@ -45,6 +46,9 @@ ontrack <command>
 `ontrack-cli` 目前覆盖了几个核心能力面:
 
 - 登录与会话管理
+  - 从受限浏览器状态静默续期 token
+  - 仅在 Monash 强制验证时进行结构化 human handoff
+  - 本地 `ontrack-auth-mcp` 鉴权控制面
   - 支持 `SSO auto capture`
   - 支持手动粘贴 redirect URL
   - 支持直接传入 `auth token + username`
@@ -69,7 +73,8 @@ ontrack <command>
   - `discover --probe`
 - 终端体验
   - 默认彩色高亮表格输出
-  - `--json` 便于脚本集成
+  - `--output agent-json` 提供版本化 Agent 自动化协议
+  - 旧 `--json` 保持原始脚本输出兼容
   - 自动处理部分 endpoint 权限差异和 fallback
 
 ## 安装
@@ -92,6 +97,7 @@ bun add --global ontrack-cli
 
 ```bash
 ontrack
+ontrack-auth-mcp
 ```
 
 ### 本地安装
@@ -116,6 +122,87 @@ bun dist/cli.js auth-method
 ```bash
 bun run dev -- auth-method
 ```
+
+## Agent-first 使用方式
+
+### 发现协议
+
+Agent 应查询 capability 与 schema，不需要解析帮助文本：
+
+```bash
+ontrack capabilities --output agent-json
+ontrack schema task.show --output agent-json
+```
+
+`--output agent-json` 返回稳定的 `ontrack.agent/v1` envelope，包含 request
+id、command path、状态、结构化数据、warnings、next actions 与 artifacts。
+错误使用稳定 code 和退出码。原来的裸 `--json` 在 0.5 中继续保持旧的原始
+shape。
+
+### 传入结构化输入
+
+```bash
+ontrack task show \
+  --input-json '{"project_id":87,"abbreviation":"D4"}' \
+  --output agent-json
+```
+
+也可以使用有大小上限的非交互 stdin：
+
+```bash
+printf '%s' '{"project_id":87,"task_definition_id":501}' |
+  ontrack task show --input - --output agent-json
+```
+
+只接受 command schema 已声明的字段。未知字段、重复且有歧义的 flag、危险
+object key、错误类型以及 TTY stdin 都会在发出业务请求前被拒绝。
+
+### 使用鉴权 MCP
+
+包内另带一个职责严格受限的 stdio server：
+
+```json
+{
+  "mcpServers": {
+    "ontrack-auth": {
+      "command": "ontrack-auth-mcp"
+    }
+  }
+}
+```
+
+它只暴露 `auth_status`、`auth_ensure`、`auth_logout`，不会向 Agent 返回密码、
+Okta challenge 数字、cookie、refresh token、OnTrack access token 或 SSO
+表单数据。MCP 调用方不能自行选择网络 origin；非生产环境必须由可信 host 在
+server 启动前通过 `ONTRACK_BASE_URL` 配置。
+
+自主运行时使用 `auth_ensure` 的 `interaction: "never"`。运行时会先复用有效
+token，再尝试从受限浏览器状态静默刷新。如果 Monash 策略要求 number
+challenge，它会返回结构化 human handoff。用户在场时可以改用
+`interaction: "if_required"`，此时最多开启一次可见浏览器流程；用户完成
+Monash 控制的验证后，Agent 继续工作。
+
+CLI 使用同一个生命周期。读请求被拒绝时最多静默刷新并安全重放一次；写请求
+永远不会被自动重放。
+
+### 安全执行写操作
+
+写命令默认仍为 dry-run。Agent 确认真实写入时还必须提供稳定的幂等键：
+
+```bash
+ontrack plan set-dates \
+  --project-id 87 \
+  --abbr D4 \
+  --start 2026-08-01 \
+  --target 2026-08-10 \
+  --confirm \
+  --idempotency-key plan-87-D4-2026-08-10 \
+  --output agent-json
+```
+
+已经完成的 operation 会从安全日志重放结果，不会再次 dispatch；相同 key
+对应不同输入时会被拒绝；如果传输失败或进程中断导致远端结果无法确定，该 key
+会保持阻断，直到 Agent 先读取远端状态完成核对。
 
 ## 快速开始
 
@@ -257,7 +344,9 @@ ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.
 
 ### `--json`
 
-几乎所有读命令都支持 `--json`。如果你要把 CLI 接到 shell script、Node script、CI 或其他自动化流程里，优先用这个输出模式。
+几乎所有读命令都支持 `--json`，用于兼容原始脚本输出。Agent 应使用
+`--output agent-json`，以获得版本化 envelope、schema、稳定错误和 next
+actions。
 
 ## 登录与会话
 
@@ -330,7 +419,10 @@ ontrack login --auth-token <token> --username <username>
 
 ### 登录后会发生什么
 
-CLI 会把会话保存到本地，后续命令默认复用，不需要每次重新登录。
+CLI 会把 access token 保存到本地，并将浏览器 refresh state 单独保存在受限
+文件中。authenticated command 会尽量在 token 临近过期时静默续期，因此一般
+不需要每次重新登录；当 Monash 的 refresh 或 SSO 策略到期时，仍可能要求用户
+完成验证。
 
 使用的认证头为:
 
@@ -351,13 +443,17 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack` | 打开交互式命令启动器 | 用序号快速执行常用流程 |
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
+| `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
+| `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |
+| `ontrack auth status --output agent-json` | 读取 credential 生命周期元数据 | 不返回 credential 或 identity |
+| `ontrack auth ensure --output agent-json` | 保证 credential 可用 | 默认静默；必要时返回结构化 handoff |
 | `ontrack login` | 引导式 Monash SSO 登录（默认） | 主登录入口 |
 | `ontrack login --sso` | 引导式 Monash SSO 登录 | 显式别名模式 |
 | `ontrack login --show-browser` | 显示浏览器执行引导式登录 | 调试 selector/MFA 边缘场景 |
 | `ontrack login --hide-browser` | 显式保持无头引导式登录 | 可选显式参数（默认行为） |
 | `ontrack login --auto` | 浏览器捕获模式登录 | 仅需被动捕获时使用 |
-| `ontrack logout` | 清理本地会话 | 切账号、重登、排障 |
+| `ontrack logout` | 清理本地 session 和浏览器 refresh state | 切账号、重登、排障 |
 | `ontrack whoami` | 查看当前缓存账号 | 确认登录身份 |
 | `ontrack doctor` | 检查关键 API 是否可用 | 快速定位权限或会话问题 |
 
@@ -641,6 +737,26 @@ ontrack tasks --project-id 87 --json
 
 CLI 会自动创建目录，并尽量以更安全的权限写入 session 文件。
 
+### 浏览器 refresh state
+
+静默续期使用的 exact-origin 浏览器状态单独保存：
+
+- macOS / Linux：`~/.config/ontrack-cli/browser-state.json`
+- Windows：`%APPDATA%\ontrack-cli\browser-state.json`
+
+平台支持时目录权限为 `0700`、文件权限为 `0600`。Auth MCP 只在内部使用该
+状态，绝不会向调用方返回。
+
+### Agent execution journal
+
+Agent 确认写操作的无凭证记录位于：
+
+- macOS / Linux：`~/.config/ontrack-cli/executions/`
+- Windows：`%APPDATA%\ontrack-cli\executions\`
+
+journal 只存储 hash、生命周期状态和经过清理的结果，不存储上传路径、文件内容、
+评论、身份数据或 credential。
+
 ### 下载目录
 
 默认 PDF 下载目录:
@@ -823,12 +939,15 @@ bunx playwright@1.58.2 install chromium
 
 ### `419 Authentication Timeout`
 
-说明缓存 session 已过期。直接重新登录:
+说明服务端拒绝了缓存的 access token。先让 auth runtime 尝试续期：
 
 ```bash
-ontrack logout
-ontrack login
+ontrack auth ensure --interaction never --output agent-json
 ```
+
+如果返回 `HUMAN_VERIFICATION_REQUIRED`，请在用户可操作时改用
+`--interaction if_required`。普通读命令本身也会自动尝试一次静默刷新和安全
+重放。
 
 ### `Task abbreviation "... " is ambiguous`
 

@@ -24,6 +24,20 @@ type JsonBody = Record<string, unknown> | undefined;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const DEFAULT_RETRY_ATTEMPTS = 2;
 
+type AuthSessionRefresh = () => Promise<SessionData | null>;
+
+function isReplaySafe(init: RequestInit): boolean {
+  const method = methodOf(init);
+  return method === 'GET' || method === 'HEAD';
+}
+
+function withRefreshedAuth(init: RequestInit, session: SessionData): RequestInit {
+  const headers = new Headers(init.headers);
+  headers.set('Auth-Token', session.authToken);
+  headers.set('Username', session.username);
+  return { ...init, headers };
+}
+
 /** Normalize request method string for retry policy checks. */
 function methodOf(init: RequestInit): string {
   return (init.method || 'GET').toUpperCase();
@@ -67,12 +81,41 @@ async function requestJson<T>(
   init: RequestInit,
   attempt: number = 0,
   maxRetries: number = DEFAULT_RETRY_ATTEMPTS,
+  refreshAuth?: AuthSessionRefresh,
+  authRetried: boolean = false,
 ): Promise<T> {
   const response = await fetch(url, init);
 
   if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
     await wait(retryDelayMs(attempt));
-    return requestJson<T>(url, init, attempt + 1, maxRetries);
+    return requestJson<T>(
+      url,
+      init,
+      attempt + 1,
+      maxRetries,
+      refreshAuth,
+      authRetried,
+    );
+  }
+
+  if (
+    !response.ok &&
+    !authRetried &&
+    refreshAuth &&
+    isReplaySafe(init) &&
+    (response.status === 401 || response.status === 419)
+  ) {
+    const refreshed = await refreshAuth().catch(() => null);
+    if (refreshed) {
+      return requestJson<T>(
+        url,
+        withRefreshedAuth(init, refreshed),
+        0,
+        maxRetries,
+        refreshAuth,
+        true,
+      );
+    }
   }
 
   if (!response.ok) {
@@ -119,12 +162,41 @@ async function requestBinary(
   init: RequestInit,
   attempt: number = 0,
   maxRetries: number = DEFAULT_RETRY_ATTEMPTS,
+  refreshAuth?: AuthSessionRefresh,
+  authRetried: boolean = false,
 ): Promise<DownloadResult> {
   const response = await fetch(url, init);
 
   if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
     await wait(retryDelayMs(attempt));
-    return requestBinary(url, init, attempt + 1, maxRetries);
+    return requestBinary(
+      url,
+      init,
+      attempt + 1,
+      maxRetries,
+      refreshAuth,
+      authRetried,
+    );
+  }
+
+  if (
+    !response.ok &&
+    !authRetried &&
+    refreshAuth &&
+    isReplaySafe(init) &&
+    (response.status === 401 || response.status === 419)
+  ) {
+    const refreshed = await refreshAuth().catch(() => null);
+    if (refreshed) {
+      return requestBinary(
+        url,
+        withRefreshedAuth(init, refreshed),
+        0,
+        maxRetries,
+        refreshAuth,
+        true,
+      );
+    }
   }
 
   if (!response.ok) {
@@ -170,7 +242,33 @@ function authHeaders(session: SessionData): HeadersInit {
 }
 
 export class OnTrackApiClient {
-  constructor(private readonly baseUrl: string) {}
+  private refreshedSession?: SessionData;
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly options: {
+      readonly refreshSession?: (failedSession: SessionData) => Promise<SessionData | null>;
+    } = {},
+  ) {}
+
+  private activeSession(session: SessionData): SessionData {
+    return this.refreshedSession ?? session;
+  }
+
+  private authRefresh(session: SessionData): AuthSessionRefresh | undefined {
+    if (!this.options.refreshSession) {
+      return undefined;
+    }
+    return async () => {
+      const refreshed = await this.options.refreshSession?.(
+        this.activeSession(session),
+      );
+      if (refreshed) {
+        this.refreshedSession = { ...refreshed, user: { ...refreshed.user } };
+      }
+      return refreshed ?? null;
+    };
+  }
 
   get base(): string {
     return this.baseUrl;
@@ -204,75 +302,111 @@ export class OnTrackApiClient {
       method: 'DELETE',
       headers: {
         Accept: 'application/json',
-        ...authHeaders(session),
+        ...authHeaders(this.activeSession(session)),
       },
     });
   }
 
   /** List projects visible to the authenticated account. */
   listProjects(session: SessionData): Promise<ProjectSummary[]> {
-    return requestJson<ProjectSummary[]>(withApiPath(this.baseUrl, 'projects'), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders(session),
+    return requestJson<ProjectSummary[]>(
+      withApiPath(this.baseUrl, 'projects'),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
       },
-    });
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    );
   }
 
   /** Fetch one project payload, usually including task instances. */
   getProject(session: SessionData, projectId: number): Promise<ProjectSummary> {
-    return requestJson<ProjectSummary>(withApiPath(this.baseUrl, `projects/${projectId}`), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders(session),
+    return requestJson<ProjectSummary>(
+      withApiPath(this.baseUrl, `projects/${projectId}`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
       },
-    });
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    );
   }
 
   /** List units; some roles may receive 403 (handled by caller fallback). */
   listUnits(session: SessionData): Promise<UnitSummary[]> {
-    return requestJson<UnitSummary[]>(withApiPath(this.baseUrl, 'units'), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders(session),
+    return requestJson<UnitSummary[]>(
+      withApiPath(this.baseUrl, 'units'),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
       },
-    });
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    );
   }
 
   /** Fetch a single unit, often used to resolve task definition metadata. */
   getUnit(session: SessionData, unitId: number): Promise<UnitSummary> {
-    return requestJson<UnitSummary>(withApiPath(this.baseUrl, `units/${unitId}`), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders(session),
+    return requestJson<UnitSummary>(
+      withApiPath(this.baseUrl, `units/${unitId}`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
       },
-    });
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    );
   }
 
   /** Inbox endpoint for a specific unit. */
   listInboxTasks(session: SessionData, unitId: number): Promise<InboxTask[]> {
-    return requestJson<InboxTask[]>(withApiPath(this.baseUrl, `units/${unitId}/tasks/inbox`), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders(session),
+    return requestJson<InboxTask[]>(
+      withApiPath(this.baseUrl, `units/${unitId}/tasks/inbox`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
       },
-    });
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    );
   }
 
   /** Read all prerequisite relationships for a unit's task definitions. */
   listUnitTaskPrerequisites(session: SessionData, unitId: number): Promise<unknown[]> {
-    return requestJson<unknown[]>(withApiPath(this.baseUrl, `units/${unitId}/task_prerequisites`), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders(session),
+    return requestJson<unknown[]>(
+      withApiPath(this.baseUrl, `units/${unitId}/task_prerequisites`),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
       },
-    });
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    );
   }
 
   /** Read prerequisites for one task definition within a unit. */
@@ -283,9 +417,12 @@ export class OnTrackApiClient {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -297,9 +434,12 @@ export class OnTrackApiClient {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -317,10 +457,13 @@ export class OnTrackApiClient {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
         body: JSON.stringify({ comment }),
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -355,10 +498,13 @@ export class OnTrackApiClient {
         method: 'POST',
         headers: {
           Accept: 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
         body: form,
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -370,9 +516,12 @@ export class OnTrackApiClient {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -391,7 +540,7 @@ export class OnTrackApiClient {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
         body: JSON.stringify({
           target_start_date: targetStartDate,
@@ -407,7 +556,7 @@ export class OnTrackApiClient {
       method: 'PUT',
       headers: {
         Accept: 'application/json',
-        ...authHeaders(session),
+        ...authHeaders(this.activeSession(session)),
       },
     });
   }
@@ -426,7 +575,7 @@ export class OnTrackApiClient {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
         body: JSON.stringify({ extensions }),
       },
@@ -444,9 +593,12 @@ export class OnTrackApiClient {
         method: 'GET',
         headers: {
           Accept: 'application/pdf, application/octet-stream, */*',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -465,9 +617,12 @@ export class OnTrackApiClient {
         method: 'GET',
         headers: {
           Accept: 'application/pdf, application/octet-stream, */*',
-          ...authHeaders(session),
+          ...authHeaders(this.activeSession(session)),
         },
       },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
     );
   }
 
@@ -478,7 +633,7 @@ export class OnTrackApiClient {
       method: 'GET',
       headers: {
         Accept: 'application/json, */*',
-        ...authHeaders(session),
+        ...authHeaders(this.activeSession(session)),
       },
     });
 

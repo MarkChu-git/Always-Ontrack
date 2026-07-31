@@ -13,6 +13,7 @@ test('logout clears the local session and emits no remote error detail', async (
   const configRoot = await mkdtemp(join(tmpdir(), 'ontrack-logout-'));
   const sessionDir = join(configRoot, 'ontrack-cli');
   const sessionPath = join(sessionDir, 'session.json');
+  const browserStatePath = join(sessionDir, 'browser-state.json');
   const server = createServer((_, response) => {
     response.writeHead(400, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ error: `auth_token=${exposureMarker}` }));
@@ -34,6 +35,11 @@ test('logout clears the local session and emits no remote error detail', async (
         savedAt: '2026-07-31T00:00:00.000Z',
         user: { id: 1, username: 'student1', role: 'student' },
       }),
+      'utf8',
+    );
+    await writeFile(
+      browserStatePath,
+      JSON.stringify({ cookies: [], origins: [] }),
       'utf8',
     );
 
@@ -66,6 +72,7 @@ test('logout clears the local session and emits no remote error detail', async (
     );
     assert.equal(result.stderr.includes(exposureMarker), false);
     assert.equal(existsSync(sessionPath), false);
+    assert.equal(existsSync(browserStatePath), false);
   } finally {
     server.close();
     await rm(configRoot, { recursive: true, force: true });

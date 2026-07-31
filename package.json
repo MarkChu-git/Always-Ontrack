@@ -1,7 +1,7 @@
 {
   "name": "ontrack-cli",
-  "version": "0.4.0",
-  "description": "CLI for Monash OnTrack / Doubtfire",
+  "version": "0.5.0",
+  "description": "Agent-first CLI and authentication MCP for Monash OnTrack / Doubtfire",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -16,10 +16,11 @@
   },
   "type": "module",
   "bin": {
-    "ontrack": "./dist/cli.js"
+    "ontrack": "./dist/cli.js",
+    "ontrack-auth-mcp": "./dist/auth-mcp.js"
   },
   "scripts": {
-    "build": "bun run clean && tsc -p tsconfig.json && bun -e \"import { chmod } from 'node:fs/promises'; await chmod('dist/cli.js', 0o755)\"",
+    "build": "bun run clean && tsc -p tsconfig.json && bun -e \"import { chmod } from 'node:fs/promises'; await Promise.all(['dist/cli.js', 'dist/auth-mcp.js'].map((path) => chmod(path, 0o755)))\"",
     "dev": "bun src/cli.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov && bun scripts/check-coverage.ts",
@@ -39,12 +40,16 @@
   "keywords": [
     "ontrack",
     "doubtfire",
-    "cli"
+    "cli",
+    "agent",
+    "mcp"
   ],
   "files": [
     "dist"
   ],
   "dependencies": {
-    "playwright-core": "^1.58.2"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "playwright-core": "^1.58.2",
+    "zod": "^4.0.0"
   }
 }

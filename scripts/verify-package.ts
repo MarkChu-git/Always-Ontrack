@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -8,6 +8,7 @@ const requiredEntries = [
   'package/LICENSE',
   'package/README.md',
   'package/README.zh-CN.md',
+  'package/dist/auth-mcp.js',
   'package/dist/cli.js',
 ] as const;
 
@@ -128,7 +129,36 @@ export async function verifyPackageTarball(tarballPath: string): Promise<Package
     await assertRegularTree(extractionRoot);
     const packageRoot = await realpath(join(extractionRoot, 'package'));
     const cliPath = await realpath(join(packageRoot, 'dist', 'cli.js'));
+    const authMcpPath = await realpath(join(packageRoot, 'dist', 'auth-mcp.js'));
     assertChildPath(packageRoot, cliPath);
+    assertChildPath(packageRoot, authMcpPath);
+    const manifest = JSON.parse(
+      await readFile(join(packageRoot, 'package.json'), 'utf8'),
+    ) as {
+      name?: unknown;
+      bin?: unknown;
+    };
+    if (
+      manifest.name !== 'ontrack-cli' ||
+      !manifest.bin ||
+      typeof manifest.bin !== 'object' ||
+      (manifest.bin as Record<string, unknown>).ontrack !== './dist/cli.js' ||
+      (manifest.bin as Record<string, unknown>)['ontrack-auth-mcp'] !==
+        './dist/auth-mcp.js'
+    ) {
+      throw new Error('packed manifest does not expose both expected executables');
+    }
+    const [cliMetadata, authMcpMetadata, authMcpSource] = await Promise.all([
+      lstat(cliPath),
+      lstat(authMcpPath),
+      readFile(authMcpPath, 'utf8'),
+    ]);
+    if ((cliMetadata.mode & 0o111) === 0 || (authMcpMetadata.mode & 0o111) === 0) {
+      throw new Error('packed executables are missing executable permission bits');
+    }
+    if (!authMcpSource.startsWith('#!/usr/bin/env bun')) {
+      throw new Error('packed Auth MCP is missing its Bun executable entrypoint');
+    }
     const cli = await run([process.execPath, cliPath, '--help'], packageRoot);
     return { entries, cliOutput: `${cli.stdout}${cli.stderr}` };
   } finally {

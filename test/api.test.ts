@@ -80,6 +80,69 @@ test('listInboxTasks surfaces 419 errors', async () => {
   );
 });
 
+test('a rejected read refreshes once and the client reuses the replacement token', async () => {
+  let requests = 0;
+  let refreshes = 0;
+  const replacement: SessionData = {
+    ...session,
+    authToken: 'replacement-token',
+  };
+  const client = new OnTrackApiClient(session.baseUrl, {
+    refreshSession: async (failed) => {
+      refreshes += 1;
+      assert.equal(failed.authToken, 'token-123');
+      return replacement;
+    },
+  });
+  mockFetch(async (_input, init) => {
+    requests += 1;
+    const token = new Headers(init?.headers).get('Auth-Token');
+    if (requests === 1) {
+      assert.equal(token, 'token-123');
+      return new Response('', { status: 419, statusText: 'Authentication Timeout' });
+    }
+    assert.equal(token, 'replacement-token');
+    return new Response(JSON.stringify([{ id: 101 }]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  assert.deepEqual(await client.listProjects(session), [{ id: 101 }]);
+  assert.deepEqual(await client.listProjects(session), [{ id: 101 }]);
+  assert.equal(requests, 3);
+  assert.equal(refreshes, 1);
+});
+
+test('a rejected mutation is never refreshed or replayed', async () => {
+  let requests = 0;
+  let refreshes = 0;
+  const client = new OnTrackApiClient(session.baseUrl, {
+    refreshSession: async () => {
+      refreshes += 1;
+      return { ...session, authToken: 'replacement-token' };
+    },
+  });
+  mockFetch(async () => {
+    requests += 1;
+    return new Response('', { status: 419, statusText: 'Authentication Timeout' });
+  });
+
+  await assert.rejects(
+    () =>
+      client.updateTaskTargetDates(
+        session,
+        101,
+        501,
+        '2026-08-01',
+        '2026-08-10',
+      ),
+    /419 Authentication Timeout/,
+  );
+  assert.equal(requests, 1);
+  assert.equal(refreshes, 0);
+});
+
 test('typed auth errors classify 401/419 and redact credential-like response details', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   mockFetch(async () => new Response(JSON.stringify({ error: 'auth_token=do-not-expose' }), {

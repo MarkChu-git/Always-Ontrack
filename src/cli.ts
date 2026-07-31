@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -15,6 +16,7 @@ import {
   SsoFallbackError,
   classifySsoFallback,
   captureCredentialsFromStoredBrowserSession,
+  clearBrowserSessionState,
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
 } from './lib/auto-login.js';
@@ -93,6 +95,30 @@ import type {
 } from './lib/types.js';
 import type { WelcomeMenuItem } from './lib/welcome.js';
 import type { ResolvedTaskSelector, WatchTaskState } from './lib/utils.js';
+import {
+  AgentProtocolError,
+  agentErrorEnvelope,
+  configureAgentOutputContext,
+  exitCodeForAgentError,
+  getAgentOutputContext,
+} from './lib/agent-protocol.js';
+import {
+  buildCapabilities,
+  getCommandSpec,
+  resolveCommandPath,
+} from './lib/command-spec.js';
+import {
+  mergeStructuredCommandInput,
+  validateAgentCommandArguments,
+} from './lib/command-input.js';
+import { createOnTrackAuthBroker } from './lib/auth-broker.js';
+import type { AuthInteractionMode } from './lib/auth-runtime.js';
+import {
+  claimExecution,
+  updateExecution,
+  validateIdempotencyKey,
+} from './lib/execution-journal.js';
+import type { ExecutionClaim } from './lib/execution-journal.js';
 
 /**
  * Main CLI entry module.
@@ -137,6 +163,10 @@ Usage:
   ontrack
   ontrack welcome
   ontrack auth-method [--base-url URL] [--json]
+  ontrack auth status [--output agent-json]
+  ontrack auth ensure [--min-ttl-seconds N] [--interaction never|if_required] [--output agent-json]
+  ontrack capabilities [--output agent-json]
+  ontrack schema COMMAND [--output agent-json]
   ontrack login [--base-url URL] [--redirect-url URL]
   ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME
   ontrack login [--base-url URL] --auto [--auto-timeout-sec N] [--show-browser|--hide-browser]
@@ -155,14 +185,14 @@ Usage:
   ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
   ontrack plan show --project-id ID [--include-beyond-target] [--json]
-  ontrack plan set-dates --project-id ID (--task-definition-id ID | --abbr ABBR) --start YYYY-MM-DD --target YYYY-MM-DD [--confirm] [--json]
-  ontrack plan reset --project-id ID [--confirm] [--json]
+  ontrack plan set-dates --project-id ID (--task-definition-id ID | --abbr ABBR) --start YYYY-MM-DD --target YYYY-MM-DD [--confirm] [--idempotency-key KEY] [--json]
+  ontrack plan reset --project-id ID [--confirm] [--idempotency-key KEY] [--json]
   ontrack feedback list --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack feedback watch --project-id ID (--task-definition-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]
   ontrack pdf task --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
   ontrack pdf submission --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
-  ontrack submission upload --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--json]
-  ontrack submission upload-new-files --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--json]
+  ontrack submission upload --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--idempotency-key KEY] [--json]
+  ontrack submission upload-new-files --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--idempotency-key KEY] [--json]
   ontrack submission status --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
 
@@ -181,6 +211,9 @@ Notes:
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
   - Planner and submission writes are dry-runs unless --confirm is supplied.
+  - Confirmed Agent writes also require --idempotency-key; completed keys replay safely and unknown outcomes stay blocked.
+  - Agent callers should use --output agent-json for the versioned ontrack.agent/v1 envelope.
+  - Structured Agent input is accepted via --input-json OBJECT or --input -.
 `);
 }
 
@@ -511,8 +544,8 @@ async function promptTaskSelectorFromTaskList(options: {
   allowBatch?: boolean;
   allowAllTasks?: boolean;
 } = {}): Promise<string[] | null> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const projects = await loadProjectsWithTaskMetadata(api, session);
 
   if (projects.length === 0) {
@@ -1066,21 +1099,85 @@ async function handleWelcome(): Promise<void> {
   }
 }
 
-/** Enforce active login session before executing authenticated commands. */
-function requireSession(session: SessionData | null): SessionData {
-  if (!session) {
-    throw new Error('No saved session found. Run `ontrack login` first.');
+/**
+ * Ensure an authenticated command receives a usable credential. Legacy
+ * sessions without expiry remain readable during the compatibility window;
+ * lifecycle-aware sessions silently refresh before their expiry boundary.
+ */
+async function requireSession(): Promise<SessionData> {
+  const existing = await loadSession();
+  if (existing && sessionUsability(existing).state === 'unknown') {
+    if (!getAgentOutputContext()) {
+      console.error(
+        '[warn] This saved credential has no verified expiry metadata; continuing with server-side validation.',
+      );
+    }
+    return existing;
   }
-  const usability = sessionUsability(session);
-  if (usability.state === 'expired') {
-    throw new Error('The saved OnTrack credential has expired. Run `ontrack login` again.');
+
+  const baseUrl = existing?.baseUrl ?? normalizeBaseUrl();
+  const broker = createOnTrackAuthBroker({ baseUrl });
+  const result = await broker.ensure({
+    minTtlSeconds: 600,
+    interaction: 'never',
+  });
+  if (result.status === 'ready') {
+    const session = await broker.currentSession();
+    if (session) {
+      return session;
+    }
+    throw new AgentProtocolError({
+      code: 'AUTH_REFRESH_FAILED',
+      status: 'auth_required',
+      summary: 'Authentication completed but no local session was available.',
+      retryable: true,
+    });
   }
-  if (usability.state === 'unknown') {
-    console.error(
-      '[warn] This saved credential has no verified expiry metadata; continuing with server-side validation.',
-    );
+  if (result.status === 'auth_required') {
+    throw new AgentProtocolError({
+      code: 'HUMAN_VERIFICATION_REQUIRED',
+      status: 'auth_required',
+      summary: 'Monash authentication requires human verification.',
+      retryable: true,
+      nextActions: [
+        {
+          action: 'auth.ensure',
+          arguments: { interaction: 'if_required' },
+        },
+      ],
+    });
   }
-  return session;
+  throw new AgentProtocolError({
+    code: 'AUTH_REFRESH_FAILED',
+    status: 'auth_required',
+    summary: 'The saved OnTrack credential could not be refreshed.',
+    retryable: result.retryable,
+    nextActions: [
+      {
+        action: 'auth.ensure',
+        arguments: { interaction: 'if_required' },
+      },
+    ],
+  });
+}
+
+/**
+ * Build an API client that may refresh and replay one failed read. Mutations
+ * are never replayed because the protocol layer restricts this callback to
+ * GET/HEAD requests.
+ */
+function createAuthenticatedApi(session: SessionData): OnTrackApiClient {
+  const broker = createOnTrackAuthBroker({ baseUrl: session.baseUrl });
+  return new OnTrackApiClient(session.baseUrl, {
+    refreshSession: async () => {
+      const result = await broker.ensure({
+        minTtlSeconds: 0,
+        interaction: 'never',
+        forceRefresh: true,
+      });
+      return result.status === 'ready' ? broker.currentSession() : null;
+    },
+  });
 }
 
 /** Flatten project task arrays while preserving project/unit context fields for display. */
@@ -1477,6 +1574,91 @@ async function handleAuthMethod(args: string[]): Promise<void> {
   }
 }
 
+/** Read package metadata without making capabilities depend on a network or session. */
+async function readCliVersion(): Promise<string> {
+  const raw = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { version?: unknown };
+  return typeof raw.version === 'string' ? raw.version : 'unknown';
+}
+
+/** Emit the offline Agent command and safety capability registry. */
+async function handleCapabilities(): Promise<void> {
+  printJson(buildCapabilities(await readCliVersion()));
+}
+
+/** Emit one offline command schema selected by stable Agent command path. */
+function handleSchema(args: string[]): void {
+  const positional = args.find((value, index) => {
+    if (value.startsWith('--')) return false;
+    return index === 0 || args[index - 1]?.startsWith('--') === false;
+  });
+  const requested = getFlagValue(args, '--command') ?? positional;
+  if (!requested || requested === 'agent-json') {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'schema requires a stable command path, for example task.show.',
+    });
+  }
+  printJson(getCommandSpec(requested));
+}
+
+/** Return credential lifecycle metadata without exposing identity or secrets. */
+async function handleAuthStatus(args: string[]): Promise<void> {
+  const existing = await loadSession();
+  const requestedBaseUrl = getFlagValue(args, '--base-url');
+  const baseUrl = requestedBaseUrl
+    ? normalizeBaseUrl(requestedBaseUrl)
+    : (existing?.baseUrl ?? normalizeBaseUrl());
+  const broker = createOnTrackAuthBroker({ baseUrl });
+  printJson(await broker.status());
+}
+
+/** Ensure a usable credential, allowing a visible browser only by explicit policy. */
+async function handleAuthEnsure(args: string[]): Promise<void> {
+  const existing = await loadSession();
+  const requestedBaseUrl = getFlagValue(args, '--base-url');
+  const baseUrl = requestedBaseUrl
+    ? normalizeBaseUrl(requestedBaseUrl)
+    : (existing?.baseUrl ?? normalizeBaseUrl());
+  const minTtlSeconds = parseOptionalInteger(args, '--min-ttl-seconds') ?? 600;
+  const rawInteraction =
+    parseOptionalString(args, '--interaction') ?? 'never';
+  if (rawInteraction !== 'never' && rawInteraction !== 'if_required') {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: '--interaction must be never or if_required.',
+    });
+  }
+  const interaction = rawInteraction as AuthInteractionMode;
+  const broker = createOnTrackAuthBroker({ baseUrl });
+  const result = await broker.ensure({ minTtlSeconds, interaction });
+  if (result.status === 'ready') {
+    printJson(result);
+    return;
+  }
+  if (result.status === 'auth_required') {
+    throw new AgentProtocolError({
+      code: 'HUMAN_VERIFICATION_REQUIRED',
+      status: 'auth_required',
+      summary: 'Monash authentication requires human verification.',
+      retryable: true,
+      nextActions: [
+        {
+          action: 'auth.ensure',
+          arguments: { interaction: 'if_required' },
+        },
+      ],
+    });
+  }
+  throw new AgentProtocolError({
+    code: 'AUTH_REFRESH_FAILED',
+    status: 'auth_required',
+    summary: 'The OnTrack credential could not be refreshed.',
+    retryable: result.retryable,
+  });
+}
+
 /**
  * Login entrypoint.
  *
@@ -1871,14 +2053,34 @@ async function handleLogin(args: string[]): Promise<void> {
 }
 
 /** Clear remote/local auth state (remote sign-out failure does not block local cleanup). */
-async function handleLogout(): Promise<void> {
+async function handleLogout(args: string[] = []): Promise<void> {
+  if (getAgentOutputContext() && !hasFlag(args, '--confirm')) {
+    throw new AgentProtocolError({
+      code: 'CONFIRMATION_REQUIRED',
+      status: 'action_required',
+      summary: 'Agent logout requires explicit confirmation.',
+      nextActions: [
+        {
+          action: 'auth.logout',
+          arguments: { confirm: true },
+        },
+      ],
+    });
+  }
   const session = await loadSession();
   if (!session) {
-    await clearSession();
-    console.log('Session cleared.');
+    await Promise.all([
+      clearSession(),
+      Promise.resolve().then(() => clearBrowserSessionState()),
+    ]);
+    if (hasFlag(args, '--json')) {
+      printJson({ status: 'signed_out' });
+    } else {
+      console.log('Session cleared.');
+    }
     return;
   }
-  const api = new OnTrackApiClient(session.baseUrl);
+  const api = createAuthenticatedApi(session);
   let remoteSignOutError: unknown;
 
   try {
@@ -1887,16 +2089,23 @@ async function handleLogout(): Promise<void> {
     remoteSignOutError = error;
   }
 
-  await clearSession();
+  await Promise.all([
+    clearSession(),
+    Promise.resolve().then(() => clearBrowserSessionState()),
+  ]);
   if (remoteSignOutError) {
     console.error('[warn] Local session was cleared, but remote sign-out failed. Re-authenticate if needed.');
   }
-  console.log('Session cleared.');
+  if (hasFlag(args, '--json')) {
+    printJson({ status: 'signed_out' });
+  } else {
+    console.log('Session cleared.');
+  }
 }
 
 /** Show current cached identity and role info. */
 async function handleWhoAmI(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
+  const session = await requireSession();
   const whoAmI = toWhoAmIView(session);
   if (hasFlag(args, '--json')) {
     printJson(whoAmI);
@@ -1918,8 +2127,8 @@ async function handleWhoAmI(args: string[]): Promise<void> {
 
 /** List projects with readable summary fields. */
 async function handleProjects(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const projects = await api.listProjects(session);
 
   if (hasFlag(args, '--json')) {
@@ -1960,8 +2169,8 @@ function countTasksByStatus(tasks: StudentTaskRow[]): string {
 
 /** Show full project payload/summary for one project id. */
 async function handleProjectShow(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const projectId = parseIntegerFlagValue(getFlagValue(args, '--project-id'), '--project-id');
   const projects = await loadProjectsWithTaskMetadata(api, session, { projectId });
   const project = projects[0];
@@ -1993,8 +2202,8 @@ async function handleProjectShow(args: string[]): Promise<void> {
 
 /** List units, with role-aware hints and /projects-based fallback when needed. */
 async function handleUnits(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const { units, fallbackUsed } = await listUnitsWithFallback(api, session);
 
   if (hasFlag(args, '--json')) {
@@ -2024,8 +2233,8 @@ function arrayLength(value: unknown): number {
 
 /** Show detailed unit payload for one unit id. */
 async function handleUnitShow(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const unitId = parseIntegerFlagValue(getFlagValue(args, '--unit-id'), '--unit-id');
   const unit = await api.getUnit(session, unitId);
 
@@ -2056,8 +2265,8 @@ async function handleUnitShow(args: string[]): Promise<void> {
 
 /** List tasks inside one unit, optionally filtered by status. */
 async function handleUnitTasks(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const unitId = parseIntegerFlagValue(getFlagValue(args, '--unit-id'), '--unit-id');
   const status = getFlagValue(args, '--status');
   const projects = await loadProjectsWithTaskMetadata(api, session, { unitId });
@@ -2089,8 +2298,8 @@ async function handleUnitTasks(args: string[]): Promise<void> {
 
 /** List tasks across accessible projects, with optional project/status filters. */
 async function handleTasks(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const projectId = parseOptionalInteger(args, '--project-id');
   const projects = await loadProjectsWithTaskMetadata(api, session, { projectId });
 
@@ -2174,8 +2383,8 @@ async function runDoctorCheck(
 /** Run quick health checks for auth/session visibility across core endpoints. */
 async function handleDoctor(args: string[]): Promise<void> {
   // Lightweight connectivity/auth diagnostics against high-value endpoints.
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
 
   const checks: DoctorCheck[] = [];
   // Public auth metadata check (no session mutation).
@@ -2350,8 +2559,8 @@ async function handleDiscover(args: string[]): Promise<void> {
 
   if (probe) {
     // Probe mode requires authenticated session and checks endpoint accessibility.
-    const session = requireSession(await loadSession());
-    const api = new OnTrackApiClient(session.baseUrl);
+    const session = await requireSession();
+    const api = createAuthenticatedApi(session);
     const siteUrl = getFlagValue(args, '--site-url') || defaultSiteUrlFromBase(session.baseUrl);
     const discovery = await discoverOnTrackSurface(siteUrl);
     const apiTemplates = applyLimit(discovery.apiTemplates, limit);
@@ -2429,8 +2638,8 @@ async function handleDiscover(args: string[]): Promise<void> {
 
 /** Inbox loader with endpoint fallback for role-restricted accounts. */
 async function handleInbox(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const status = getFlagValue(args, '--status');
   const unitId = parseOptionalInteger(args, '--unit-id');
   roleScopeHint(session, 'inbox', unitId !== undefined);
@@ -2522,8 +2731,8 @@ async function handleInbox(args: string[]): Promise<void> {
 
 /** Resolve and display one or many tasks in detail (single/batch selectors). */
 async function handleTaskShow(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskBatchSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
@@ -2599,8 +2808,8 @@ function resolveSelectedStudentTask(
 
 /** Show the observed prerequisite rows for one task definition. */
 async function handleTaskPrerequisites(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
@@ -2670,8 +2879,8 @@ async function loadPlannerContext(
 
 /** Show effective personal/default plan dates and prerequisites. */
 async function handlePlanShow(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const projectId = parseIntegerFlagValue(
     getFlagValue(args, '--project-id'),
     '--project-id',
@@ -2721,10 +2930,94 @@ function plannerReadback(
   }));
 }
 
+function requestedIdempotencyKey(args: string[]): string | undefined {
+  const value = getFlagValue(args, '--idempotency-key')?.trim();
+  return value ? validateIdempotencyKey(value) : undefined;
+}
+
+async function claimConfirmedWrite(
+  args: string[],
+  command: string,
+  input: Readonly<Record<string, unknown>>,
+): Promise<ExecutionClaim | undefined> {
+  const key = requestedIdempotencyKey(args);
+  if (!key) {
+    if (getAgentOutputContext()) {
+      throw new AgentProtocolError({
+        code: 'CONFIRMATION_REQUIRED',
+        status: 'action_required',
+        summary: 'Confirmed Agent writes require --idempotency-key.',
+        nextActions: [
+          {
+            action: command,
+            arguments: {
+              confirm: true,
+              idempotency_key: 'choose-a-stable-operation-key',
+            },
+          },
+        ],
+      });
+    }
+    return undefined;
+  }
+  return claimExecution(key, command, input);
+}
+
+function replayedWriteOutput(claim: ExecutionClaim | undefined): boolean {
+  if (!claim?.replayed) {
+    return false;
+  }
+  const result =
+    claim.result && typeof claim.result === 'object'
+      ? {
+          ...(claim.result as Record<string, unknown>),
+          operationId: claim.operationId,
+          idempotency: { replayed: true },
+        }
+      : {
+          operationId: claim.operationId,
+          idempotency: { replayed: true },
+          result: claim.result ?? null,
+        };
+  printJson(result);
+  return true;
+}
+
+async function recordUnknownWrite(
+  claim: ExecutionClaim | undefined,
+  command: string,
+  input: Readonly<Record<string, unknown>>,
+  summary: string,
+  nextAction: string,
+  nextArguments: Readonly<Record<string, unknown>>,
+  cause?: unknown,
+): Promise<never> {
+  if (claim) {
+    await updateExecution(claim, command, input, 'outcome_unknown');
+  }
+  throw new AgentProtocolError({
+    code: 'IDEMPOTENCY_OUTCOME_UNKNOWN',
+    status: 'action_required',
+    summary,
+    nextActions: [{ action: nextAction, arguments: nextArguments }],
+    cause,
+  });
+}
+
+function isDefinitiveWriteRejection(error: unknown): error is OnTrackHttpError {
+  return (
+    error instanceof OnTrackHttpError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 425
+  );
+}
+
 /** Preview or apply one exact target-date mutation. */
 async function handlePlanSetDates(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
   const startDate = parseOptionalString(args, '--start');
   const targetDate = parseOptionalString(args, '--target');
@@ -2748,7 +3041,14 @@ async function handlePlanSetDates(args: string[]): Promise<void> {
   const mutation = buildTargetDateMutation(plan, { startDate, targetDate });
   const confirmed = hasFlag(args, '--confirm');
   if (!confirmed) {
-    const preview = { dryRun: true, mutation };
+    const preview = {
+      dryRun: true,
+      mutation,
+      idempotency: {
+        required_for_agent_apply: true,
+        key: requestedIdempotencyKey(args) ?? null,
+      },
+    };
     if (hasFlag(args, '--json')) {
       printJson(preview);
     } else {
@@ -2758,22 +3058,61 @@ async function handlePlanSetDates(args: string[]): Promise<void> {
     return;
   }
 
+  const command = 'plan.set_dates';
+  const executionInput = {
+    project_id: plan.reference.projectId,
+    task_definition_id: plan.reference.taskDefinitionId,
+    start: startDate,
+    target: targetDate,
+  };
+  const claim = await claimConfirmedWrite(args, command, executionInput);
+  if (replayedWriteOutput(claim)) {
+    return;
+  }
   const before = {
     start: plan.start.value,
     target: plan.target.value,
   };
-  await api.updateTaskTargetDates(
-    session,
-    plan.reference.projectId,
-    plan.reference.taskDefinitionId,
-    startDate,
-    targetDate,
-  );
+  try {
+    await api.updateTaskTargetDates(
+      session,
+      plan.reference.projectId,
+      plan.reference.taskDefinitionId,
+      startDate,
+      targetDate,
+    );
+  } catch (error) {
+    if (isDefinitiveWriteRejection(error)) {
+      if (claim) {
+        await updateExecution(claim, command, executionInput, 'rejected');
+      }
+      throw error;
+    }
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The target-date request was dispatched, but its outcome is unknown.',
+      'plan.show',
+      { project_id: selector.projectId },
+      error,
+    );
+  }
   const readback = await loadPlannerContext(
     api,
     session,
     selector.projectId,
     true,
+  ).catch((error) =>
+    recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The target-date response was accepted, but read-back verification failed.',
+      'plan.show',
+      { project_id: selector.projectId },
+      error,
+    ),
   );
   const observed = readback.plans.find(
     (item) => item.reference.taskDefinitionId === plan.reference.taskDefinitionId,
@@ -2783,11 +3122,23 @@ async function handlePlanSetDates(args: string[]): Promise<void> {
     observed.start.value !== startDate ||
     observed.target.value !== targetDate
   ) {
-    throw new Error(
-      'Planner write received a response, but read-back did not verify the requested dates. Inspect `ontrack plan show` before retrying.',
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The target-date response was accepted, but read-back did not verify the requested dates.',
+      'plan.show',
+      { project_id: selector.projectId },
     );
+    throw new Error('Unreachable after recording an unknown write outcome.');
   }
   const output = {
+    ...(claim
+      ? {
+          operationId: claim.operationId,
+          idempotency: { replayed: false },
+        }
+      : {}),
     confirmed: true,
     verified: true,
     mutation,
@@ -2797,6 +3148,9 @@ async function handlePlanSetDates(args: string[]): Promise<void> {
       target: observed.target.value,
     },
   };
+  if (claim) {
+    await updateExecution(claim, command, executionInput, 'succeeded', output);
+  }
   if (hasFlag(args, '--json')) {
     printJson(output);
     return;
@@ -2808,8 +3162,8 @@ async function handlePlanSetDates(args: string[]): Promise<void> {
 
 /** Preview or apply the exact project-wide target-date reset contract. */
 async function handlePlanReset(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const projectId = parseIntegerFlagValue(
     getFlagValue(args, '--project-id'),
     '--project-id',
@@ -2817,7 +3171,14 @@ async function handlePlanReset(args: string[]): Promise<void> {
   const mutation = buildResetTargetDatesMutation(projectId);
   const confirmed = hasFlag(args, '--confirm');
   if (!confirmed) {
-    const preview = { dryRun: true, mutation };
+    const preview = {
+      dryRun: true,
+      mutation,
+      idempotency: {
+        required_for_agent_apply: true,
+        key: requestedIdempotencyKey(args) ?? null,
+      },
+    };
     if (hasFlag(args, '--json')) {
       printJson(preview);
     } else {
@@ -2827,10 +3188,49 @@ async function handlePlanReset(args: string[]): Promise<void> {
     return;
   }
 
+  const command = 'plan.reset';
+  const executionInput = { project_id: projectId };
+  const claim = await claimConfirmedWrite(args, command, executionInput);
+  if (replayedWriteOutput(claim)) {
+    return;
+  }
   const beforeContext = await loadPlannerContext(api, session, projectId, true);
   const before = plannerReadback(beforeContext.plans);
-  await api.resetProjectTargetDates(session, projectId);
-  const afterContext = await loadPlannerContext(api, session, projectId, true);
+  try {
+    await api.resetProjectTargetDates(session, projectId);
+  } catch (error) {
+    if (isDefinitiveWriteRejection(error)) {
+      if (claim) {
+        await updateExecution(claim, command, executionInput, 'rejected');
+      }
+      throw error;
+    }
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The planner-reset request was dispatched, but its outcome is unknown.',
+      'plan.show',
+      { project_id: projectId },
+      error,
+    );
+  }
+  const afterContext = await loadPlannerContext(
+    api,
+    session,
+    projectId,
+    true,
+  ).catch((error) =>
+    recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The planner-reset response was accepted, but read-back verification failed.',
+      'plan.show',
+      { project_id: projectId },
+      error,
+    ),
+  );
   const after = plannerReadback(afterContext.plans);
   const beforeIds = before.map((item) => item.taskDefinitionId).sort((a, b) => a - b);
   const afterIds = after.map((item) => item.taskDefinitionId).sort((a, b) => a - b);
@@ -2841,11 +3241,32 @@ async function handlePlanReset(args: string[]): Promise<void> {
         item.startSource !== 'personal' && item.targetSource !== 'personal',
     );
   if (!verified) {
-    throw new Error(
-      'Planner reset received a response, but read-back still contains personal dates or a changed task set. Inspect `ontrack plan show` before retrying.',
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The planner-reset response was accepted, but read-back did not verify the reset.',
+      'plan.show',
+      { project_id: projectId },
     );
+    throw new Error('Unreachable after recording an unknown write outcome.');
   }
-  const output = { confirmed: true, verified: true, mutation, before, after };
+  const output = {
+    ...(claim
+      ? {
+          operationId: claim.operationId,
+          idempotency: { replayed: false },
+        }
+      : {}),
+    confirmed: true,
+    verified: true,
+    mutation,
+    before,
+    after,
+  };
+  if (claim) {
+    await updateExecution(claim, command, executionInput, 'succeeded', output);
+  }
   if (hasFlag(args, '--json')) {
     printJson(output);
     return;
@@ -2986,8 +3407,8 @@ function presentFeedbackRows(comments: FeedbackItem[]): Array<Record<string, unk
 
 /** List feedback/comments for one or many selected tasks. */
 async function handleFeedbackList(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskBatchSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
@@ -3052,8 +3473,8 @@ async function handleFeedbackList(args: string[]): Promise<void> {
 
 /** Real-time feedback watcher for a single task conversation stream. */
 async function handleFeedbackWatch(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
   const interval = hasFlag(args, '--interval')
     ? parseIntegerFlagValue(getFlagValue(args, '--interval'), '--interval')
@@ -3190,8 +3611,8 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
 
 /** Download task/submission PDF for one or many selected tasks. */
 async function handlePdfDownload(args: string[], type: 'task' | 'submission'): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskBatchSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
@@ -3291,8 +3712,8 @@ async function handleSubmissionUpload(
   args: string[],
   mode: 'upload' | 'upload-new-files',
 ): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
@@ -3362,6 +3783,10 @@ async function handleSubmissionUpload(
       trigger: trigger ?? null,
       files: safeFiles,
       comment: { status: comment ? 'requested' : 'not_requested' },
+      idempotency: {
+        required_for_agent_apply: true,
+        key: requestedIdempotencyKey(args) ?? null,
+      },
     };
     if (hasFlag(args, '--json')) {
       printJson(preview);
@@ -3374,6 +3799,34 @@ async function handleSubmissionUpload(
   }
 
   const files = await readUploadFiles(prepared.files);
+  const command =
+    mode === 'upload'
+      ? 'submission.upload'
+      : 'submission.upload_new_files';
+  const executionInput = {
+    project_id: resolved.project.id,
+    task_definition_id: resolved.taskDefId,
+    mode,
+    trigger: trigger ?? null,
+    files: files.map((file) => ({
+      key: file.key,
+      bytes: file.content.byteLength,
+      sha256: createHash('sha256').update(file.content).digest('hex'),
+    })),
+    comment_sha256: comment
+      ? createHash('sha256').update(comment).digest('hex')
+      : null,
+  };
+  const claim = await claimConfirmedWrite(args, command, executionInput);
+  if (replayedWriteOutput(claim)) {
+    return;
+  }
+  if (claim) {
+    attempt = createSubmissionAttempt(prepared, {
+      operationId: claim.operationId,
+      at: new Date().toISOString(),
+    });
+  }
   attempt = transitionSubmissionAttempt(attempt, {
     type: 'upload_started',
     at: new Date().toISOString(),
@@ -3395,24 +3848,31 @@ async function handleSubmissionUpload(
       at: new Date().toISOString(),
     });
   } catch (error) {
-    if (error instanceof OnTrackHttpError) {
+    if (isDefinitiveWriteRejection(error)) {
       attempt = transitionSubmissionAttempt(attempt, {
         type: 'upload_rejected',
         at: new Date().toISOString(),
       });
-      if (error.authFailure !== 'other') {
-        throw error;
+      if (claim) {
+        await updateExecution(claim, command, executionInput, 'rejected');
       }
-      throw new Error(
-        `Submission was rejected by OnTrack (HTTP ${error.status}). It was not retried.`,
-      );
+      throw error;
     }
     attempt = transitionSubmissionAttempt(attempt, {
       type: 'upload_outcome_unknown',
       at: new Date().toISOString(),
     });
-    throw new Error(
-      'Submission was dispatched once, but the transport outcome is unknown. Run `ontrack submission status` before considering any retry.',
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'Submission was dispatched once, but the transport outcome is unknown.',
+      'submission.status',
+      {
+        project_id: resolved.project.id,
+        task_definition_id: resolved.taskDefId,
+      },
+      error,
     );
   }
 
@@ -3458,29 +3918,35 @@ async function handleSubmissionUpload(
     }
   }
 
+  const output = {
+    command: `submission ${mode}`,
+    projectId: resolved.project.id,
+    unitCode: resolved.unitCode,
+    task: resolved.abbr,
+    taskDefinitionId: resolved.taskDefId,
+    operationId: attempt.operationId,
+    ...(claim ? { idempotency: { replayed: false } } : {}),
+    state: attempt.state,
+    dryRun: false,
+    confirmed: true,
+    verification,
+    trigger: trigger ?? null,
+    files: safeFiles,
+    upload: { status: 'response_accepted' },
+    comment: !comment
+      ? { status: 'not_requested' }
+      : commentResult
+        ? { status: 'posted', id: commentResult.id }
+        : commentFailed
+          ? { status: 'failed' }
+          : { status: 'skipped_until_submission_observed' },
+  };
+  if (claim) {
+    await updateExecution(claim, command, executionInput, 'succeeded', output);
+  }
+
   if (hasFlag(args, '--json')) {
-    printJson({
-      command: `submission ${mode}`,
-      projectId: resolved.project.id,
-      unitCode: resolved.unitCode,
-      task: resolved.abbr,
-      taskDefinitionId: resolved.taskDefId,
-      operationId: attempt.operationId,
-      state: attempt.state,
-      dryRun: false,
-      confirmed: true,
-      verification,
-      trigger: trigger ?? null,
-      files: safeFiles,
-      upload: { status: 'response_accepted' },
-      comment: !comment
-        ? { status: 'not_requested' }
-        : commentResult
-          ? { status: 'posted', id: commentResult.id }
-          : commentFailed
-            ? { status: 'failed' }
-            : { status: 'skipped_until_submission_observed' },
-    });
+    printJson(output);
     return;
   }
 
@@ -3505,8 +3971,8 @@ async function handleSubmissionUpload(
 
 /** Read and normalize server submission status before lifecycle actions. */
 async function handleSubmissionStatus(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
@@ -3629,8 +4095,8 @@ function describeWatchEvent(event: {
 
 /** Cross-task watcher for status/due-date/new-feedback deltas. */
 async function handleWatch(args: string[]): Promise<void> {
-  const session = requireSession(await loadSession());
-  const api = new OnTrackApiClient(session.baseUrl);
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
   const unitId = parseOptionalInteger(args, '--unit-id');
   const projectId = parseOptionalInteger(args, '--project-id');
   const interval = hasFlag(args, '--interval')
@@ -3815,7 +4281,52 @@ async function handleSubmissionCommand(args: string[]): Promise<void> {
 
 /** Top-level command dispatcher. */
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
+  const requestedOutput = getFlagValue(args, '--output');
+  const agentOutput = requestedOutput === 'agent-json' || hasFlag(args, '--agent');
+  if (requestedOutput && requestedOutput !== 'agent-json') {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: '--output currently supports only agent-json.',
+    });
+  }
+
+  const resolvedPath = resolveCommandPath(args);
+  if (agentOutput) {
+    const commandSpec = (() => {
+      try {
+        return getCommandSpec(resolvedPath);
+      } catch {
+        return undefined;
+      }
+    })();
+    configureAgentOutputContext({
+      command: resolvedPath,
+      requestId: `req_${randomUUID()}`,
+      streaming: commandSpec?.streaming ?? false,
+    });
+    if (!commandSpec) {
+      throw new AgentProtocolError({
+        code: 'INVALID_ARGUMENT',
+        summary: `Command "${resolvedPath}" is not available in Agent mode.`,
+      });
+    }
+    if (!hasFlag(args, '--json')) {
+      args = [...args, '--json'];
+    }
+    if (hasFlag(args, '--input') || hasFlag(args, '--input-json')) {
+      args = await mergeStructuredCommandInput(args, commandSpec);
+    }
+    if (commandSpec) {
+      validateAgentCommandArguments(args, commandSpec);
+    }
+  } else if (hasFlag(args, '--input') || hasFlag(args, '--input-json')) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'Structured JSON input requires --output agent-json.',
+    });
+  }
+
   const command = args[0];
   const rest = args.slice(1);
 
@@ -3830,17 +4341,50 @@ async function main(): Promise<void> {
   }
 
   switch (command) {
+    case 'capabilities':
+      await handleCapabilities();
+      return;
+    case 'schema':
+      handleSchema(rest);
+      return;
     case 'welcome':
       await handleWelcome();
       return;
     case 'auth-method':
       await handleAuthMethod(rest);
       return;
+    case 'auth': {
+      const [subcommand, ...authArgs] = rest;
+      if (subcommand === 'method') {
+        await handleAuthMethod(authArgs);
+        return;
+      }
+      if (subcommand === 'login') {
+        await handleLogin(authArgs);
+        return;
+      }
+      if (subcommand === 'logout') {
+        await handleLogout(authArgs);
+        return;
+      }
+      if (subcommand === 'status') {
+        await handleAuthStatus(authArgs);
+        return;
+      }
+      if (subcommand === 'ensure') {
+        await handleAuthEnsure(authArgs);
+        return;
+      }
+      throw new AgentProtocolError({
+        code: 'INVALID_ARGUMENT',
+        summary: `Unknown auth subcommand: ${subcommand || '(missing)'}.`,
+      });
+    }
     case 'login':
       await handleLogin(rest);
       return;
     case 'logout':
-      await handleLogout();
+      await handleLogout(rest);
       return;
     case 'whoami':
       await handleWhoAmI(rest);
@@ -3888,15 +4432,134 @@ async function main(): Promise<void> {
       await handleWatch(rest);
       return;
     default:
-      throw new Error(`Unknown command: ${command}`);
+      throw new AgentProtocolError({
+        code: 'INVALID_ARGUMENT',
+        summary: `Unknown command: ${command}.`,
+      });
   }
 }
 
+function normalizeAgentCliError(error: unknown): AgentProtocolError {
+  if (error instanceof AgentProtocolError) {
+    return error;
+  }
+  if (error instanceof OnTrackHttpError) {
+    if (error.authFailure !== 'other') {
+      return new AgentProtocolError({
+        code: 'AUTH_REQUIRED',
+        status: 'auth_required',
+        summary: 'The saved OnTrack credential was rejected.',
+        retryable: true,
+        nextActions: [
+          {
+            action: 'auth.ensure',
+            arguments: { interaction: 'if_required' },
+          },
+        ],
+        cause: error,
+      });
+    }
+    if (error.status === 403) {
+      return new AgentProtocolError({
+        code: 'FORBIDDEN',
+        summary: 'OnTrack denied this operation.',
+        cause: error,
+      });
+    }
+    if (error.status === 404) {
+      return new AgentProtocolError({
+        code: 'NOT_FOUND',
+        summary: 'The requested OnTrack resource was not found.',
+        cause: error,
+      });
+    }
+    if (error.status === 409) {
+      return new AgentProtocolError({
+        code: 'CONFLICT',
+        summary: 'OnTrack reported a conflicting state.',
+        cause: error,
+      });
+    }
+    if (error.status === 429) {
+      return new AgentProtocolError({
+        code: 'RATE_LIMITED',
+        summary: 'OnTrack rate-limited the request.',
+        retryable: true,
+        cause: error,
+      });
+    }
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The OnTrack service could not complete the request.',
+      retryable: error.status >= 500,
+      cause: error,
+    });
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (
+    /\bnot found\b|\bno matching\b|\bnot available\b|\bdoes not exist\b/u.test(
+      message,
+    )
+  ) {
+    return new AgentProtocolError({
+      code: 'NOT_FOUND',
+      summary: 'The requested resource was not found.',
+      cause: error,
+    });
+  }
+  if (
+    /\bambiguous\b|\bconflict\b|\brequires an existing\b|\bstill processing\b|\bcannot dispatch\b/u.test(
+      message,
+    )
+  ) {
+    return new AgentProtocolError({
+      code: 'CONFLICT',
+      summary: 'The requested operation conflicts with the current state.',
+      cause: error,
+    });
+  }
+  if (
+    /\brequires?\b|\bmissing\b|\bmust\b|\binvalid\b|\bunknown\b|\bat least\b|\bcannot be\b|\bonly supports?\b|\bprovide\b|\bfailed to (?:read|inspect)\b/u.test(
+      message,
+    )
+  ) {
+    return new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'One or more command arguments are invalid.',
+      cause: error,
+    });
+  }
+  return new AgentProtocolError({
+    code: 'INTERNAL_ERROR',
+    summary: 'The command failed unexpectedly.',
+    cause: error,
+  });
+}
+
 main().catch((error) => {
+  const agentContext = getAgentOutputContext();
+  if (agentContext) {
+    const normalized = normalizeAgentCliError(error);
+    console.log(
+      JSON.stringify(
+        agentErrorEnvelope({
+          command: agentContext.command,
+          requestId: agentContext.requestId,
+          error: normalized,
+        }),
+        null,
+        agentContext.streaming ? undefined : 2,
+      ),
+    );
+    process.exitCode = exitCodeForAgentError(normalized);
+    return;
+  }
+
   const redacted = toRedactedError(error);
   if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
     console.error(
-      `Error: OnTrack rejected the saved credential (${error.authFailure}). Run \`ontrack login\` again.`,
+      `Error: OnTrack rejected the saved credential (${error.authFailure}). Run \`ontrack auth ensure --interaction if_required\`.`,
     );
   } else {
     console.error(`Error: ${redacted.message}`);

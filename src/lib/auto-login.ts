@@ -1,7 +1,23 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
-import type { Browser, BrowserContext, BrowserContextOptions, Frame, Locator, Page } from 'playwright-core';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import type {
+  Browser,
+  BrowserContext,
+  BrowserContextOptions,
+  Frame,
+  Locator,
+  Page,
+} from "playwright-core";
 
 /**
  * Browser automation flow for Monash SSO / Okta handoff.
@@ -16,8 +32,8 @@ export interface LoginCredentials {
   authToken: string;
   username: string;
   expiresAt?: string;
-  source: 'url' | 'auth_request' | 'auth_response' | 'local_storage' | 'cookie';
-  contract?: 'access-token' | 'legacy-auth';
+  source: "url" | "auth_request" | "auth_response" | "local_storage" | "cookie";
+  contract?: "access-token" | "legacy-auth";
 }
 
 /** Guided SSO options for username/password + MFA interaction mode. */
@@ -28,7 +44,9 @@ export interface SsoLoginOptions {
   password: string;
   timeoutMs?: number;
   headless?: boolean;
-  chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
+  chooseMfaMethod?: (
+    options: MfaMethodOption[],
+  ) => Promise<number | null | undefined>;
   requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
   onMfaNumberChallenge?: (numbers: string[]) => void;
   browserAdapter?: BrowserLaunchAdapter;
@@ -43,22 +61,22 @@ export interface MfaMethodOption {
 
 /** High-level guided login lifecycle steps used by terminal callbacks. */
 export type SsoStep =
-  | 'username'
-  | 'password'
-  | 'mfa_select'
-  | 'mfa_code'
-  | 'mfa_wait'
-  | 'completed'
-  | 'fallback';
+  | "username"
+  | "password"
+  | "mfa_select"
+  | "mfa_code"
+  | "mfa_wait"
+  | "completed"
+  | "fallback";
 
 /** Categorized fallback reasons surfaced to callers and users. */
 export type SsoFallbackReason =
-  | 'captcha'
-  | 'unsupported_mfa'
-  | 'selector_missing'
-  | 'timeout'
-  | 'browser_unavailable'
-  | 'automation_error';
+  | "captcha"
+  | "unsupported_mfa"
+  | "selector_missing"
+  | "timeout"
+  | "browser_unavailable"
+  | "automation_error";
 
 /** Typed fallback error carrying reason + stage for better UX messaging. */
 export class SsoFallbackError extends Error {
@@ -68,26 +86,29 @@ export class SsoFallbackError extends Error {
     message: string,
   ) {
     super(message);
-    this.name = 'SsoFallbackError';
+    this.name = "SsoFallbackError";
   }
 }
 
 /** Browser launch strategy selected at runtime. */
 export interface BrowserLaunchPlan {
-  source: 'env' | 'system' | 'bundled';
+  source: "env" | "system" | "bundled";
   executablePath?: string;
 }
 
 /** Narrow browser Adapter for deterministic, no-network login state-machine tests. */
 export interface BrowserLaunchAdapter {
-  launch(options: { headless: boolean; executablePath?: string }): Promise<Pick<Browser, 'newContext' | 'close'>>;
+  launch(options: {
+    headless: boolean;
+    executablePath?: string;
+  }): Promise<Pick<Browser, "newContext" | "close">>;
 }
 
-const DEFAULT_ONTRACK_ORIGIN = 'https://ontrack.infotech.monash.edu';
+const DEFAULT_ONTRACK_ORIGIN = "https://ontrack.infotech.monash.edu";
 
 /** Type guard for non-empty string-like values. */
 function hasValue(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 /** True only when a URL belongs to the exact OnTrack origin being authenticated. */
@@ -100,12 +121,18 @@ function isTargetOnTrackUrl(urlValue: string, targetOrigin: string): boolean {
 }
 
 /** True only for an auth endpoint on the exact OnTrack origin. */
-function isTargetOnTrackAuthUrl(urlValue: string, targetOrigin: string): boolean {
+function isTargetOnTrackAuthUrl(
+  urlValue: string,
+  targetOrigin: string,
+): boolean {
   if (!isTargetOnTrackUrl(urlValue, targetOrigin)) {
     return false;
   }
 
-  return new URL(urlValue).pathname === '/api/auth' || new URL(urlValue).pathname.startsWith('/api/auth/');
+  return (
+    new URL(urlValue).pathname === "/api/auth" ||
+    new URL(urlValue).pathname.startsWith("/api/auth/")
+  );
 }
 
 /** Extract authToken/username directly from redirect URL query params. */
@@ -118,15 +145,15 @@ export function extractCredentialsFromUrl(
     if (url.origin !== new URL(targetOrigin).origin) {
       return null;
     }
-    const authToken = url.searchParams.get('authToken');
-    const username = url.searchParams.get('username');
+    const authToken = url.searchParams.get("authToken");
+    const username = url.searchParams.get("username");
     if (!hasValue(authToken) || !hasValue(username)) {
       return null;
     }
     return {
       authToken,
       username,
-      source: 'url',
+      source: "url",
     };
   } catch {
     return null;
@@ -134,8 +161,10 @@ export function extractCredentialsFromUrl(
 }
 
 /** Parse `/api/auth` request/response payload variants into common credential shape. */
-export function extractCredentialsFromAuthPayload(payload: unknown): LoginCredentials | null {
-  if (!payload || typeof payload !== 'object') {
+export function extractCredentialsFromAuthPayload(
+  payload: unknown,
+): LoginCredentials | null {
+  if (!payload || typeof payload !== "object") {
     return null;
   }
 
@@ -148,7 +177,7 @@ export function extractCredentialsFromAuthPayload(payload: unknown): LoginCreden
   const username = hasValue(record.username) ? record.username : null;
   const user = record.user;
   const nestedUsername =
-    user && typeof user === 'object'
+    user && typeof user === "object"
       ? extractUsernameFromUserRecord(user as Record<string, unknown>)
       : null;
   const expiresAt = hasValue(record.auth_token_expiry)
@@ -165,7 +194,7 @@ export function extractCredentialsFromAuthPayload(payload: unknown): LoginCreden
     authToken,
     username: username ?? nestedUsername!,
     ...(expiresAt ? { expiresAt } : {}),
-    source: 'auth_request',
+    source: "auth_request",
   };
 }
 
@@ -182,13 +211,17 @@ export function extractCredentialsFromCookieJar(
   }
 
   const belongsToTargetHost = (cookie: { domain?: string }): boolean => {
-    const cookieDomain = cookie.domain?.trim().toLowerCase().replace(/^\./, '');
-    return Boolean(cookieDomain && cookieDomain === targetHostname.toLowerCase());
+    const cookieDomain = cookie.domain?.trim().toLowerCase().replace(/^\./, "");
+    return Boolean(
+      cookieDomain && cookieDomain === targetHostname.toLowerCase(),
+    );
   };
 
   const find = (names: string[]): string | undefined => {
     for (const name of names) {
-      const hit = cookies.find((cookie) => cookie.name === name && belongsToTargetHost(cookie));
+      const hit = cookies.find(
+        (cookie) => cookie.name === name && belongsToTargetHost(cookie),
+      );
       if (hit?.value) {
         return hit.value;
       }
@@ -196,8 +229,8 @@ export function extractCredentialsFromCookieJar(
     return undefined;
   };
 
-  const authToken = find(['authToken', 'auth_token', 'Auth-Token']);
-  const username = find(['username', 'Username']);
+  const authToken = find(["authToken", "auth_token", "Auth-Token"]);
+  const username = find(["username", "Username"]);
   if (!authToken || !username) {
     return null;
   }
@@ -205,7 +238,7 @@ export function extractCredentialsFromCookieJar(
   return {
     authToken,
     username,
-    source: 'cookie',
+    source: "cookie",
   };
 }
 
@@ -219,8 +252,10 @@ function extractCredentialsFromRequestHeaders(
   }
 
   const authToken =
-    normalized.get('auth-token') || normalized.get('auth_token') || normalized.get('authtoken');
-  const username = normalized.get('username');
+    normalized.get("auth-token") ||
+    normalized.get("auth_token") ||
+    normalized.get("authtoken");
+  const username = normalized.get("username");
   if (!authToken || !username) {
     return null;
   }
@@ -228,7 +263,7 @@ function extractCredentialsFromRequestHeaders(
   return {
     authToken,
     username,
-    source: 'auth_request',
+    source: "auth_request",
   };
 }
 
@@ -239,40 +274,50 @@ function candidateBrowserPaths(): string[] {
     paths.push(process.env.ONTRACK_BROWSER_PATH);
   }
 
-  if (process.platform === 'darwin') {
+  if (process.platform === "darwin") {
     paths.push(
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
     );
-  } else if (process.platform === 'win32') {
+  } else if (process.platform === "win32") {
     const local = process.env.LOCALAPPDATA;
     const programFiles = process.env.PROGRAMFILES;
-    const programFilesX86 = process.env['PROGRAMFILES(X86)'];
+    const programFilesX86 = process.env["PROGRAMFILES(X86)"];
     const windowsCandidates = [
-      local ? join(local, 'Google', 'Chrome', 'Application', 'chrome.exe') : undefined,
-      programFiles ? join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe') : undefined,
-      programFilesX86
-        ? join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe')
+      local
+        ? join(local, "Google", "Chrome", "Application", "chrome.exe")
         : undefined,
       programFiles
-        ? join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+        ? join(programFiles, "Google", "Chrome", "Application", "chrome.exe")
         : undefined,
       programFilesX86
-        ? join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+        ? join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe")
+        : undefined,
+      programFiles
+        ? join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe")
+        : undefined,
+      programFilesX86
+        ? join(
+            programFilesX86,
+            "Microsoft",
+            "Edge",
+            "Application",
+            "msedge.exe",
+          )
         : undefined,
     ].filter((item): item is string => Boolean(item));
     paths.push(...windowsCandidates);
   } else {
     paths.push(
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium',
-      '/usr/bin/chromium-browser',
-      '/snap/bin/chromium',
-      '/opt/google/chrome/chrome',
-      '/opt/microsoft/msedge/msedge',
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/google-chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/snap/bin/chromium",
+      "/opt/google/chrome/chrome",
+      "/opt/microsoft/msedge/msedge",
     );
   }
 
@@ -288,13 +333,13 @@ export function resolveBrowserLaunchPlan(
   if (explicitBrowser) {
     if (!fileExists(explicitBrowser)) {
       throw new SsoFallbackError(
-        'browser_unavailable',
-        'fallback',
+        "browser_unavailable",
+        "fallback",
         `ONTRACK_BROWSER_PATH points to a missing executable: ${explicitBrowser}`,
       );
     }
     return {
-      source: 'env',
+      source: "env",
       executablePath: explicitBrowser,
     };
   }
@@ -302,22 +347,22 @@ export function resolveBrowserLaunchPlan(
   for (const path of candidateBrowserPaths()) {
     if (fileExists(path)) {
       return {
-        source: 'system',
+        source: "system",
         executablePath: path,
       };
     }
   }
 
   return {
-    source: 'bundled',
+    source: "bundled",
   };
 }
 
 /** Human-readable remediation when no launchable browser is found. */
 function browserInstallHint(): string {
   return (
-    'No browser executable found. Install Chrome/Chromium/Edge, install a reviewed Playwright Chromium runtime manually, ' +
-    'or set ONTRACK_BROWSER_PATH.'
+    "No browser executable found. Install Chrome/Chromium/Edge, install a reviewed Playwright Chromium runtime manually, " +
+    "or set ONTRACK_BROWSER_PATH."
   );
 }
 
@@ -330,7 +375,9 @@ function isMissingDisplayServerError(message: string): boolean {
 
 /** Detect launch failures caused by missing shared system libraries. */
 function isMissingSharedLibraryError(message: string): boolean {
-  return /error while loading shared libraries|cannot open shared object file/i.test(message);
+  return /error while loading shared libraries|cannot open shared object file/i.test(
+    message,
+  );
 }
 
 /** Map unknown automation failures to high-level fallback reasons for CLI messaging. */
@@ -339,23 +386,34 @@ export function classifySsoFallback(error: unknown): SsoFallbackReason {
     return error.reason;
   }
 
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  if (message.includes('captcha')) {
-    return 'captcha';
+  const message =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+  if (message.includes("captcha")) {
+    return "captcha";
   }
-  if (message.includes('unsupported mfa') || message.includes('webauthn') || message.includes('email')) {
-    return 'unsupported_mfa';
+  if (
+    message.includes("unsupported mfa") ||
+    message.includes("webauthn") ||
+    message.includes("email")
+  ) {
+    return "unsupported_mfa";
   }
-  if (message.includes('selector') || message.includes('username field') || message.includes('password field')) {
-    return 'selector_missing';
+  if (
+    message.includes("selector") ||
+    message.includes("username field") ||
+    message.includes("password field")
+  ) {
+    return "selector_missing";
   }
-  if (message.includes('timeout')) {
-    return 'timeout';
+  if (message.includes("timeout")) {
+    return "timeout";
   }
-  if (message.includes('browser')) {
-    return 'browser_unavailable';
+  if (message.includes("browser")) {
+    return "browser_unavailable";
   }
-  return 'automation_error';
+  return "automation_error";
 }
 
 /** Safe JSON parsing helper for intercepted request/response payloads. */
@@ -372,12 +430,17 @@ function extractCredentialsFromUnknownObject(
   value: unknown,
   depth: number = 0,
 ): { authToken?: string; username?: string } {
-  if (!value || typeof value !== 'object' || depth > 6) {
+  if (!value || typeof value !== "object" || depth > 6) {
     return {};
   }
 
-  const tokenKeys = new Set(['authenticationtoken', 'auth_token', 'authtoken', 'auth-token']);
-  const usernameKeys = new Set(['username', 'user_name', 'login']);
+  const tokenKeys = new Set([
+    "authenticationtoken",
+    "auth_token",
+    "authtoken",
+    "auth-token",
+  ]);
+  const usernameKeys = new Set(["username", "user_name", "login"]);
   let authToken: string | undefined;
   let username: string | undefined;
 
@@ -396,7 +459,7 @@ function extractCredentialsFromUnknownObject(
       return;
     }
 
-    if (typeof node !== 'object') {
+    if (typeof node !== "object") {
       return;
     }
 
@@ -428,7 +491,7 @@ function extractCredentialsFromUnknownObject(
 
 /** Snapshot of one browser storage key/value pair used during session reuse probing. */
 interface BrowserStorageEntry {
-  scope: 'local' | 'session';
+  scope: "local" | "session";
   key: string;
   value: string;
 }
@@ -441,7 +504,7 @@ function normalizeStorageStringValue(raw: string): string | null {
 
   const trimmed = raw.trim();
   const parsed = tryParseJson(trimmed);
-  if (typeof parsed === 'string' && hasValue(parsed)) {
+  if (typeof parsed === "string" && hasValue(parsed)) {
     return parsed.trim();
   }
 
@@ -449,7 +512,9 @@ function normalizeStorageStringValue(raw: string): string | null {
 }
 
 /** Parse username-ish fields from user objects that OnTrack stores in browser storage. */
-function extractUsernameFromUserRecord(record: Record<string, unknown>): string | null {
+function extractUsernameFromUserRecord(
+  record: Record<string, unknown>,
+): string | null {
   const candidates = [
     record.username,
     record.user_name,
@@ -492,7 +557,7 @@ export function extractCredentialsFromStorageEntries(
 
   // 1) Exact-key extraction for known OnTrack keys (most reliable + fastest).
   for (const entry of normalizedEntries) {
-    if (entry.normalizedKey === 'doubtfire_credentials_token') {
+    if (entry.normalizedKey === "doubtfire_credentials_token") {
       authToken = normalizeStorageStringValue(entry.value);
       if (authToken) {
         break;
@@ -501,13 +566,15 @@ export function extractCredentialsFromStorageEntries(
   }
 
   for (const entry of normalizedEntries) {
-    if (entry.normalizedKey !== 'doubtfire_user') {
+    if (entry.normalizedKey !== "doubtfire_user") {
       continue;
     }
 
     const parsed = tryParseJson(entry.value);
-    if (parsed && typeof parsed === 'object') {
-      username = extractUsernameFromUserRecord(parsed as Record<string, unknown>);
+    if (parsed && typeof parsed === "object") {
+      username = extractUsernameFromUserRecord(
+        parsed as Record<string, unknown>,
+      );
       if (!username) {
         const extracted = extractCredentialsFromUnknownObject(parsed);
         username = extracted.username ?? null;
@@ -523,11 +590,19 @@ export function extractCredentialsFromStorageEntries(
 
   // 2) Generic key-based fallback (covers future key renames and other identity providers).
   for (const entry of normalizedEntries) {
-    if (!authToken && ['auth_token', 'authtoken', 'auth-token', 'authenticationtoken'].includes(entry.normalizedKey)) {
+    if (
+      !authToken &&
+      ["auth_token", "authtoken", "auth-token", "authenticationtoken"].includes(
+        entry.normalizedKey,
+      )
+    ) {
       authToken = normalizeStorageStringValue(entry.value);
     }
 
-    if (!username && ['username', 'user_name', 'login', 'email'].includes(entry.normalizedKey)) {
+    if (
+      !username &&
+      ["username", "user_name", "login", "email"].includes(entry.normalizedKey)
+    ) {
       username = normalizeStorageStringValue(entry.value);
     }
   }
@@ -536,7 +611,7 @@ export function extractCredentialsFromStorageEntries(
   if (!authToken || !username) {
     for (const entry of normalizedEntries) {
       const parsed = tryParseJson(entry.value);
-      if (!parsed || typeof parsed !== 'object') {
+      if (!parsed || typeof parsed !== "object") {
         continue;
       }
 
@@ -561,7 +636,7 @@ export function extractCredentialsFromStorageEntries(
   return {
     authToken,
     username,
-    source: 'local_storage',
+    source: "local_storage",
   };
 }
 
@@ -572,8 +647,12 @@ async function extractCredentialsFromLocalStorage(page: {
   try {
     const data = await page.evaluate(() => {
       try {
-        const collect = (storage: Storage, scope: 'local' | 'session') => {
-          const out: Array<{ scope: 'local' | 'session'; key: string; value: string }> = [];
+        const collect = (storage: Storage, scope: "local" | "session") => {
+          const out: Array<{
+            scope: "local" | "session";
+            key: string;
+            value: string;
+          }> = [];
           for (let index = 0; index < storage.length; index += 1) {
             const key = storage.key(index);
             if (!key) {
@@ -587,7 +666,10 @@ async function extractCredentialsFromLocalStorage(page: {
           return out;
         };
 
-        return [...collect(localStorage, 'local'), ...collect(sessionStorage, 'session')];
+        return [
+          ...collect(localStorage, "local"),
+          ...collect(sessionStorage, "session"),
+        ];
       } catch {
         return null;
       }
@@ -634,14 +716,42 @@ export function resolveBrowserSessionStatePath(
   }
 
   if (env.XDG_CONFIG_HOME) {
-    return join(env.XDG_CONFIG_HOME, 'ontrack-cli', 'browser-state.json');
+    return join(env.XDG_CONFIG_HOME, "ontrack-cli", "browser-state.json");
   }
 
-  if (platform === 'win32' && env.APPDATA) {
-    return join(env.APPDATA, 'ontrack-cli', 'browser-state.json');
+  if (platform === "win32" && env.APPDATA) {
+    return join(env.APPDATA, "ontrack-cli", "browser-state.json");
   }
 
-  return join(home, '.config', 'ontrack-cli', 'browser-state.json');
+  return join(home, ".config", "ontrack-cli", "browser-state.json");
+}
+
+/** Remove the persisted OnTrack-only browser state used by silent renewal. */
+export function clearBrowserSessionState(storagePath?: string): void {
+  const path = storagePath ?? resolveBrowserSessionStatePath();
+  if (!existsSync(path)) {
+    return;
+  }
+  const metadata = lstatSync(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error("Refusing to remove a non-regular browser-state path.");
+  }
+
+  let state: unknown;
+  try {
+    state = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error("Refusing to remove an invalid browser-state file.");
+  }
+  if (
+    !state ||
+    typeof state !== "object" ||
+    !Array.isArray((state as { cookies?: unknown }).cookies) ||
+    !Array.isArray((state as { origins?: unknown }).origins)
+  ) {
+    throw new Error("Refusing to remove an invalid browser-state file.");
+  }
+  rmSync(path);
 }
 
 /**
@@ -653,67 +763,85 @@ export function resolveSystemBrowserUserDataDirs(
   platform: NodeJS.Platform = process.platform,
   home: string = homedir(),
 ): SystemBrowserProfileLocation[] {
-  const profileDir = (env.ONTRACK_BROWSER_PROFILE_DIR || 'Default').trim() || 'Default';
+  const profileDir =
+    (env.ONTRACK_BROWSER_PROFILE_DIR || "Default").trim() || "Default";
   const explicit = env.ONTRACK_BROWSER_USER_DATA_DIR?.trim();
   if (explicit) {
     return [
       {
-        label: 'env:ONTRACK_BROWSER_USER_DATA_DIR',
+        label: "env:ONTRACK_BROWSER_USER_DATA_DIR",
         userDataDir: explicit,
         profileDir,
       },
     ];
   }
 
-  if (platform === 'darwin') {
+  if (platform === "darwin") {
     return [
       {
-        label: 'Google Chrome',
-        userDataDir: join(home, 'Library', 'Application Support', 'Google', 'Chrome'),
+        label: "Google Chrome",
+        userDataDir: join(
+          home,
+          "Library",
+          "Application Support",
+          "Google",
+          "Chrome",
+        ),
         profileDir,
       },
       {
-        label: 'Microsoft Edge',
-        userDataDir: join(home, 'Library', 'Application Support', 'Microsoft Edge'),
+        label: "Microsoft Edge",
+        userDataDir: join(
+          home,
+          "Library",
+          "Application Support",
+          "Microsoft Edge",
+        ),
         profileDir,
       },
       {
-        label: 'Chromium',
-        userDataDir: join(home, 'Library', 'Application Support', 'Chromium'),
+        label: "Chromium",
+        userDataDir: join(home, "Library", "Application Support", "Chromium"),
         profileDir,
       },
       {
-        label: 'Brave',
-        userDataDir: join(home, 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser'),
+        label: "Brave",
+        userDataDir: join(
+          home,
+          "Library",
+          "Application Support",
+          "BraveSoftware",
+          "Brave-Browser",
+        ),
         profileDir,
       },
     ];
   }
 
-  if (platform === 'win32') {
-    const local = env.LOCALAPPDATA?.trim() || '';
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA?.trim() || "";
     if (!local) {
       return [];
     }
     return [
       {
-        label: 'Google Chrome',
-        userDataDir: join(local, 'Google', 'Chrome', 'User Data'),
+        label: "Google Chrome",
+        userDataDir: join(local, "Google", "Chrome", "User Data"),
         profileDir,
       },
       {
-        label: 'Microsoft Edge',
-        userDataDir: join(local, 'Microsoft', 'Edge', 'User Data'),
+        label: "Microsoft Edge",
+        userDataDir: join(local, "Microsoft", "Edge", "User Data"),
         profileDir,
       },
       {
-        label: 'Chromium',
-        userDataDir: join(local, 'Chromium', 'User Data'),
+        label: "Chromium",
+        userDataDir: join(local, "Chromium", "User Data"),
         profileDir,
       },
       {
-        label: 'Brave',
-        userDataDir: join(local, 'BraveSoftware', 'Brave-Browser', 'User Data'),
+        label: "Brave",
+        userDataDir: join(local, "BraveSoftware", "Brave-Browser", "User Data"),
         profileDir,
       },
     ];
@@ -721,23 +849,23 @@ export function resolveSystemBrowserUserDataDirs(
 
   return [
     {
-      label: 'Google Chrome',
-      userDataDir: join(home, '.config', 'google-chrome'),
+      label: "Google Chrome",
+      userDataDir: join(home, ".config", "google-chrome"),
       profileDir,
     },
     {
-      label: 'Microsoft Edge',
-      userDataDir: join(home, '.config', 'microsoft-edge'),
+      label: "Microsoft Edge",
+      userDataDir: join(home, ".config", "microsoft-edge"),
       profileDir,
     },
     {
-      label: 'Chromium',
-      userDataDir: join(home, '.config', 'chromium'),
+      label: "Chromium",
+      userDataDir: join(home, ".config", "chromium"),
       profileDir,
     },
     {
-      label: 'Brave',
-      userDataDir: join(home, '.config', 'BraveSoftware', 'Brave-Browser'),
+      label: "Brave",
+      userDataDir: join(home, ".config", "BraveSoftware", "Brave-Browser"),
       profileDir,
     },
   ];
@@ -747,7 +875,7 @@ export function resolveSystemBrowserUserDataDirs(
 export function isSystemBrowserProfileReuseEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env.ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE === '1';
+  return env.ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE === "1";
 }
 
 /** Heuristic profile directory matcher for Chromium-family user-data roots. */
@@ -805,12 +933,14 @@ export function expandSystemBrowserProfileCandidates(
       continue;
     }
 
-    const discoveredNames = listDirNames(base.userDataDir).filter(isLikelyChromiumProfileDir);
+    const discoveredNames = listDirNames(base.userDataDir).filter(
+      isLikelyChromiumProfileDir,
+    );
     const orderedNames = discoveredNames.sort((left, right) => {
-      if (left === 'Default') {
+      if (left === "Default") {
         return -1;
       }
-      if (right === 'Default') {
+      if (right === "Default") {
         return 1;
       }
       return left.localeCompare(right);
@@ -835,34 +965,50 @@ export function expandSystemBrowserProfileCandidates(
   return expanded;
 }
 
-type BrowserStorageState = Exclude<NonNullable<BrowserContextOptions['storageState']>, string>;
+type BrowserStorageState = Exclude<
+  NonNullable<BrowserContextOptions["storageState"]>,
+  string
+>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isBrowserStorageCookie(value: unknown): value is BrowserStorageState['cookies'][number] {
+function isBrowserStorageCookie(
+  value: unknown,
+): value is BrowserStorageState["cookies"][number] {
   if (!isRecord(value)) {
     return false;
   }
   return (
     hasValue(value.name) &&
-    typeof value.value === 'string' &&
+    typeof value.value === "string" &&
     hasValue(value.domain) &&
     hasValue(value.path) &&
-    typeof value.expires === 'number' &&
-    typeof value.httpOnly === 'boolean' &&
-    typeof value.secure === 'boolean' &&
-    (value.sameSite === 'Strict' || value.sameSite === 'Lax' || value.sameSite === 'None')
+    typeof value.expires === "number" &&
+    typeof value.httpOnly === "boolean" &&
+    typeof value.secure === "boolean" &&
+    (value.sameSite === "Strict" ||
+      value.sameSite === "Lax" ||
+      value.sameSite === "None")
   );
 }
 
-function isBrowserStorageOrigin(value: unknown): value is BrowserStorageState['origins'][number] {
-  if (!isRecord(value) || !hasValue(value.origin) || !Array.isArray(value.localStorage)) {
+function isBrowserStorageOrigin(
+  value: unknown,
+): value is BrowserStorageState["origins"][number] {
+  if (
+    !isRecord(value) ||
+    !hasValue(value.origin) ||
+    !Array.isArray(value.localStorage)
+  ) {
     return false;
   }
   return value.localStorage.every(
-    (entry) => isRecord(entry) && hasValue(entry.name) && typeof entry.value === 'string',
+    (entry) =>
+      isRecord(entry) &&
+      hasValue(entry.name) &&
+      typeof entry.value === "string",
   );
 }
 
@@ -877,21 +1023,33 @@ function isBrowserStorageState(value: unknown): value is BrowserStorageState {
 }
 
 /** Retain only the exact OnTrack origin, never IdP or unrelated browser state. */
-function filterBrowserSessionState(state: BrowserStorageState, targetOrigin: string): BrowserStorageState {
+function filterBrowserSessionState(
+  state: BrowserStorageState,
+  targetOrigin: string,
+): BrowserStorageState {
   const target = new URL(targetOrigin);
   const targetHostname = target.hostname.toLowerCase();
   const cookies = state.cookies.filter(
-    (cookie) => cookie.domain.trim().toLowerCase().replace(/^\./, '') === targetHostname,
+    (cookie) =>
+      cookie.domain.trim().toLowerCase().replace(/^\./, "") === targetHostname,
   );
-  const origins = state.origins.filter((origin) => origin.origin === target.origin);
+  const origins = state.origins.filter(
+    (origin) => origin.origin === target.origin,
+  );
 
   return { cookies, origins };
 }
 
-function writePrivateBrowserSessionState(storagePath: string, state: BrowserStorageState): void {
+function writePrivateBrowserSessionState(
+  storagePath: string,
+  state: BrowserStorageState,
+): void {
   mkdirSync(dirname(storagePath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(storagePath), 0o700);
-  writeFileSync(storagePath, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(storagePath, JSON.stringify(state), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   chmodSync(storagePath, 0o600);
 }
 
@@ -901,9 +1059,12 @@ export interface SaveBrowserSessionStateOptions {
 }
 
 /** Persist a private, OnTrack-only browser session state for future reuse. */
-export async function saveBrowserSessionState(context: {
-  storageState: () => Promise<unknown>;
-}, options: SaveBrowserSessionStateOptions = {}): Promise<void> {
+export async function saveBrowserSessionState(
+  context: {
+    storageState: () => Promise<unknown>;
+  },
+  options: SaveBrowserSessionStateOptions = {},
+): Promise<void> {
   const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
   const state = await context.storageState();
@@ -915,10 +1076,12 @@ export async function saveBrowserSessionState(context: {
 }
 
 /** Build context options with optional previously persisted browser session state. */
-export function buildContextOptionsWithStoredSession(options: {
-  storagePath?: string;
-  targetOrigin?: string;
-} = {}):
+export function buildContextOptionsWithStoredSession(
+  options: {
+    storagePath?: string;
+    targetOrigin?: string;
+  } = {},
+):
   | {
       storageState: BrowserStorageState;
     }
@@ -930,7 +1093,7 @@ export function buildContextOptionsWithStoredSession(options: {
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(storagePath, 'utf8')) as unknown;
+    const parsed = JSON.parse(readFileSync(storagePath, "utf8")) as unknown;
     if (!isBrowserStorageState(parsed)) {
       return undefined;
     }
@@ -951,10 +1114,10 @@ export function buildContextOptionsWithStoredSession(options: {
 
 // Username selector list spans Okta + Microsoft + generic IdP form variants.
 const USERNAME_SELECTORS = [
-  'input#okta-signin-username',
-  'input#username',
-  'input#userNameInput',
-  'input#i0116',
+  "input#okta-signin-username",
+  "input#username",
+  "input#userNameInput",
+  "input#i0116",
   'input[name="identifier"]',
   'input[name="loginfmt"]',
   'input[name="username"]',
@@ -965,10 +1128,10 @@ const USERNAME_SELECTORS = [
 
 // Password selector list spans Okta + Microsoft + generic password input variants.
 const PASSWORD_SELECTORS = [
-  'input#okta-signin-password',
-  'input#password',
-  'input#passwordInput',
-  'input#i0118',
+  "input#okta-signin-password",
+  "input#password",
+  "input#passwordInput",
+  "input#i0118",
   'input[name="password"]',
   'input[name="passwd"]',
   'input[autocomplete="current-password"]',
@@ -977,8 +1140,8 @@ const PASSWORD_SELECTORS = [
 
 // Submit controls used after filling credentials.
 const PRIMARY_SUBMIT_SELECTORS = [
-  'input#okta-signin-submit',
-  '#idSIButton9',
+  "input#okta-signin-submit",
+  "#idSIButton9",
   'button[type="submit"]',
   'input[type="submit"]',
   'button[name="action"]',
@@ -992,44 +1155,57 @@ const SSO_ENTRY_SELECTORS = [
   'a[href*="saml"]',
   'button[id*="sso"]',
   'button[class*="sso"]',
-  'button[data-sso]',
+  "button[data-sso]",
 ];
 
 // Label-based fallback for SSO entry when selectors are unstable.
 const SSO_ENTRY_LABELS = [
-  'monash',
-  'single sign',
-  'sso',
-  'continue',
-  'sign in',
-  'log in',
-  'next',
+  "monash",
+  "single sign",
+  "sso",
+  "continue",
+  "sign in",
+  "log in",
+  "next",
 ];
 
-const USERNAME_CONTINUE_LABELS = ['next', 'continue', 'sign in', 'log in', 'verify'];
-const PASSWORD_SUBMIT_LABELS = ['sign in', 'log in', 'verify', 'continue', 'next'];
+const USERNAME_CONTINUE_LABELS = [
+  "next",
+  "continue",
+  "sign in",
+  "log in",
+  "verify",
+];
+const PASSWORD_SUBMIT_LABELS = [
+  "sign in",
+  "log in",
+  "verify",
+  "continue",
+  "next",
+];
 const MFA_SELECT_BUTTON_LABEL = /select/i;
 const MFA_OPTION_LABEL_CLEANUP = /\bselect\b/gi;
-const KNOWN_MFA_METHODS: Array<{ pattern: RegExp; label: string; recommended?: boolean }> = [
+const KNOWN_MFA_METHODS: Array<{
+  pattern: RegExp;
+  label: string;
+  recommended?: boolean;
+}> = [
   {
     pattern: /get a push notification/i,
-    label: 'Get a push notification (Okta Verify)',
+    label: "Get a push notification (Okta Verify)",
     recommended: true,
   },
   {
     pattern: /enter a code/i,
-    label: 'Enter a code (Okta Verify)',
+    label: "Enter a code (Okta Verify)",
   },
   {
     pattern: /google authenticator/i,
-    label: 'Google Authenticator',
+    label: "Google Authenticator",
   },
 ];
 
-const BLOCKED_LINK_HOSTS = new Set([
-  'okta.com',
-  'www.okta.com',
-]);
+const BLOCKED_LINK_HOSTS = new Set(["okta.com", "www.okta.com"]);
 
 /** Convert unknown thrown values into printable message text. */
 function asErrorMessage(error: unknown): string {
@@ -1049,10 +1225,10 @@ function summarizePageLocations(pages: Page[]): string {
   }
 
   if (locations.length === 0) {
-    return '(no stable page URL)';
+    return "(no stable page URL)";
   }
 
-  return [...new Set(locations)].join(', ');
+  return [...new Set(locations)].join(", ");
 }
 
 type InteractionScope = Page | Frame;
@@ -1098,7 +1274,7 @@ const MFA_CHALLENGE_NUMBER_SELECTORS = [
   '[id*="number-challenge"]',
   '[class*="challenge-number"]',
   '[id*="challenge-number"]',
-].join(', ');
+].join(", ");
 
 // Text signal used to decide whether nearby numbers are MFA challenge values.
 const MFA_CHALLENGE_TEXT_SIGNAL =
@@ -1117,7 +1293,14 @@ const MFA_CODE_INPUT_SELECTORS = [
   'input[inputmode="numeric"]',
 ];
 
-const MFA_CODE_SUBMIT_LABELS = ['verify', 'submit', 'continue', 'next', 'sign in', 'log in'];
+const MFA_CODE_SUBMIT_LABELS = [
+  "verify",
+  "submit",
+  "continue",
+  "next",
+  "sign in",
+  "log in",
+];
 
 /** Identify MFA methods that require user-entered one-time code instead of push/number approval. */
 function isCodeBasedMfaLabel(label: string): boolean {
@@ -1137,7 +1320,10 @@ function collectScopes(page: Page): ScopeRef[] {
 }
 
 /** True when selector exists and is visibly interactable in a given scope. */
-async function canUseSelector(scope: InteractionScope, selector: string): Promise<boolean> {
+async function canUseSelector(
+  scope: InteractionScope,
+  selector: string,
+): Promise<boolean> {
   const locator = scope.locator(selector).first();
   try {
     const count = await locator.count();
@@ -1169,11 +1355,14 @@ async function fillFirstVisible(
 }
 
 /** Click button/link controls by likely action labels (next/continue/sign in). */
-async function clickLikelyActionControl(scopes: ScopeRef[], labels: string[]): Promise<boolean> {
+async function clickLikelyActionControl(
+  scopes: ScopeRef[],
+  labels: string[],
+): Promise<boolean> {
   for (const label of labels) {
-    const matcher = new RegExp(label, 'i');
+    const matcher = new RegExp(label, "i");
     for (const scopeRef of scopes) {
-      for (const role of ['button', 'link'] as const) {
+      for (const role of ["button", "link"] as const) {
         const controls = scopeRef.scope.getByRole(role, { name: matcher });
         const count = await controls.count();
         for (let index = 0; index < count; index += 1) {
@@ -1183,8 +1372,8 @@ async function clickLikelyActionControl(scopes: ScopeRef[], labels: string[]): P
               continue;
             }
 
-            if (role === 'link') {
-              const href = await control.getAttribute('href');
+            if (role === "link") {
+              const href = await control.getAttribute("href");
               const currentUrl = scopeRef.page.url();
               if (!isSafeActionLink(currentUrl, href)) {
                 continue;
@@ -1222,15 +1411,15 @@ function isSafeActionLink(currentUrl: string, href: string | null): boolean {
       return true;
     }
 
-    if (host.endsWith('.okta.com')) {
+    if (host.endsWith(".okta.com")) {
       return true;
     }
 
-    if (host.endsWith('.microsoftonline.com')) {
+    if (host.endsWith(".microsoftonline.com")) {
       return true;
     }
 
-    if (host.includes('monash')) {
+    if (host.includes("monash")) {
       return true;
     }
 
@@ -1241,7 +1430,10 @@ function isSafeActionLink(currentUrl: string, href: string | null): boolean {
 }
 
 /** Click first visible selector match across all scopes. */
-async function clickFirstVisible(scopes: ScopeRef[], selectors: string[]): Promise<boolean> {
+async function clickFirstVisible(
+  scopes: ScopeRef[],
+  selectors: string[],
+): Promise<boolean> {
   for (const selector of selectors) {
     for (const scopeRef of scopes) {
       if (!(await canUseSelector(scopeRef.scope, selector))) {
@@ -1249,9 +1441,9 @@ async function clickFirstVisible(scopes: ScopeRef[], selectors: string[]): Promi
       }
 
       const control = scopeRef.scope.locator(selector).first();
-      if (selector.startsWith('a[')) {
+      if (selector.startsWith("a[")) {
         try {
-          const href = await control.getAttribute('href');
+          const href = await control.getAttribute("href");
           if (!isSafeActionLink(scopeRef.page.url(), href)) {
             continue;
           }
@@ -1268,7 +1460,10 @@ async function clickFirstVisible(scopes: ScopeRef[], selectors: string[]): Promi
 }
 
 /** Detect text signals (captcha, mfa prompts, etc.) across page/frame scopes. */
-async function hasTextSignal(scopes: ScopeRef[], pattern: RegExp): Promise<boolean> {
+async function hasTextSignal(
+  scopes: ScopeRef[],
+  pattern: RegExp,
+): Promise<boolean> {
   for (const scopeRef of scopes) {
     try {
       const node = scopeRef.scope.getByText(pattern).first();
@@ -1285,8 +1480,14 @@ async function hasTextSignal(scopes: ScopeRef[], pattern: RegExp): Promise<boole
 /** Detect captcha interstitials that require immediate fallback to manual flow. */
 async function detectSsoCaptcha(scopes: ScopeRef[]): Promise<boolean> {
   return (
-    (await hasTextSignal(scopes, /captcha|prove you are human|i am human|recaptcha/i)) ||
-    (await canUseSelectorInScopes(scopes, 'iframe[src*="recaptcha"], div.g-recaptcha'))
+    (await hasTextSignal(
+      scopes,
+      /captcha|prove you are human|i am human|recaptcha/i,
+    )) ||
+    (await canUseSelectorInScopes(
+      scopes,
+      'iframe[src*="recaptcha"], div.g-recaptcha',
+    ))
   );
 }
 
@@ -1303,12 +1504,17 @@ async function detectUnsupportedMfa(scopes: ScopeRef[]): Promise<boolean> {
         '[data-se*="security_key"]',
         '[data-se*="sms"]',
         '[data-se*="email"]',
-      ].join(', '),
+      ].join(", "),
     )
   ) {
     return true;
   }
-  if (await hasTextSignal(scopes, /use a security key|verify with sms|verification code via sms/i)) {
+  if (
+    await hasTextSignal(
+      scopes,
+      /use a security key|verify with sms|verification code via sms/i,
+    )
+  ) {
     return true;
   }
   return false;
@@ -1317,7 +1523,10 @@ async function detectUnsupportedMfa(scopes: ScopeRef[]): Promise<boolean> {
 /** Detect Okta Verify push/number challenge surfaces. */
 async function detectOktaVerifyChallenge(scopes: ScopeRef[]): Promise<boolean> {
   return (
-    (await hasTextSignal(scopes, /okta verify|check your okta verify app|number challenge/i)) ||
+    (await hasTextSignal(
+      scopes,
+      /okta verify|check your okta verify app|number challenge/i,
+    )) ||
     (await canUseSelectorInScopes(
       scopes,
       '[data-se*="okta_verify"], [data-se*="factor-push"], [data-se*="factor-number"]',
@@ -1359,9 +1568,9 @@ export function extractMfaNumberChallengeFromText(text: string): string[] {
     return [];
   }
 
-  const normalized = text.replace(/\r/g, '\n');
+  const normalized = text.replace(/\r/g, "\n");
   const lines = normalized
-    .split('\n')
+    .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const found: string[] = [];
@@ -1387,8 +1596,8 @@ export function extractMfaNumberChallengeFromText(text: string): string[] {
       continue;
     }
 
-    const previous = lines[index - 1] ?? '';
-    const next = lines[index + 1] ?? '';
+    const previous = lines[index - 1] ?? "";
+    const next = lines[index + 1] ?? "";
     if (hasMfaChallengeSignal(previous) || hasMfaChallengeSignal(next)) {
       found.push(line);
     }
@@ -1402,12 +1611,14 @@ export function extractMfaNumberChallengeFromText(text: string): string[] {
 }
 
 /** Aggregate challenge numbers from body text plus likely challenge DOM nodes. */
-async function extractMfaNumberChallenge(scopes: ScopeRef[]): Promise<string[]> {
+async function extractMfaNumberChallenge(
+  scopes: ScopeRef[],
+): Promise<string[]> {
   const textCandidates: string[] = [];
 
   for (const scopeRef of scopes) {
     try {
-      const body = scopeRef.scope.locator('body').first();
+      const body = scopeRef.scope.locator("body").first();
       if ((await body.count()) > 0) {
         const bodyText = await body.innerText({ timeout: 150 });
         if (bodyText.trim()) {
@@ -1419,7 +1630,9 @@ async function extractMfaNumberChallenge(scopes: ScopeRef[]): Promise<string[]> 
     }
 
     try {
-      const challengeNodes = scopeRef.scope.locator(MFA_CHALLENGE_NUMBER_SELECTORS);
+      const challengeNodes = scopeRef.scope.locator(
+        MFA_CHALLENGE_NUMBER_SELECTORS,
+      );
       const count = Math.min(await challengeNodes.count(), 12);
       for (let index = 0; index < count; index += 1) {
         const node = challengeNodes.nth(index);
@@ -1449,7 +1662,10 @@ async function extractMfaNumberChallenge(scopes: ScopeRef[]): Promise<string[]> 
 }
 
 /** Scope-aware selector existence check. */
-async function canUseSelectorInScopes(scopes: ScopeRef[], selector: string): Promise<boolean> {
+async function canUseSelectorInScopes(
+  scopes: ScopeRef[],
+  selector: string,
+): Promise<boolean> {
   for (const scopeRef of scopes) {
     if (await canUseSelector(scopeRef.scope, selector)) {
       return true;
@@ -1459,7 +1675,10 @@ async function canUseSelectorInScopes(scopes: ScopeRef[], selector: string): Pro
 }
 
 /** True when any selector in a set can be used in any active scope. */
-async function hasAnySelectorInScopes(scopes: ScopeRef[], selectors: string[]): Promise<boolean> {
+async function hasAnySelectorInScopes(
+  scopes: ScopeRef[],
+  selectors: string[],
+): Promise<boolean> {
   for (const selector of selectors) {
     if (await canUseSelectorInScopes(scopes, selector)) {
       return true;
@@ -1470,35 +1689,35 @@ async function hasAnySelectorInScopes(scopes: ScopeRef[], selectors: string[]): 
 
 /** Normalize noisy MFA labels into stable user-facing option text. */
 function normalizeMfaLabel(raw: string): string {
-  const compact = raw.replace(/\s+/g, ' ').trim();
+  const compact = raw.replace(/\s+/g, " ").trim();
   if (!compact) {
-    return '';
+    return "";
   }
 
   const pushMatch = compact.match(/get a push notification/i);
   if (pushMatch) {
-    return 'Get a push notification (Okta Verify)';
+    return "Get a push notification (Okta Verify)";
   }
 
   const codeMatch = compact.match(/enter a code/i);
   if (codeMatch) {
-    return 'Enter a code (Okta Verify)';
+    return "Enter a code (Okta Verify)";
   }
 
   const gaMatch = compact.match(/google authenticator/i);
   if (gaMatch) {
-    return 'Google Authenticator';
+    return "Google Authenticator";
   }
 
   return compact
-    .replace(MFA_OPTION_LABEL_CLEANUP, '')
-    .replace(/\s+/g, ' ')
+    .replace(MFA_OPTION_LABEL_CLEANUP, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 /** Escape user-facing strings for dynamic RegExp construction. */
 function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Extract best-effort MFA option label from control and nearby container text. */
@@ -1517,14 +1736,14 @@ async function extractMfaOptionLabel(control: Locator): Promise<string> {
             return match[0];
           }
         }
-        return '';
+        return "";
       };
 
       let node: HTMLElement | null = element as HTMLElement;
-      let best = '';
+      let best = "";
       let depth = 0;
       while (node && depth < 8) {
-        const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+        const text = (node.innerText || "").replace(/\s+/g, " ").trim();
         const patterned = pickByPattern(text);
         if (patterned) {
           return patterned;
@@ -1539,7 +1758,7 @@ async function extractMfaOptionLabel(control: Locator): Promise<string> {
     });
     return normalizeMfaLabel(label);
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -1547,27 +1766,33 @@ async function extractMfaOptionLabel(control: Locator): Promise<string> {
 async function collectSelectControls(scopeRef: ScopeRef): Promise<Locator[]> {
   const controls: Locator[] = [];
 
-  const roleButtons = scopeRef.scope.getByRole('button', { name: MFA_SELECT_BUTTON_LABEL });
+  const roleButtons = scopeRef.scope.getByRole("button", {
+    name: MFA_SELECT_BUTTON_LABEL,
+  });
   const roleButtonCount = await roleButtons.count();
   for (let index = 0; index < roleButtonCount; index += 1) {
     controls.push(roleButtons.nth(index));
   }
 
-  const roleLinks = scopeRef.scope.getByRole('link', { name: MFA_SELECT_BUTTON_LABEL });
+  const roleLinks = scopeRef.scope.getByRole("link", {
+    name: MFA_SELECT_BUTTON_LABEL,
+  });
   const roleLinkCount = await roleLinks.count();
   for (let index = 0; index < roleLinkCount; index += 1) {
     controls.push(roleLinks.nth(index));
   }
 
-  const inputControls = scopeRef.scope.locator('input[type="submit"], input[type="button"]');
+  const inputControls = scopeRef.scope.locator(
+    'input[type="submit"], input[type="button"]',
+  );
   const inputCount = await inputControls.count();
   for (let index = 0; index < inputCount; index += 1) {
     const control = inputControls.nth(index);
     try {
       const value =
-        (await control.inputValue().catch(() => '')) ||
-        (await control.getAttribute('value')) ||
-        '';
+        (await control.inputValue().catch(() => "")) ||
+        (await control.getAttribute("value")) ||
+        "";
       if (!MFA_SELECT_BUTTON_LABEL.test(value)) {
         continue;
       }
@@ -1581,11 +1806,15 @@ async function collectSelectControls(scopeRef: ScopeRef): Promise<Locator[]> {
 }
 
 /** Find first enabled/visible action control in an MFA option container row. */
-async function findVisibleActionControl(container: Locator): Promise<Locator | null> {
+async function findVisibleActionControl(
+  container: Locator,
+): Promise<Locator | null> {
   const candidates = [
-    container.getByRole('button'),
-    container.getByRole('link'),
-    container.locator('button, a[role="button"], input[type="submit"], input[type="button"]'),
+    container.getByRole("button"),
+    container.getByRole("link"),
+    container.locator(
+      'button, a[role="button"], input[type="submit"], input[type="button"]',
+    ),
   ];
 
   for (const group of candidates) {
@@ -1596,7 +1825,7 @@ async function findVisibleActionControl(container: Locator): Promise<Locator | n
         if (!(await control.isVisible({ timeout: 100 }))) {
           continue;
         }
-        if ((await control.getAttribute('disabled')) !== null) {
+        if ((await control.getAttribute("disabled")) !== null) {
           continue;
         }
         return control;
@@ -1621,7 +1850,9 @@ function countKnownMfaMethodMentions(text: string): number {
 }
 
 /** Discover MFA options by scanning known method labels and adjacent controls. */
-async function collectKnownMfaMethodOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
+async function collectKnownMfaMethodOptions(
+  scopes: ScopeRef[],
+): Promise<DetectedMfaOption[]> {
   const options: DetectedMfaOption[] = [];
 
   for (const scopeRef of scopes) {
@@ -1639,12 +1870,14 @@ async function collectKnownMfaMethodOptions(scopes: ScopeRef[]): Promise<Detecte
         }
 
         const row = matchedNode.locator(
-          'xpath=ancestor-or-self::*[self::div or self::li or self::tr or self::section or self::form][1]',
+          "xpath=ancestor-or-self::*[self::div or self::li or self::tr or self::section or self::form][1]",
         );
 
-        let rowText = '';
+        let rowText = "";
         try {
-          rowText = (await row.innerText({ timeout: 100 })).replace(/\s+/g, ' ').trim();
+          rowText = (await row.innerText({ timeout: 100 }))
+            .replace(/\s+/g, " ")
+            .trim();
         } catch {
           // use matched node if row text is unavailable
         }
@@ -1672,7 +1905,9 @@ async function collectKnownMfaMethodOptions(scopes: ScopeRef[]): Promise<Detecte
 }
 
 /** Discover selectable MFA options via generic "Select" controls + known-label fallback. */
-async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedMfaOption[]> {
+async function collectMfaSelectionOptions(
+  scopes: ScopeRef[],
+): Promise<DetectedMfaOption[]> {
   const options: DetectedMfaOption[] = [];
   for (const scopeRef of scopes) {
     const controls = await collectSelectControls(scopeRef);
@@ -1712,7 +1947,9 @@ async function collectMfaSelectionOptions(scopes: ScopeRef[]): Promise<DetectedM
 }
 
 /** Click a detected MFA option with layered fallback click strategies. */
-async function clickDetectedMfaOption(option: DetectedMfaOption): Promise<boolean> {
+async function clickDetectedMfaOption(
+  option: DetectedMfaOption,
+): Promise<boolean> {
   try {
     if (await option.control.isVisible({ timeout: 300 })) {
       await option.control.click({ timeout: 1500, force: true });
@@ -1731,12 +1968,17 @@ async function clickDetectedMfaOption(option: DetectedMfaOption): Promise<boolea
     // fallback below
   }
 
-  const coreLabel = option.label.replace(/\s*\(.*?\)\s*$/, '').trim();
-  const labelPattern = new RegExp(escapeRegex(coreLabel), 'i');
-  const row = option.scopeRef.scope.locator('div, li, tr, section, form').filter({ hasText: labelPattern }).first();
+  const coreLabel = option.label.replace(/\s*\(.*?\)\s*$/, "").trim();
+  const labelPattern = new RegExp(escapeRegex(coreLabel), "i");
+  const row = option.scopeRef.scope
+    .locator("div, li, tr, section, form")
+    .filter({ hasText: labelPattern })
+    .first();
 
   try {
-    const rowButtons = row.getByRole('button', { name: MFA_SELECT_BUTTON_LABEL });
+    const rowButtons = row.getByRole("button", {
+      name: MFA_SELECT_BUTTON_LABEL,
+    });
     if ((await rowButtons.count()) > 0) {
       await rowButtons.first().click({ timeout: 1500, force: true });
       return true;
@@ -1762,7 +2004,9 @@ async function clickDetectedMfaOption(option: DetectedMfaOption): Promise<boolea
 async function maybeHandleMfaMethodSelection(
   scopes: ScopeRef[],
   state: GuidedSsoRuntimeState,
-  chooseMfaMethod: ((options: MfaMethodOption[]) => Promise<number | null | undefined>) | undefined,
+  chooseMfaMethod:
+    | ((options: MfaMethodOption[]) => Promise<number | null | undefined>)
+    | undefined,
   onStep?: (step: SsoStep) => void,
 ): Promise<boolean> {
   if (state.mfaSelectionDone) {
@@ -1774,17 +2018,18 @@ async function maybeHandleMfaMethodSelection(
     return false;
   }
 
-  onStep?.('mfa_select');
+  onStep?.("mfa_select");
 
-  const presentedOptions: MfaMethodOption[] = detectedOptions.map((option, index) => ({
-    id: index + 1,
-    label: option.label,
-    recommended: option.recommended,
-  }));
+  const presentedOptions: MfaMethodOption[] = detectedOptions.map(
+    (option, index) => ({
+      id: index + 1,
+      label: option.label,
+      recommended: option.recommended,
+    }),
+  );
 
   const defaultOption =
-    presentedOptions.find((item) => item.recommended) ??
-    presentedOptions[0];
+    presentedOptions.find((item) => item.recommended) ?? presentedOptions[0];
   if (!defaultOption) {
     return false;
   }
@@ -1794,7 +2039,10 @@ async function maybeHandleMfaMethodSelection(
     state.mfaSelectionPrompted = true;
     try {
       const chosen = await chooseMfaMethod(presentedOptions);
-      if (typeof chosen === 'number' && presentedOptions.some((item) => item.id === chosen)) {
+      if (
+        typeof chosen === "number" &&
+        presentedOptions.some((item) => item.id === chosen)
+      ) {
         selectedId = chosen;
       }
     } catch {
@@ -1821,43 +2069,50 @@ async function maybeHandleMfaMethodSelection(
 async function maybeHandleMfaCodeEntry(
   scopes: ScopeRef[],
   state: GuidedSsoRuntimeState,
-  requestMfaCode: ((methodLabel: string) => Promise<string | null | undefined>) | undefined,
+  requestMfaCode:
+    | ((methodLabel: string) => Promise<string | null | undefined>)
+    | undefined,
   onStep?: (step: SsoStep) => void,
 ): Promise<boolean> {
   if (!state.expectsMfaCode || state.mfaCodeSubmitted) {
     return false;
   }
 
-  const hasCodeField = await hasAnySelectorInScopes(scopes, MFA_CODE_INPUT_SELECTORS);
+  const hasCodeField = await hasAnySelectorInScopes(
+    scopes,
+    MFA_CODE_INPUT_SELECTORS,
+  );
   if (!hasCodeField) {
     return false;
   }
 
-  onStep?.('mfa_code');
+  onStep?.("mfa_code");
 
   if (!requestMfaCode) {
     throw new SsoFallbackError(
-      'unsupported_mfa',
-      'fallback',
-      `Selected MFA method "${state.selectedMfaMethodLabel || 'code'}" requires code entry, but no code prompt callback was provided.`,
+      "unsupported_mfa",
+      "fallback",
+      `Selected MFA method "${state.selectedMfaMethodLabel || "code"}" requires code entry, but no code prompt callback was provided.`,
     );
   }
 
   if (!state.mfaCodePrompted) {
     state.mfaCodePrompted = true;
-    const input = await requestMfaCode(state.selectedMfaMethodLabel || 'Verification code');
-    const code = input?.trim() ?? '';
+    const input = await requestMfaCode(
+      state.selectedMfaMethodLabel || "Verification code",
+    );
+    const code = input?.trim() ?? "";
     if (!code) {
       throw new SsoFallbackError(
-        'unsupported_mfa',
-        'fallback',
-        `No code entered for MFA method "${state.selectedMfaMethodLabel || 'code'}".`,
+        "unsupported_mfa",
+        "fallback",
+        `No code entered for MFA method "${state.selectedMfaMethodLabel || "code"}".`,
       );
     }
     state.pendingMfaCode = code;
   }
 
-  const codeToSubmit = state.pendingMfaCode?.trim() ?? '';
+  const codeToSubmit = state.pendingMfaCode?.trim() ?? "";
   if (!codeToSubmit) {
     return false;
   }
@@ -1872,14 +2127,17 @@ async function maybeHandleMfaCodeEntry(
 }
 
 /** Fill OTP code in either segmented 1-digit inputs or a single MFA code field. */
-async function fillMfaCodeInputs(scopes: ScopeRef[], code: string): Promise<boolean> {
-  const compactCode = code.replace(/\s+/g, '');
+async function fillMfaCodeInputs(
+  scopes: ScopeRef[],
+  code: string,
+): Promise<boolean> {
+  const compactCode = code.replace(/\s+/g, "");
   const segmentedSelector = [
     'input[inputmode="numeric"][maxlength="1"]',
     'input[type="tel"][maxlength="1"]',
     'input[name*="code"][maxlength="1"]',
     'input[id*="code"][maxlength="1"]',
-  ].join(', ');
+  ].join(", ");
 
   for (const scopeRef of scopes) {
     const segmented = scopeRef.scope.locator(segmentedSelector);
@@ -1906,8 +2164,14 @@ async function fillMfaCodeInputs(scopes: ScopeRef[], code: string): Promise<bool
 }
 
 /** Submit current auth step via selector, label-driven click, or Enter fallback. */
-async function submitAfterFieldFill(scopes: ScopeRef[], labels: string[]): Promise<boolean> {
-  const submittedBySelector = await clickFirstVisible(scopes, PRIMARY_SUBMIT_SELECTORS);
+async function submitAfterFieldFill(
+  scopes: ScopeRef[],
+  labels: string[],
+): Promise<boolean> {
+  const submittedBySelector = await clickFirstVisible(
+    scopes,
+    PRIMARY_SUBMIT_SELECTORS,
+  );
   if (submittedBySelector) {
     return true;
   }
@@ -1924,7 +2188,7 @@ async function submitAfterFieldFill(scopes: ScopeRef[], labels: string[]): Promi
         continue;
       }
       try {
-        await scopeRef.scope.locator(selector).first().press('Enter');
+        await scopeRef.scope.locator(selector).first().press("Enter");
         return true;
       } catch {
         // continue
@@ -1946,8 +2210,12 @@ async function advanceGuidedSsoOnPage(
   username: string,
   password: string,
   state: GuidedSsoRuntimeState,
-  chooseMfaMethod: ((options: MfaMethodOption[]) => Promise<number | null | undefined>) | undefined,
-  requestMfaCode: ((methodLabel: string) => Promise<string | null | undefined>) | undefined,
+  chooseMfaMethod:
+    | ((options: MfaMethodOption[]) => Promise<number | null | undefined>)
+    | undefined,
+  requestMfaCode:
+    | ((methodLabel: string) => Promise<string | null | undefined>)
+    | undefined,
   onMfaNumberChallenge: ((numbers: string[]) => void) | undefined,
   onStep?: (step: SsoStep) => void,
 ): Promise<void> {
@@ -1960,7 +2228,7 @@ async function advanceGuidedSsoOnPage(
     if (clickedEntry) {
       state.ssoEntryClicked = true;
       try {
-        await page.waitForLoadState('domcontentloaded', { timeout: 4000 });
+        await page.waitForLoadState("domcontentloaded", { timeout: 4000 });
       } catch {
         // continue with current state
       }
@@ -1969,15 +2237,25 @@ async function advanceGuidedSsoOnPage(
   }
 
   if (!state.usernameSubmitted) {
-    const hasUsernameField = await hasAnySelectorInScopes(scopes, USERNAME_SELECTORS);
+    const hasUsernameField = await hasAnySelectorInScopes(
+      scopes,
+      USERNAME_SELECTORS,
+    );
     if (hasUsernameField) {
       state.sawUsernameField = true;
     }
 
-    const usernameFilled = await fillFirstVisible(scopes, USERNAME_SELECTORS, username);
+    const usernameFilled = await fillFirstVisible(
+      scopes,
+      USERNAME_SELECTORS,
+      username,
+    );
     if (usernameFilled) {
-      onStep?.('username');
-      state.usernameSubmitted = await submitAfterFieldFill(scopes, USERNAME_CONTINUE_LABELS);
+      onStep?.("username");
+      state.usernameSubmitted = await submitAfterFieldFill(
+        scopes,
+        USERNAME_CONTINUE_LABELS,
+      );
       if (!state.usernameSubmitted) {
         state.usernameSubmitted = true;
       }
@@ -1985,15 +2263,25 @@ async function advanceGuidedSsoOnPage(
   }
 
   if (!state.passwordSubmitted) {
-    const hasPasswordField = await hasAnySelectorInScopes(scopes, PASSWORD_SELECTORS);
+    const hasPasswordField = await hasAnySelectorInScopes(
+      scopes,
+      PASSWORD_SELECTORS,
+    );
     if (hasPasswordField) {
       state.sawPasswordField = true;
     }
 
-    const passwordFilled = await fillFirstVisible(scopes, PASSWORD_SELECTORS, password);
+    const passwordFilled = await fillFirstVisible(
+      scopes,
+      PASSWORD_SELECTORS,
+      password,
+    );
     if (passwordFilled) {
-      onStep?.('password');
-      state.passwordSubmitted = await submitAfterFieldFill(scopes, PASSWORD_SUBMIT_LABELS);
+      onStep?.("password");
+      state.passwordSubmitted = await submitAfterFieldFill(
+        scopes,
+        PASSWORD_SUBMIT_LABELS,
+      );
       if (!state.passwordSubmitted) {
         state.passwordSubmitted = true;
       }
@@ -2009,7 +2297,7 @@ async function advanceGuidedSsoOnPage(
     );
     if (handledSelection) {
       try {
-        await page.waitForLoadState('domcontentloaded', { timeout: 2000 });
+        await page.waitForLoadState("domcontentloaded", { timeout: 2000 });
       } catch {
         // keep polling
       }
@@ -2026,7 +2314,7 @@ async function advanceGuidedSsoOnPage(
     );
     if (submittedMfaCode) {
       try {
-        await page.waitForLoadState('domcontentloaded', { timeout: 2000 });
+        await page.waitForLoadState("domcontentloaded", { timeout: 2000 });
       } catch {
         // keep polling
       }
@@ -2043,7 +2331,7 @@ async function advanceGuidedSsoOnPage(
     if (state.sawOktaVerifyChallenge) {
       const numbers = await extractMfaNumberChallenge(scopes);
       if (numbers.length > 0) {
-        const key = numbers.join('|');
+        const key = numbers.join("|");
         if (key !== state.lastMfaChallengeNumbersKey) {
           state.lastMfaChallengeNumbersKey = key;
           onMfaNumberChallenge?.(numbers);
@@ -2052,7 +2340,7 @@ async function advanceGuidedSsoOnPage(
 
       if (!state.mfaWaitNotified) {
         state.mfaWaitNotified = true;
-        onStep?.('mfa_wait');
+        onStep?.("mfa_wait");
         return;
       }
     }
@@ -2060,7 +2348,7 @@ async function advanceGuidedSsoOnPage(
 
   if (state.usernameSubmitted || state.passwordSubmitted) {
     try {
-      await page.waitForLoadState('domcontentloaded', { timeout: 2000 });
+      await page.waitForLoadState("domcontentloaded", { timeout: 2000 });
     } catch {
       // keep polling
     }
@@ -2072,7 +2360,7 @@ async function launchBrowserForCapture(options: {
   headless: boolean;
   browserAdapter?: BrowserLaunchAdapter;
 }): Promise<{
-  browser: Pick<Browser, 'newContext' | 'close'>;
+  browser: Pick<Browser, "newContext" | "close">;
   plan: BrowserLaunchPlan;
 }> {
   const plan = resolveBrowserLaunchPlan();
@@ -2094,13 +2382,13 @@ async function launchBrowserForCapture(options: {
       };
     }
 
-    let playwrightModule: typeof import('playwright-core');
+    let playwrightModule: typeof import("playwright-core");
     try {
-      playwrightModule = await import('playwright-core');
+      playwrightModule = await import("playwright-core");
     } catch {
       throw new SsoFallbackError(
-        'browser_unavailable',
-        'fallback',
+        "browser_unavailable",
+        "fallback",
         'Auto login requires dependency "playwright-core". Install the CLI with dependencies and retry.',
       );
     }
@@ -2114,31 +2402,31 @@ async function launchBrowserForCapture(options: {
 
     if (isMissingDisplayServerError(detail)) {
       throw new SsoFallbackError(
-        'browser_unavailable',
-        'fallback',
-        'No display server found ($DISPLAY). Use default headless mode, or run with xvfb-run if you need --show-browser.',
+        "browser_unavailable",
+        "fallback",
+        "No display server found ($DISPLAY). Use default headless mode, or run with xvfb-run if you need --show-browser.",
       );
     }
 
     if (isMissingSharedLibraryError(detail)) {
       throw new SsoFallbackError(
-        'browser_unavailable',
-        'fallback',
-        'Browser dependencies are missing. Install the required OS libraries through your system package manager, then retry.',
+        "browser_unavailable",
+        "fallback",
+        "Browser dependencies are missing. Install the required OS libraries through your system package manager, then retry.",
       );
     }
 
-    if (plan.source === 'bundled') {
+    if (plan.source === "bundled") {
       throw new SsoFallbackError(
-        'browser_unavailable',
-        'fallback',
+        "browser_unavailable",
+        "fallback",
         `${browserInstallHint()} (${detail})`,
       );
     }
 
     throw new SsoFallbackError(
-      'browser_unavailable',
-      'fallback',
+      "browser_unavailable",
+      "fallback",
       `Unable to launch browser at "${plan.executablePath}": ${detail}`,
     );
   }
@@ -2156,8 +2444,12 @@ async function captureSsoCredentialsInternal(
     username: string;
     password: string;
     onStep?: (step: SsoStep) => void;
-    chooseMfaMethod?: (options: MfaMethodOption[]) => Promise<number | null | undefined>;
-    requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
+    chooseMfaMethod?: (
+      options: MfaMethodOption[],
+    ) => Promise<number | null | undefined>;
+    requestMfaCode?: (
+      methodLabel: string,
+    ) => Promise<string | null | undefined>;
     onMfaNumberChallenge?: (numbers: string[]) => void;
   },
 ): Promise<LoginCredentials> {
@@ -2172,7 +2464,9 @@ async function captureSsoCredentialsInternal(
 
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   // Isolated context loads only sanitized, OnTrack-only persisted state when available.
-  const context = await browser.newContext(buildContextOptionsWithStoredSession({ targetOrigin }));
+  const context = await browser.newContext(
+    buildContextOptionsWithStoredSession({ targetOrigin }),
+  );
   const page = await context.newPage();
   const seenPages = new Set<Page>();
   let captured: LoginCredentials | null = null;
@@ -2193,19 +2487,19 @@ async function captureSsoCredentialsInternal(
     // Immediate URL check covers flows where auth token appears in address bar.
     setCaptured(extractCredentialsFromUrl(currentPage.url(), targetOrigin));
 
-    currentPage.on('framenavigated', () => {
+    currentPage.on("framenavigated", () => {
       // Re-check URL after every navigation in case redirect carries token.
       setCaptured(extractCredentialsFromUrl(currentPage.url(), targetOrigin));
     });
 
-    currentPage.on('request', (...args: unknown[]) => {
+    currentPage.on("request", (...args: unknown[]) => {
       const request = args[0] as {
         method: () => string;
         url: () => string;
         postData: () => string | null;
       };
 
-      if (request.method() !== 'POST') {
+      if (request.method() !== "POST") {
         return;
       }
       if (!isTargetOnTrackAuthUrl(request.url(), targetOrigin)) {
@@ -2221,7 +2515,7 @@ async function captureSsoCredentialsInternal(
       setCaptured(maybe);
     });
 
-    currentPage.on('response', (...args: unknown[]) => {
+    currentPage.on("response", (...args: unknown[]) => {
       void (async () => {
         if (captured) {
           return;
@@ -2232,7 +2526,10 @@ async function captureSsoCredentialsInternal(
           status: () => number;
           json: () => Promise<unknown>;
         };
-        if (!isTargetOnTrackAuthUrl(response.url(), targetOrigin) || response.status() >= 400) {
+        if (
+          !isTargetOnTrackAuthUrl(response.url(), targetOrigin) ||
+          response.status() >= 400
+        ) {
           return;
         }
 
@@ -2241,13 +2538,13 @@ async function captureSsoCredentialsInternal(
           const parsed = extractCredentialsFromAuthPayload(body);
           if (parsed) {
             const contract = new URL(response.url()).pathname.endsWith(
-              '/api/auth/access-token',
+              "/api/auth/access-token",
             )
-              ? 'access-token'
-              : 'legacy-auth';
+              ? "access-token"
+              : "legacy-auth";
             setCaptured({
               ...parsed,
-              source: 'auth_response',
+              source: "auth_response",
               contract,
             });
           }
@@ -2259,10 +2556,10 @@ async function captureSsoCredentialsInternal(
   };
 
   registerPage(page);
-  context.on('page', (newPage: Page) => registerPage(newPage));
+  context.on("page", (newPage: Page) => registerPage(newPage));
 
   try {
-    await page.goto(options.ssoUrl, { waitUntil: 'domcontentloaded' });
+    await page.goto(options.ssoUrl, { waitUntil: "domcontentloaded" });
     const start = Date.now();
     let sawOktaVerifyChallenge = false;
     const guidedState: GuidedSsoRuntimeState | null = guidedLogin
@@ -2309,17 +2606,17 @@ async function captureSsoCredentialsInternal(
 
         if (await detectSsoCaptcha(scopes)) {
           throw new SsoFallbackError(
-            'captcha',
-            'fallback',
-            'SSO page requested CAPTCHA verification, which is not supported in automated mode.',
+            "captcha",
+            "fallback",
+            "SSO page requested CAPTCHA verification, which is not supported in automated mode.",
           );
         }
 
         if (await detectUnsupportedMfa(scopes)) {
           throw new SsoFallbackError(
-            'unsupported_mfa',
-            'fallback',
-            'Detected an unsupported MFA challenge. Supported methods are Okta Verify push/number and code-entry methods (Okta Verify code / Google Authenticator).',
+            "unsupported_mfa",
+            "fallback",
+            "Detected an unsupported MFA challenge. Supported methods are Okta Verify push/number and code-entry methods (Okta Verify code / Google Authenticator).",
           );
         }
 
@@ -2364,23 +2661,27 @@ async function captureSsoCredentialsInternal(
     if (!captured) {
       if (guidedLogin) {
         const pageSnapshot = summarizePageLocations(context.pages());
-        if (guidedState && !guidedState.sawUsernameField && !guidedState.sawPasswordField) {
+        if (
+          guidedState &&
+          !guidedState.sawUsernameField &&
+          !guidedState.sawPasswordField
+        ) {
           throw new SsoFallbackError(
-            'selector_missing',
-            'username',
+            "selector_missing",
+            "username",
             `Unable to locate Monash SSO username/password fields after redirects. Seen pages: ${pageSnapshot}. Run with --show-browser and retry.`,
           );
         }
         throw new SsoFallbackError(
-          'timeout',
-          'fallback',
+          "timeout",
+          "fallback",
           sawOktaVerifyChallenge
-            ? 'Timed out waiting for Okta Verify approval. Please approve in the app and retry.'
+            ? "Timed out waiting for Okta Verify approval. Please approve in the app and retry."
             : `Timed out waiting for SSO completion after submitting credentials. Seen pages: ${pageSnapshot}`,
         );
       }
       throw new Error(
-        'Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.',
+        "Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.",
       );
     }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
@@ -2404,7 +2705,10 @@ export async function captureCredentialsFromStoredBrowserSession(
   options: AutoLoginOptions,
 ): Promise<LoginCredentials | null> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? 12_000);
-  const fromStoredState = await captureCredentialsFromPersistedStateFile(options, timeoutMs);
+  const fromStoredState = await captureCredentialsFromPersistedStateFile(
+    options,
+    timeoutMs,
+  );
   if (fromStoredState) {
     return fromStoredState;
   }
@@ -2418,7 +2722,7 @@ export async function captureCredentialsFromStoredBrowserSession(
 
 /** Common probe routine shared by persisted-state and live-profile session reuse paths. */
 async function probeCredentialsInOpenContext(
-  context: Pick<BrowserContext, 'cookies'>,
+  context: Pick<BrowserContext, "cookies">,
   page: Page,
   options: AutoLoginOptions,
   timeoutMs: number,
@@ -2426,11 +2730,14 @@ async function probeCredentialsInOpenContext(
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   let capturedFromRequestHeaders: LoginCredentials | null = null;
 
-  page.on('request', (...args: unknown[]) => {
+  page.on("request", (...args: unknown[]) => {
     if (capturedFromRequestHeaders) {
       return;
     }
-    const request = args[0] as { headers: () => Record<string, string>; url: () => string };
+    const request = args[0] as {
+      headers: () => Record<string, string>;
+      url: () => string;
+    };
     if (!isTargetOnTrackAuthUrl(request.url(), targetOrigin)) {
       return;
     }
@@ -2462,7 +2769,10 @@ async function probeCredentialsInOpenContext(
       // ignore unstable intermediate URLs
     }
 
-    return extractCredentialsFromCookieJar(await context.cookies(), targetOrigin);
+    return extractCredentialsFromCookieJar(
+      await context.cookies(),
+      targetOrigin,
+    );
   };
 
   const candidates = [`${targetOrigin}/home`, options.ssoUrl];
@@ -2473,7 +2783,7 @@ async function probeCredentialsInOpenContext(
     }
     try {
       await page.goto(candidate, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: "domcontentloaded",
         timeout: Math.min(remaining, 8_000),
       });
     } catch {
@@ -2518,12 +2828,19 @@ async function captureCredentialsFromPersistedStateFile(
   try {
     const context = await browser.newContext(storageState);
     const page = await context.newPage();
-    const captured = await probeCredentialsInOpenContext(context, page, options, timeoutMs);
+    const captured = await probeCredentialsInOpenContext(
+      context,
+      page,
+      options,
+      timeoutMs,
+    );
     if (!captured) {
       return null;
     }
     try {
-      await saveBrowserSessionState(context, { targetOrigin: new URL(options.apiBaseUrl).origin });
+      await saveBrowserSessionState(context, {
+        targetOrigin: new URL(options.apiBaseUrl).origin,
+      });
     } catch {
       // non-fatal persistence failure
     }
@@ -2538,17 +2855,20 @@ async function captureCredentialsFromSystemBrowserProfile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
-  const profileCandidates = expandSystemBrowserProfileCandidates(resolveSystemBrowserUserDataDirs(), {
-    profileOverride: process.env.ONTRACK_BROWSER_PROFILE_DIR,
-  });
+  const profileCandidates = expandSystemBrowserProfileCandidates(
+    resolveSystemBrowserUserDataDirs(),
+    {
+      profileOverride: process.env.ONTRACK_BROWSER_PROFILE_DIR,
+    },
+  );
 
   if (profileCandidates.length === 0) {
     return null;
   }
 
-  let playwrightModule: typeof import('playwright-core');
+  let playwrightModule: typeof import("playwright-core");
   try {
-    playwrightModule = await import('playwright-core');
+    playwrightModule = await import("playwright-core");
   } catch {
     return null;
   }
@@ -2568,11 +2888,14 @@ async function captureCredentialsFromSystemBrowserProfile(
   for (const candidate of profileCandidates) {
     let context: BrowserContext | null = null;
     try {
-      context = await playwrightModule.chromium.launchPersistentContext(candidate.userDataDir, {
-        headless: options.headless ?? true,
-        executablePath: launchPlan.executablePath,
-        args: [`--profile-directory=${candidate.profileDir}`],
-      });
+      context = await playwrightModule.chromium.launchPersistentContext(
+        candidate.userDataDir,
+        {
+          headless: options.headless ?? true,
+          executablePath: launchPlan.executablePath,
+          args: [`--profile-directory=${candidate.profileDir}`],
+        },
+      );
 
       const page = context.pages()[0] ?? (await context.newPage());
       const captured = await probeCredentialsInOpenContext(
@@ -2602,7 +2925,9 @@ async function captureCredentialsFromSystemBrowserProfile(
 }
 
 /** Browser-only credential capture (no guided username/password actions). */
-export async function captureSsoCredentials(options: AutoLoginOptions): Promise<LoginCredentials> {
+export async function captureSsoCredentials(
+  options: AutoLoginOptions,
+): Promise<LoginCredentials> {
   return captureSsoCredentialsInternal(options);
 }
 
@@ -2628,6 +2953,6 @@ export async function captureSsoCredentialsWithGuidedLogin(
       onMfaNumberChallenge: options.onMfaNumberChallenge,
     },
   );
-  onStep?.('completed');
+  onStep?.("completed");
   return credentials;
 }

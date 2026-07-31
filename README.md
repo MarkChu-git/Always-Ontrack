@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  A terminal-first CLI for Monash OnTrack / Doubtfire
+  An agent-first CLI and authentication MCP for Monash OnTrack / Doubtfire
 </p>
 
 `ontrack-cli` turns common Monash OnTrack workflows into a single command surface:
@@ -20,12 +20,15 @@ The CLI targets the Monash OnTrack API by default:
 
 `https://ontrack.infotech.monash.edu/api`
 
-It is designed to work out of the box, with no mandatory base URL setup and a command set that is suitable for both interactive terminal use and scriptable automation.
+The primary interface is a versioned, schema-discoverable Agent protocol. Human
+tables and the interactive launcher remain available over the same execution
+engine.
 
 ## Contents
 
 - [What it does](#what-it-does)
 - [Installation](#installation)
+- [Agent-first usage](#agent-first-usage)
 - [Quick start](#quick-start)
 - [Core concepts](#core-concepts)
 - [Authentication and session management](#authentication-and-session-management)
@@ -45,6 +48,9 @@ It is designed to work out of the box, with no mandatory base URL setup and a co
 `ontrack-cli` currently covers the following areas:
 
 - Authentication and session handling
+  - silent token renewal from a restricted browser state
+  - structured human handoff only when Monash requires verification
+  - local `ontrack-auth-mcp` control plane
   - SSO auto capture
   - manual redirect URL login
   - direct `auth token + username` login
@@ -69,7 +75,8 @@ It is designed to work out of the box, with no mandatory base URL setup and a co
   - `discover --probe`
 - Terminal UX
   - colored table output by default
-  - `--json` for automation and scripting
+  - `--output agent-json` for versioned Agent automation
+  - legacy `--json` for compatible raw scripting output
   - fallback handling when some endpoints are not accessible for the current account
 
 ## Installation
@@ -92,6 +99,7 @@ After installation, the CLI is available as:
 
 ```bash
 ontrack
+ontrack-auth-mcp
 ```
 
 ### Local install
@@ -116,6 +124,92 @@ Development mode:
 ```bash
 bun run dev -- auth-method
 ```
+
+## Agent-first usage
+
+### Discover the protocol
+
+Agents should discover capabilities and schemas instead of scraping help text:
+
+```bash
+ontrack capabilities --output agent-json
+ontrack schema task.show --output agent-json
+```
+
+`--output agent-json` returns the stable `ontrack.agent/v1` envelope with a
+request id, command path, status, structured data, warnings, next actions, and
+artifacts. Errors use stable codes and exit statuses. Existing bare `--json`
+keeps its pre-0.5 raw shape.
+
+### Pass structured input
+
+```bash
+ontrack task show \
+  --input-json '{"project_id":87,"abbreviation":"D4"}' \
+  --output agent-json
+```
+
+Or use bounded, non-interactive stdin:
+
+```bash
+printf '%s' '{"project_id":87,"task_definition_id":501}' |
+  ontrack task show --input - --output agent-json
+```
+
+Only fields declared by the command schema are accepted. Unknown fields,
+ambiguous duplicate flags, unsafe object keys, invalid types, and TTY stdin are
+rejected before a business request is sent.
+
+### Use the authentication MCP
+
+The package installs a separate stdio server whose scope is deliberately limited
+to authentication:
+
+```json
+{
+  "mcpServers": {
+    "ontrack-auth": {
+      "command": "ontrack-auth-mcp"
+    }
+  }
+}
+```
+
+It exposes `auth_status`, `auth_ensure`, and `auth_logout`. It never returns
+passwords, Okta challenge values, cookies, refresh tokens, OnTrack access tokens,
+or SSO form data. MCP callers cannot choose a network origin; a non-production
+deployment must be configured by the trusted host through `ONTRACK_BASE_URL`
+before the server starts.
+
+Use `auth_ensure` with `interaction: "never"` during autonomous work. It first
+reuses a valid token, then attempts a silent refresh from the restricted browser
+state. If Monash policy requires a number challenge, it returns a structured
+human handoff. `interaction: "if_required"` may open one visible browser flow;
+the Agent resumes after the user completes the Monash-controlled step.
+
+The CLI applies the same lifecycle automatically. A rejected read may silently
+refresh and replay once. Mutations are never automatically replayed.
+
+### Apply writes safely
+
+Writes remain dry-run by default. A confirmed Agent write also requires a stable
+idempotency key:
+
+```bash
+ontrack plan set-dates \
+  --project-id 87 \
+  --abbr D4 \
+  --start 2026-08-01 \
+  --target 2026-08-10 \
+  --confirm \
+  --idempotency-key plan-87-D4-2026-08-10 \
+  --output agent-json
+```
+
+Completed operations replay their safe recorded result without dispatching
+again. Reusing a key with different input is rejected. If a transport failure or
+process interruption makes the remote outcome unknowable, that key is blocked
+until the Agent verifies remote state.
 
 ## Quick start
 
@@ -267,7 +361,9 @@ Batch-capable commands (`task show`, `feedback list`, `pdf task`, `pdf submissio
 
 ### `--json`
 
-Most read commands support `--json`. Use it when you want to pipe results into scripts, CI steps, or your own tooling.
+Most read commands support `--json` for compatible raw output. Agents should use
+`--output agent-json` for the versioned envelope, schemas, stable errors, and
+next actions.
 
 ## Authentication and session management
 
@@ -342,7 +438,10 @@ ontrack login --auth-token <token> --username <username>
 
 ### What gets cached
 
-After login, the CLI stores a session locally and reuses it for subsequent commands. You do not need to sign in again for each run unless the session expires or you log out.
+After login, the CLI stores the access token locally and keeps browser refresh
+state in a separate restricted file. Authenticated commands renew near-expiry
+tokens silently when possible, so users do not normally sign in for every run.
+Monash can still require verification when its refresh or SSO policy expires.
 
 The API client authenticates with these headers:
 
@@ -363,13 +462,17 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack` | Open the interactive command launcher | Fastest way to run common workflows by number |
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
+| `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
+| `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
+| `ontrack auth status --output agent-json` | Read credential lifecycle metadata | Never returns a credential or identity |
+| `ontrack auth ensure --output agent-json` | Ensure a usable credential | Silent by default; structured handoff when required |
 | `ontrack login` | Run guided Monash SSO with MFA method selection (push/number/code) | Primary login command |
 | `ontrack login --sso` | Run guided Monash SSO with MFA method selection (push/number/code) | Explicit guided alias |
 | `ontrack login --show-browser` | Force visible browser mode for guided SSO | Debug selector or MFA edge cases |
 | `ontrack login --hide-browser` | Keep explicit headless guided SSO | Optional explicit flag (default behavior) |
 | `ontrack login --auto` | Run browser-only capture mode | Use when you only need passive capture |
-| `ontrack logout` | Clear the local session | Switch accounts, reset state, troubleshoot |
+| `ontrack logout` | Clear local session and browser refresh state | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
 | `ontrack doctor` | Probe key endpoints | Quickly identify session or permission issues |
 
@@ -651,6 +754,26 @@ Default session file location:
 
 The CLI creates the directory automatically and writes the session file with stricter permissions where the platform allows it.
 
+### Browser refresh state
+
+The exact-origin browser state used for silent renewal is stored separately:
+
+- macOS / Linux: `~/.config/ontrack-cli/browser-state.json`
+- Windows: `%APPDATA%\ontrack-cli\browser-state.json`
+
+The directory is restricted to `0700` and the file to `0600` where supported.
+The Auth MCP consumes this state internally but never returns it to its caller.
+
+### Agent execution journal
+
+Confirmed Agent writes keep credential-free records under:
+
+- macOS / Linux: `~/.config/ontrack-cli/executions/`
+- Windows: `%APPDATA%\ontrack-cli\executions\`
+
+The journal stores hashes, lifecycle state, and sanitized results. It never stores
+upload paths, file contents, comments, identity data, or credentials.
+
 ### Download directory
 
 Default PDF download directory:
@@ -833,12 +956,16 @@ bunx playwright@1.58.2 install chromium
 
 ### `419 Authentication Timeout`
 
-The cached session has expired. Re-authenticate:
+The server rejected the cached access token. First ask the auth runtime to renew
+it:
 
 ```bash
-ontrack logout
-ontrack login
+ontrack auth ensure --interaction never --output agent-json
 ```
+
+If the result is `HUMAN_VERIFICATION_REQUIRED`, run the same command with
+`--interaction if_required` while the user is available. Ordinary read commands
+already attempt one silent refresh and safe replay automatically.
 
 ### `Task abbreviation "... " is ambiguous`
 
