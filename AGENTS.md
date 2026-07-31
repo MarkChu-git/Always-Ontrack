@@ -19,6 +19,30 @@ Rules:
 
 ## Agent skills
 
+### GitNexus
+
+GitNexus 1.6.9 is an optional, local code-intelligence index. It complements
+Graphify: Graphify is the portable committed architecture graph, while
+GitNexus provides live symbol context and blast-radius analysis.
+
+- All project commands use the ignored `.gitnexus-home/` registry so the MCP
+  cannot enumerate repositories from the user's global GitNexus registry.
+- Do not run `gitnexus setup`; it writes user-global editor configuration.
+- Do not run bare `gitnexus analyze`; use `bun run gitnexus:analyze`, which
+  deliberately uses `--index-only` and cannot modify `AGENTS.md`, `CLAUDE.md`,
+  or install generated skills.
+- Before editing a product-code symbol, use `bun run gitnexus:impact --
+  "<symbol>" --file <path>` when `.gitnexus/` is available. Use Graphify first
+  for broad architecture questions; use GitNexus for precise, live code impact.
+- After product-code changes, refresh with `bun run gitnexus:analyze`; before a
+  commit, run `bun run gitnexus:detect-changes`, which checks both staged and
+  unstaged changes. Treat HIGH or CRITICAL impact findings as a reason to
+  inspect the affected code before proceeding.
+- Keep the MCP transport on stdio. Do not expose `gitnexus mcp --http` or send
+  repository data to a remote embeddings provider without explicit approval.
+
+See `docs/agents/gitnexus.md` for setup, update, and recovery instructions.
+
 ### Issue tracker
 
 Issues and PRDs are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.

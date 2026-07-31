@@ -30,7 +30,18 @@
     "graphify:build": "graphify extract . --code-only",
     "graphify:update": "graphify update .",
     "graphify:check": "graphify check-update .",
-    "skills:check": "bun scripts/check-skill-lock.ts",
+    "gitnexus:analyze": "GITNEXUS_HOME=.gitnexus-home gitnexus analyze --force --index-only --name ontrack-cli --wal-checkpoint-threshold 67108864",
+    "gitnexus:repair": "GITNEXUS_HOME=.gitnexus-home gitnexus analyze --repair-fts --index-only --name ontrack-cli --wal-checkpoint-threshold 67108864",
+    "gitnexus:status": "GITNEXUS_HOME=.gitnexus-home gitnexus status",
+    "gitnexus:query": "GITNEXUS_HOME=.gitnexus-home gitnexus query --repo ontrack-cli",
+    "gitnexus:context": "GITNEXUS_HOME=.gitnexus-home gitnexus context --repo ontrack-cli",
+    "gitnexus:impact": "GITNEXUS_HOME=.gitnexus-home gitnexus impact --repo ontrack-cli",
+    "gitnexus:detect-changes": "GITNEXUS_HOME=.gitnexus-home gitnexus detect-changes --scope all --repo ontrack-cli",
+    "gitnexus:check": "GITNEXUS_HOME=.gitnexus-home gitnexus check --cycles --json --repo ontrack-cli",
+    "gitnexus:doctor": "GITNEXUS_HOME=.gitnexus-home gitnexus doctor",
+    "gitnexus:mcp": "GITNEXUS_HOME=.gitnexus-home gitnexus mcp",
+    "gitnexus:mcp:check": "bun scripts/check-gitnexus-mcp.ts",
+    "skills:check": "bun scripts/check-skill-lock.ts && bun scripts/check-gitnexus-skill-sync.ts",
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",
     "prepare": "bun run build"
   },
@@ -40,6 +51,7 @@
   "packageManager": "bun@1.3.14",
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "gitnexus": "1.6.9",
     "typescript": "^5.9.0"
   },
   "keywords": [
@@ -56,5 +68,12 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "playwright-core": "^1.58.2",
     "zod": "^4.0.0"
+  },
+  "trustedDependencies": [
+    "@ladybugdb/core"
+  ],
+  "overrides": {
+    "adm-zip": "0.6.0",
+    "sharp": "0.35.3"
   }
 }
