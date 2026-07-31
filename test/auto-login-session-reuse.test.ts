@@ -15,6 +15,7 @@ import { join } from "node:path";
 import {
   buildContextOptionsWithStoredSession,
   captureCredentialsFromStoredBrowserSession,
+  setBrowserSessionStatePathForTests,
 } from "../src/lib/auto-login.js";
 
 const SSO_URL = "https://identity.example/sso";
@@ -51,23 +52,14 @@ async function withBrowserState(
   await previousEnvironmentUser;
 
   let tempRoot: string | undefined;
-  let environmentChanged = false;
-  const previousStoragePath = process.env.ONTRACK_BROWSER_STATE_PATH;
   try {
     tempRoot = await mkdtemp(join(homedir(), `.${prefix}`));
     const storagePath = join(tempRoot, "browser-state.json");
-    process.env.ONTRACK_BROWSER_STATE_PATH = storagePath;
-    environmentChanged = true;
+    setBrowserSessionStatePathForTests(storagePath);
     await run(storagePath);
   } finally {
     try {
-      if (environmentChanged) {
-        if (previousStoragePath === undefined) {
-          delete process.env.ONTRACK_BROWSER_STATE_PATH;
-        } else {
-          process.env.ONTRACK_BROWSER_STATE_PATH = previousStoragePath;
-        }
-      }
+      setBrowserSessionStatePathForTests(undefined);
       if (tempRoot) {
         await rm(tempRoot, { recursive: true, force: true });
       }

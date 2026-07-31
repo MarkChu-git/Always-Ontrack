@@ -736,6 +736,32 @@ export function resolveBrowserSessionStatePath(
   return join(home, ".config", "ontrack-cli", "browser-state.json");
 }
 
+let browserSessionStatePathForTests: string | undefined;
+
+/** @internal Isolate browser-state filesystem tests without production env paths. */
+export function setBrowserSessionStatePathForTests(
+  storagePath: string | undefined,
+): void {
+  browserSessionStatePathForTests = storagePath
+    ? resolve(storagePath)
+    : undefined;
+}
+
+/**
+ * Credential-bearing browser state always uses one operator-owned path. It
+ * intentionally ignores environment path overrides so Agent or service
+ * configuration cannot redirect authentication file I/O.
+ */
+function resolveManagedBrowserSessionStatePath(): string {
+  if (browserSessionStatePathForTests) {
+    return browserSessionStatePathForTests;
+  }
+  const home = homedir();
+  return process.platform === "win32"
+    ? join(home, "AppData", "Roaming", "ontrack-cli", "browser-state.json")
+    : join(home, ".config", "ontrack-cli", "browser-state.json");
+}
+
 /**
  * Resolve the private directory containing an existing browser-state file.
  * The filename is fixed and the directory is canonicalized inside the local
@@ -750,7 +776,7 @@ function resolveTrustedExistingBrowserSessionStateLocation(
   directoryInode: number;
 } | null {
   const trustedRoot = realpathSync(homedir());
-  const configuredPath = resolve(resolveBrowserSessionStatePath());
+  const configuredPath = resolve(resolveManagedBrowserSessionStatePath());
   if (basename(configuredPath) !== "browser-state.json") {
     throw new Error(
       "Refusing to reuse a browser-state file with an unexpected name.",
@@ -1013,7 +1039,7 @@ function writeBrowserSessionStateIfAbsent(
 
 /** Remove the persisted OnTrack-only browser state used by silent renewal. */
 export function clearBrowserSessionState(storagePath?: string): void {
-  const path = storagePath ?? resolveBrowserSessionStatePath();
+  const path = storagePath ?? resolveManagedBrowserSessionStatePath();
   // This path is trusted local operator configuration.
   // codeql[js/path-injection]
   if (!existsSync(path)) {
@@ -1374,7 +1400,8 @@ export async function saveBrowserSessionState(
   },
   options: SaveBrowserSessionStateOptions = {},
 ): Promise<void> {
-  const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
+  const storagePath =
+    options.storagePath ?? resolveManagedBrowserSessionStatePath();
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
   const state = await context.storageState();
   const filtered = filterBrowserSessionState(
@@ -1398,7 +1425,8 @@ export function buildContextOptionsWithStoredSession(
       storageState: BrowserStorageState;
     }
   | undefined {
-  const storagePath = options.storagePath ?? resolveBrowserSessionStatePath();
+  const storagePath =
+    options.storagePath ?? resolveManagedBrowserSessionStatePath();
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
   // This is a trusted local operator store path.
   // codeql[js/path-injection]
