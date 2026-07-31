@@ -6,7 +6,10 @@
 
 OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不是部署到服务器的 Web 服务。因此本项目的 CD 指的是：可复现地构建一个 npm-compatible tarball、将其作为 GitHub Release asset 保存、并在明确启用后以受保护的 OIDC 身份发布到 npm registry。
 
-开发、测试、类型检查、构建和打包一律使用 Bun。npm CLI 只在 registry 发布这个窄传输边界使用，因为 npm Trusted Publishing 的 OIDC 文档目前以 npm CLI 为发布端；在 Bun 官方明确支持 npm OIDC 发布之前，不把 `npm publish` 扩展到日常开发或 CI 依赖管理。
+开发、测试、类型检查、构建和打包使用 Bun。Node.js 只用于两个明确
+隔离的工具边界：GitNexus 1.6.9 的 LadybugDB 本地分析（Node 24.18.0）
+和 registry 发布时的 npm Trusted Publishing。GitNexus 的安装、版本锁定
+与命令编排仍由 Bun 管理；npm CLI 不扩展到日常依赖管理。
 
 本设计的目标：
 
@@ -21,15 +24,16 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 | 项目 | 当前事实 | 对设计的影响 |
 | --- | --- | --- |
 | 默认分支 | `master` | 所有 branch protection 与 PR 触发器以 `master` 为目标。 |
-| 版本 | `package.json` 为 `0.4.0` | Release tag 必须严格为 `v0.4.0` 形式，并与包版本去掉 `v` 后相同。 |
+| 版本 | `package.json` 为 `0.5.0` | Release tag 必须严格为 `v0.5.0` 形式，并与包版本去掉 `v` 后相同。 |
 | 历史 tag | 本地有带注释的 `v0.2.0`、`v0.3.0`，远端尚未发现它们 | 在启用 tag-triggered release 前，先确认并推送应保留的历史 tag。 |
 | package manager | `bun.lock`、`packageManager: bun@1.3.14`、`engines.bun: >=1.3.14` | CI 固定 Bun 1.3.14，使用 `bun install --frozen-lockfile`。 |
 | 现有 workflow | 已实现 `ci.yml`、`dependency-review.yml`、`release.yml` | 本文同时是实施说明；远端治理项按 runbook 完成。 |
 | 公共发行 | npm registry 已有 `ontrack-cli@0.3.0` | registry 发布是现实需求；不能把“迁移 npm 到 Bun”误解成停止 npm registry 分发。 |
 | package 发布面 | `bun pm pack --dry-run` 当前包含 package metadata、LICENSE、双语 README 与 `dist/**` | 发布前必须验证 tarball allowlist，阻止源码、测试、session 或下载文件泄漏。 |
+| GitNexus | 精确 devDependency `1.6.9`；项目 registry 隔离；分析必须 Node >=22 | CI 固定 Node 24.18.0，运行 full analyze、status、cycles 与 MCP live smoke；`.gitnexus/` 不缓存、不上传。 |
 | 真实 smoke | `smoke:real` 使用真实账号与生产环境 | 只放在维护者本机/受控人工 checklist，绝不放入 hosted CI。 |
 | Dependabot | GitHub 支持 Bun >=1.1.39 的文本 `bun.lock`，不支持旧 `bun.lockb` | 可以原生使用 Dependabot 的 `bun` ecosystem。 |
-| npm OIDC | Trusted Publishing 需要 npm CLI >=11.5.1、Node >=22.14、GitHub-hosted runner、`id-token: write`、精确匹配的 `repository.url` | 这是 registry publish job 使用 Node/npm 的唯一例外；发布前补齐包元数据与 trusted publisher 配置。 |
+| npm OIDC | Trusted Publishing 需要 npm CLI >=11.5.1、Node >=22.14、GitHub-hosted runner、`id-token: write`、精确匹配的 `repository.url` | 这是 registry publish job 的 Node/npm 边界；另一个 Node 边界仅限 GitNexus 本地分析。 |
 
 `package.json` 已包含 OIDC 发布所需的仓库元数据：
 
@@ -57,7 +61,7 @@ registry 发布仍默认关闭，直到维护者完成 Trusted Publisher 与受�
 PR / push to master / tag
         │
         ▼
-  CI: frozen install → typecheck → test+coverage → audit → build
+  CI: frozen install → isolated GitNexus smoke → typecheck → test+coverage → audit → build
         │
         ▼
   package verification: build one tgz → inspect → isolated CLI help
@@ -136,6 +140,11 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.bun/install/cache
@@ -147,6 +156,13 @@ jobs:
       - name: Install exactly from lockfile
         run: bun install --frozen-lockfile
 
+      - name: Verify isolated GitNexus agent graph
+        run: |
+          bun run gitnexus:analyze
+          bun run gitnexus:status
+          bun run gitnexus:check
+          bun run gitnexus:mcp:check
+
       - run: bun run typecheck
       - run: bun test --coverage --coverage-reporter=text --coverage-reporter=lcov
       - run: bun audit
@@ -157,9 +173,7 @@ jobs:
       - name: Pack the already-built release candidate
         run: |
           mkdir -p artifacts
-          VERSION="$(bun -e 'console.log(require("./package.json").version)')"
-          bun pm pack --ignore-scripts --destination artifacts \
-            --filename "ontrack-cli-${VERSION}.tgz"
+          bun pm pack --ignore-scripts --destination artifacts --quiet
 
       - name: Verify package contents and installed binary
         run: bun scripts/verify-package.ts artifacts/*.tgz

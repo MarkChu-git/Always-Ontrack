@@ -23,6 +23,11 @@ always-ontrack-logo.png
 **/*.pem
 **/*.key
 
+# GitNexus uses a local LadybugDB index and per-repository runner. It is
+# reproducible from the pinned dev dependency and must not be committed.
+.gitnexus/
+.gitnexus-home/
+
 # Graphify's portable core graph is committed; machine-local state is not.
 graphify-out/cache/
 graphify-out/cost.json

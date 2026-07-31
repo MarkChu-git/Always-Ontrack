@@ -1,0 +1,40 @@
+# Agent tooling is installed alongside the product but is not product code.
+.agents/
+.codex/
+.pi/
+AGENTS.md
+docs/agents/
+skills-lock.json
+
+# Graphify is the authoritative portable architecture artifact.
+graphify-out/
+.gitnexus-home/
+
+# User/course artifacts are not part of the CLI codebase.
+downloads/
+always-ontrack-logo.png
+
+# Keep credentials and browser-auth artifacts out even when a caller sets
+# GITNEXUS_NO_GITIGNORE=1.
+**/.env*
+!**/.env.example
+**/.npmrc
+**/.auth/
+**/playwright/.auth/
+**/*storage-state*.json
+**/*browser-state*.json
+**/*session-state*.json
+**/ontrack-cli/session.json
+**/ontrack-cli/.session.json.tmp-*
+**/test-results/
+**/playwright-report/
+**/traces/
+**/trace.zip
+**/*.trace.zip
+**/*.pem
+**/*.key
+
+# Build and dependency outputs.
+node_modules/
+dist/
+coverage/
