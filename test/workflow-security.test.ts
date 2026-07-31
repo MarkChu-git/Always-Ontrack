@@ -29,3 +29,19 @@ test('release validates the exact single draft asset before reuse and publicatio
     /Publish the approved draft GitHub Release[\s\S]*sha256sum[\s\S]*gh release edit "\$TAG" --draft=false/,
   );
 });
+
+test('CI and release reject modified or unpinned project skills', async () => {
+  const [ciWorkflow, releaseWorkflow] = await Promise.all([
+    readFile(new URL('ci.yml', workflowRoot), 'utf8'),
+    readFile(new URL('release.yml', workflowRoot), 'utf8'),
+  ]);
+
+  assert.match(
+    ciWorkflow,
+    /Verify pinned project skills[\s\S]*bun run skills:check[\s\S]*bun run typecheck/,
+  );
+  assert.match(
+    releaseWorkflow,
+    /Typecheck, test, audit, and build[\s\S]*bun run skills:check[\s\S]*bun run typecheck/,
+  );
+});
