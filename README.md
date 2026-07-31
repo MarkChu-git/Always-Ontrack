@@ -186,6 +186,8 @@ reuses a valid token, then attempts a silent refresh from the restricted browser
 state. If Monash policy requires a number challenge, it returns a structured
 human handoff. `interaction: "if_required"` may open one visible browser flow;
 the Agent resumes after the user completes the Monash-controlled step.
+The default remaining-validity margin is 60 seconds; pass `min_ttl_seconds` (or
+CLI `--min-ttl-seconds`) to require a longer margin for a specific operation.
 
 The CLI applies the same lifecycle automatically. A rejected read may silently
 refresh and replay once. Mutations are never automatically replayed.

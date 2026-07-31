@@ -181,6 +181,8 @@ token，再尝试从受限浏览器状态静默刷新。如果 Monash 策略要�
 challenge，它会返回结构化 human handoff。用户在场时可以改用
 `interaction: "if_required"`，此时最多开启一次可见浏览器流程；用户完成
 Monash 控制的验证后，Agent 继续工作。
+默认剩余有效期门槛为 60 秒；特定操作需要更长时间时，可传入
+`min_ttl_seconds`（或 CLI 的 `--min-ttl-seconds`）。
 
 CLI 使用同一个生命周期。读请求被拒绝时最多静默刷新并安全重放一次；写请求
 永远不会被自动重放。

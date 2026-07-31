@@ -53,6 +53,18 @@ const DEFAULT_LOCK_TIMEOUT_MS = 15_000;
 const DEFAULT_LOCK_STALE_MS = 120_000;
 const DEFAULT_LOCK_POLL_INTERVAL_MS = 50;
 
+/** Stable machine code for a healthy refresh lock that was not acquired in time. */
+export const AUTH_REFRESH_LOCK_TIMEOUT = 'AUTH_REFRESH_LOCK_TIMEOUT';
+
+class SessionRefreshLockTimeoutError extends Error {
+  readonly code = AUTH_REFRESH_LOCK_TIMEOUT;
+
+  constructor() {
+    super('Timed out acquiring session refresh lock.');
+    this.name = 'SessionRefreshLockTimeoutError';
+  }
+}
+
 function resolveSessionPath(options: SessionPathOptions = {}): string {
   return options.sessionPath ?? getSessionPath();
 }
@@ -212,7 +224,7 @@ async function acquireSessionRefreshLock(
 
     await recoverStaleRefreshLock(lockPath, staleMs);
     if (Date.now() >= deadline) {
-      throw new Error('Timed out acquiring session refresh lock.');
+      throw new SessionRefreshLockTimeoutError();
     }
     await wait(pollIntervalMs);
   }

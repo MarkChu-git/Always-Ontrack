@@ -5,6 +5,7 @@ import {
   createOnTrackAuthBroker,
   type OnTrackAuthBroker,
 } from './lib/auth-broker.js';
+import { DEFAULT_AUTH_MIN_TTL_SECONDS } from './lib/auth-runtime.js';
 import { clearSession } from './lib/session.js';
 import { clearBrowserSessionState } from './lib/auto-login.js';
 import { normalizeBaseUrl } from './lib/utils.js';
@@ -119,7 +120,12 @@ export function createAuthMcpServer(
       description:
         'Returns a usable credential state, silently refreshing first. A visible browser is allowed only with interaction=if_required.',
       inputSchema: z.object({
-        min_ttl_seconds: z.number().int().min(0).max(86_400).default(600),
+        min_ttl_seconds: z
+          .number()
+          .int()
+          .min(0)
+          .max(86_400)
+          .default(DEFAULT_AUTH_MIN_TTL_SECONDS),
         interaction: z.enum(['never', 'if_required']).default('never'),
       }).strict(),
       outputSchema: toolResultSchema,

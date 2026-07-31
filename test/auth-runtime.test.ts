@@ -9,6 +9,7 @@ import {
   type AuthRuntimeAdapter,
 } from '../src/lib/auth-runtime.js';
 import {
+  AUTH_REFRESH_LOCK_TIMEOUT,
   saveSession,
   withSessionRefreshLock,
 } from '../src/lib/session.js';
@@ -67,6 +68,32 @@ test('auth runtime returns ready without adapter refresh when expiry exceeds the
   });
   assert.equal(refreshCalls, 0);
   assert.equal(JSON.stringify(result).includes(baseSession.authToken), false);
+});
+
+test('auth runtime default accepts a session with nearly ten minutes remaining without refresh', async () => {
+  let silentRefreshCalls = 0;
+  const session: SessionData = {
+    ...baseSession,
+    savedAt: '2026-07-31T09:03:53.181Z',
+    expiresAt: '2026-07-31T09:13:53.402Z',
+  };
+  const runtime = createAuthRuntime(createAdapter({
+    loadSession: async () => session,
+    silentRefresh: async () => {
+      silentRefreshCalls += 1;
+      return freshSession();
+    },
+    now: () => new Date('2026-07-31T09:03:54.000Z'),
+  }));
+
+  const result = await runtime.ensure();
+
+  assert.deepEqual(result, {
+    status: 'ready',
+    expiresAt: '2026-07-31T09:13:53.402Z',
+    refreshed: false,
+  });
+  assert.equal(silentRefreshCalls, 0);
 });
 
 test('auth runtime silently refreshes sessions inside the expiry margin and persists the replacement', async () => {
@@ -197,6 +224,51 @@ test('auth runtime deduplicates concurrent same-process refresh operations', asy
   ]);
 });
 
+test('auth runtime does not share in-flight results across different normalized options', async () => {
+  let silentRefreshCalls = 0;
+  let interactiveCalls = 0;
+  let releaseFirstRefresh: (() => void) | undefined;
+  const firstRefreshGate = new Promise<void>((resolve) => {
+    releaseFirstRefresh = resolve;
+  });
+  const runtime = createAuthRuntime(createAdapter({
+    silentRefresh: async () => {
+      silentRefreshCalls += 1;
+      if (silentRefreshCalls === 1) {
+        await firstRefreshGate;
+      }
+      return null;
+    },
+    beginInteractiveLogin: async () => {
+      interactiveCalls += 1;
+      return freshSession('interactive-token-must-not-leak');
+    },
+    now: () => new Date('2026-07-31T00:55:00.000Z'),
+  }));
+
+  const never = runtime.ensure({ minTtlSeconds: 600, interaction: 'never' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(silentRefreshCalls, 1);
+  const ifRequired = runtime.ensure({
+    minTtlSeconds: 600,
+    interaction: 'if_required',
+  });
+  releaseFirstRefresh?.();
+
+  assert.deepEqual(await never, {
+    status: 'auth_required',
+    code: 'HUMAN_VERIFICATION_REQUIRED',
+    retryable: true,
+  });
+  assert.deepEqual(await ifRequired, {
+    status: 'ready',
+    expiresAt: '2026-07-31T02:00:00.000Z',
+    refreshed: true,
+  });
+  assert.equal(silentRefreshCalls, 2);
+  assert.equal(interactiveCalls, 1);
+});
+
 test('separate runtimes reuse a credential refreshed while waiting on the shared lock', async () => {
   let session: SessionData | null = baseSession;
   let refreshCalls = 0;
@@ -281,6 +353,115 @@ test('auth runtime converts refresh-lock failures into a redacted terminal error
   assert.equal(JSON.stringify(result).includes('credential detail'), false);
 });
 
+test('auth runtime reuses a session another process refreshed after a refresh-lock timeout', async () => {
+  let loadCalls = 0;
+  const runtime = createAuthRuntime(createAdapter({
+    loadSession: async () => {
+      loadCalls += 1;
+      return loadCalls === 1
+        ? { ...baseSession, expiresAt: '2026-07-31T00:00:30.000Z' }
+        : baseSession;
+    },
+    withRefreshLock: async () => {
+      throw Object.assign(new Error('refresh lock timed out'), {
+        code: AUTH_REFRESH_LOCK_TIMEOUT,
+      });
+    },
+    now: () => new Date('2026-07-31T00:00:00.000Z'),
+  }));
+
+  const result = await runtime.ensure({ minTtlSeconds: 60 });
+
+  assert.deepEqual(result, {
+    status: 'ready',
+    expiresAt: '2026-07-31T01:00:00.000Z',
+    refreshed: false,
+  });
+  assert.equal(loadCalls, 2);
+});
+
+test('auth runtime reports human verification after a refresh-lock timeout without a fresh session', async () => {
+  let loadCalls = 0;
+  let silentRefreshCalls = 0;
+  let interactiveCalls = 0;
+  const stale = { ...baseSession, expiresAt: '2026-07-31T00:00:30.000Z' };
+  const runtime = createAuthRuntime(createAdapter({
+    loadSession: async () => {
+      loadCalls += 1;
+      return stale;
+    },
+    withRefreshLock: async () => {
+      throw Object.assign(new Error('refresh lock timed out'), {
+        code: AUTH_REFRESH_LOCK_TIMEOUT,
+      });
+    },
+    silentRefresh: async () => {
+      silentRefreshCalls += 1;
+      return freshSession();
+    },
+    beginInteractiveLogin: async () => {
+      interactiveCalls += 1;
+      return freshSession();
+    },
+    now: () => new Date('2026-07-31T00:00:00.000Z'),
+  }));
+
+  const result = await runtime.ensure({
+    minTtlSeconds: 60,
+    interaction: 'if_required',
+  });
+
+  assert.deepEqual(result, {
+    status: 'auth_required',
+    code: 'HUMAN_VERIFICATION_REQUIRED',
+    retryable: true,
+  });
+  assert.equal(loadCalls, 2);
+  assert.equal(silentRefreshCalls, 0);
+  assert.equal(interactiveCalls, 0);
+});
+
+test('auth runtime keeps min-TTL and force-refresh variants out of the same in-flight operation', async () => {
+  for (const [firstOptions, secondOptions] of [
+    [
+      { minTtlSeconds: 600, interaction: 'never' as const },
+      { minTtlSeconds: 700, interaction: 'never' as const },
+    ],
+    [
+      { minTtlSeconds: 600, interaction: 'never' as const },
+      {
+        minTtlSeconds: 600,
+        interaction: 'never' as const,
+        forceRefresh: true,
+      },
+    ],
+  ]) {
+    let silentRefreshCalls = 0;
+    let releaseFirstRefresh: (() => void) | undefined;
+    const firstRefreshGate = new Promise<void>((resolve) => {
+      releaseFirstRefresh = resolve;
+    });
+    const runtime = createAuthRuntime(createAdapter({
+      silentRefresh: async () => {
+        silentRefreshCalls += 1;
+        if (silentRefreshCalls === 1) {
+          await firstRefreshGate;
+        }
+        return freshSession();
+      },
+      now: () => new Date('2026-07-31T00:55:00.000Z'),
+    }));
+
+    const first = runtime.ensure(firstOptions);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(silentRefreshCalls, 1);
+    const second = runtime.ensure(secondOptions);
+    releaseFirstRefresh?.();
+    await Promise.all([first, second]);
+    assert.equal(silentRefreshCalls, 2);
+  }
+});
+
 test('session refresh lock serializes contenders, recovers a stale lock, times out on a fresh lock, and releases in finally', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ontrack-auth-runtime-'));
   const lockPath = join(root, 'refresh.lock');
@@ -354,7 +535,13 @@ test('session refresh lock serializes contenders, recovers a stale lock, times o
         staleMs: 60_000,
         pollIntervalMs: 2,
       }),
-      /Timed out acquiring session refresh lock/,
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: unknown }).code,
+          AUTH_REFRESH_LOCK_TIMEOUT,
+        );
+        return true;
+      },
     );
     await rm(lockPath, { recursive: true, force: true });
 

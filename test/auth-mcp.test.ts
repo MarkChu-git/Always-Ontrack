@@ -105,6 +105,45 @@ test('Auth MCP returns structured lifecycle data without credential material', a
   );
 });
 
+test('Auth MCP uses the 60-second default expiry margin when callers omit it', async () => {
+  let received: { minTtlSeconds?: number; interaction?: string } | undefined;
+  await withClient(
+    {
+      createBroker: () => ({
+        status: async () => ({
+          status: 'usable',
+          source: 'access-token',
+          expiresAt: '2026-08-01T00:00:00.000Z',
+          baseUrl: 'https://ontrack.example/api',
+        }),
+        ensure: async (options) => {
+          received = options;
+          return {
+            status: 'ready',
+            expiresAt: '2026-08-01T00:00:00.000Z',
+            refreshed: false,
+          };
+        },
+        currentSession: async () => null,
+      }),
+      clearSession: async () => undefined,
+      clearBrowserSessionState: async () => undefined,
+    },
+    async (client) => {
+      const result = await client.callTool({
+        name: 'auth_ensure',
+        arguments: {},
+      });
+      assert.equal(result.structuredContent?.status, 'success');
+    },
+  );
+
+  assert.deepEqual(received, {
+    minTtlSeconds: 60,
+    interaction: 'never',
+  });
+});
+
 test('Auth MCP makes human verification actionable and logout explicit', async () => {
   let clearCalls = 0;
   let browserClearCalls = 0;

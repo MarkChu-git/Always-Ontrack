@@ -1,13 +1,16 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type {
@@ -693,6 +696,10 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
+  /** Explicit persisted-state path for isolated adapters and tests. */
+  browserStatePath?: string;
+  /** Trusted adapter seam for isolating live-profile policy in tests. */
+  systemBrowserProfileReuseEnabled?: () => boolean;
 }
 
 /** Candidate system browser profile location used for direct session reuse probe. */
@@ -1038,15 +1045,25 @@ function filterBrowserSessionState(
 ): BrowserStorageState {
   const target = new URL(targetOrigin);
   const targetHostname = target.hostname.toLowerCase();
+  const nowSeconds = Date.now() / 1000;
   const cookies = state.cookies.filter(
     (cookie) =>
-      cookie.domain.trim().toLowerCase().replace(/^\./, "") === targetHostname,
+      cookie.domain.trim().toLowerCase().replace(/^\./, "") === targetHostname &&
+      (cookie.expires === -1 || cookie.expires > nowSeconds),
   );
   const origins = state.origins.filter(
     (origin) => origin.origin === target.origin,
   );
 
   return { cookies, origins };
+}
+
+function hasReusableBrowserSessionState(state: BrowserStorageState): boolean {
+  const hasLocalStorage = state.origins.some(
+    (origin) => origin.localStorage.length > 0,
+  );
+
+  return state.cookies.length > 0 || hasLocalStorage;
 }
 
 function writePrivateBrowserSessionState(
@@ -1087,6 +1104,9 @@ export async function saveBrowserSessionState(
     isBrowserStorageState(state) ? state : { cookies: [], origins: [] },
     targetOrigin,
   );
+  if (!hasReusableBrowserSessionState(filtered)) {
+    return;
+  }
   writePrivateBrowserSessionState(storagePath, filtered);
 }
 
@@ -1117,6 +1137,9 @@ export function buildContextOptionsWithStoredSession(
       return undefined;
     }
     const filtered = filterBrowserSessionState(parsed, targetOrigin);
+    if (!hasReusableBrowserSessionState(filtered)) {
+      return undefined;
+    }
     // Migrate legacy full-state files before a browser context ever receives them.
     writePrivateBrowserSessionState(storagePath, filtered);
     return { storageState: filtered };
@@ -2725,20 +2748,27 @@ async function captureSsoCredentialsInternal(
 export async function captureCredentialsFromStoredBrowserSession(
   options: AutoLoginOptions,
 ): Promise<LoginCredentials | null> {
-  const timeoutMs = Math.max(3000, options.timeoutMs ?? 12_000);
+  const timeoutMs = Math.max(0, options.timeoutMs ?? 12_000);
+  const deadline = Date.now() + timeoutMs;
   const fromStoredState = await captureCredentialsFromPersistedStateFile(
     options,
-    timeoutMs,
+    Math.max(0, deadline - Date.now()),
   );
   if (fromStoredState) {
     return fromStoredState;
   }
 
-  if (!isSystemBrowserProfileReuseEnabled()) {
+  const profileReuseEnabled =
+    options.systemBrowserProfileReuseEnabled?.() ??
+    isSystemBrowserProfileReuseEnabled();
+  if (!profileReuseEnabled) {
     return null;
   }
 
-  return captureCredentialsFromSystemBrowserProfile(options, timeoutMs);
+  return captureCredentialsFromSystemBrowserProfile(
+    options,
+    Math.max(0, deadline - Date.now()),
+  );
 }
 
 /** Common probe routine shared by persisted-state and live-profile session reuse paths. */
@@ -2749,6 +2779,7 @@ async function probeCredentialsInOpenContext(
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
   const targetOrigin = new URL(options.apiBaseUrl).origin;
+  const deadline = Date.now() + timeoutMs;
   let capturedFromRequestHeaders: LoginCredentials | null = null;
 
   page.on("request", (...args: unknown[]) => {
@@ -2798,7 +2829,7 @@ async function probeCredentialsInOpenContext(
 
   const candidates = [`${targetOrigin}/home`, options.ssoUrl];
   for (const candidate of candidates) {
-    const remaining = timeoutMs - 1000;
+    const remaining = deadline - Date.now();
     if (remaining <= 0) {
       break;
     }
@@ -2817,16 +2848,120 @@ async function probeCredentialsInOpenContext(
     }
   }
 
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() < deadline) {
     const maybe = await checkCaptured();
     if (maybe) {
       return maybe;
     }
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(400, remaining)));
+    }
   }
 
   return null;
+}
+
+interface ClaimedBrowserSessionState {
+  claimedPath: string;
+  contextOptions: {
+    storageState: BrowserStorageState;
+  };
+}
+
+/**
+ * Restore a claimed generation without overwriting a concurrently written
+ * state. A hard link provides create-if-absent semantics in the same directory.
+ */
+function restoreClaimedBrowserSessionState(
+  claimedPath: string,
+  storagePath: string,
+): void {
+  try {
+    // Both paths are trusted siblings in the private CLI state directory.
+    // codeql[js/path-injection]
+    linkSync(claimedPath, storagePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      // Keep the claim recoverable when restoration failed for another reason.
+      return;
+    }
+    // An existing path is a newer generation and always wins.
+  }
+  try {
+    clearBrowserSessionState(claimedPath);
+  } catch {
+    // Preserve an inaccessible claim rather than broadening deletion rules.
+  }
+}
+
+/**
+ * Atomically move one persisted state generation out of the shared path before
+ * probing it. A concurrent login may safely create the original path without
+ * the stale probe ever deleting that newer generation.
+ */
+function claimBrowserSessionState(
+  storagePath: string,
+  targetOrigin: string,
+): ClaimedBrowserSessionState | null {
+  const claimedPath = `${storagePath}.probe-${randomUUID()}`;
+  try {
+    // Both paths are trusted siblings in the private CLI state directory.
+    // codeql[js/path-injection]
+    renameSync(storagePath, claimedPath);
+  } catch {
+    return null;
+  }
+
+  const contextOptions = buildContextOptionsWithStoredSession({
+    storagePath: claimedPath,
+    targetOrigin,
+  });
+  if (!contextOptions) {
+    restoreClaimedBrowserSessionState(claimedPath, storagePath);
+    return null;
+  }
+  return { claimedPath, contextOptions };
+}
+
+/**
+ * Publish captured browser state only when no concurrent generation already
+ * exists. The random candidate is always removed from the private directory.
+ */
+async function publishCapturedBrowserSessionState(
+  context: {
+    storageState: () => Promise<unknown>;
+  },
+  storagePath: string,
+  targetOrigin: string,
+): Promise<boolean> {
+  const candidatePath = `${storagePath}.fresh-${randomUUID()}`;
+  try {
+    await saveBrowserSessionState(context, {
+      storagePath: candidatePath,
+      targetOrigin,
+    });
+    if (!existsSync(candidatePath)) {
+      return false;
+    }
+    try {
+      // A hard link atomically publishes only when storagePath is absent.
+      // codeql[js/path-injection]
+      linkSync(candidatePath, storagePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      // A concurrent successful login already published a newer generation.
+    }
+    return true;
+  } finally {
+    try {
+      clearBrowserSessionState(candidatePath);
+    } catch {
+      // Candidate cleanup never broadens path validation or fails login.
+    }
+  }
 }
 
 /** Probe saved state file created by previous automated logins. */
@@ -2834,36 +2969,72 @@ async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
-  const storageState = buildContextOptionsWithStoredSession({
-    targetOrigin: new URL(options.apiBaseUrl).origin,
-  });
-  if (!storageState) {
+  const storagePath =
+    options.browserStatePath ?? resolveBrowserSessionStatePath();
+  const targetOrigin = new URL(options.apiBaseUrl).origin;
+  const claim = claimBrowserSessionState(storagePath, targetOrigin);
+  if (!claim) {
     return null;
   }
 
-  const launch = await launchBrowserForCapture({
-    headless: options.headless ?? true,
-  });
+  let launch: Awaited<ReturnType<typeof launchBrowserForCapture>>;
+  try {
+    launch = await launchBrowserForCapture({
+      headless: options.headless ?? true,
+      browserAdapter: options.browserAdapter,
+    });
+  } catch (error) {
+    restoreClaimedBrowserSessionState(claim.claimedPath, storagePath);
+    throw error;
+  }
   const browser = launch.browser;
 
   try {
-    const context = await browser.newContext(storageState);
-    const page = await context.newPage();
-    const captured = await probeCredentialsInOpenContext(
-      context,
-      page,
-      options,
-      timeoutMs,
-    );
+    let context: BrowserContext;
+    let captured: LoginCredentials | null;
+    try {
+      context = await browser.newContext(claim.contextOptions);
+      const page = await context.newPage();
+      captured = await probeCredentialsInOpenContext(
+        context,
+        page,
+        options,
+        timeoutMs,
+      );
+    } catch (error) {
+      restoreClaimedBrowserSessionState(claim.claimedPath, storagePath);
+      throw error;
+    }
     if (!captured) {
+      // A state that cannot renew credentials must not impose the same browser
+      // timeout on every future command. Delete only the atomically claimed old
+      // generation; a concurrent replacement remains untouched.
+      try {
+        clearBrowserSessionState(claim.claimedPath);
+      } catch {
+        // An inaccessible claim is left untouched.
+      }
       return null;
     }
     try {
-      await saveBrowserSessionState(context, {
-        targetOrigin: new URL(options.apiBaseUrl).origin,
-      });
+      const published = await publishCapturedBrowserSessionState(
+        context,
+        storagePath,
+        targetOrigin,
+      );
+      if (!published) {
+        restoreClaimedBrowserSessionState(claim.claimedPath, storagePath);
+        return captured;
+      }
     } catch {
-      // non-fatal persistence failure
+      // Preserve the claimed generation when a fresh candidate cannot publish.
+      restoreClaimedBrowserSessionState(claim.claimedPath, storagePath);
+      return captured;
+    }
+    try {
+      clearBrowserSessionState(claim.claimedPath);
+    } catch {
+      // A successful credential capture is not failed by claim cleanup.
     }
     return captured;
   } finally {
@@ -2906,7 +3077,12 @@ async function captureCredentialsFromSystemBrowserProfile(
     return null;
   }
 
+  const deadline = Date.now() + timeoutMs;
   for (const candidate of profileCandidates) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
     let context: BrowserContext | null = null;
     try {
       context = await playwrightModule.chromium.launchPersistentContext(
@@ -2923,7 +3099,7 @@ async function captureCredentialsFromSystemBrowserProfile(
         context,
         page,
         options,
-        Math.min(timeoutMs, 10_000),
+        Math.min(remaining, 10_000),
       );
       if (captured) {
         // Never copy a real system browser profile's full storage state into CLI state.

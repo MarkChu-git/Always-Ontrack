@@ -1,0 +1,396 @@
+import { test } from "bun:test";
+import assert from "node:assert/strict";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  buildContextOptionsWithStoredSession,
+  captureCredentialsFromStoredBrowserSession,
+} from "../src/lib/auto-login.js";
+
+const SSO_URL = "https://identity.example/sso";
+const API_BASE_URL = "https://ontrack.infotech.monash.edu/api";
+const TARGET_ORIGIN = "https://ontrack.infotech.monash.edu";
+
+function sessionCookie(
+  value: string,
+  name = "refresh_state",
+  expires = -1,
+) {
+  return {
+    name,
+    value,
+    domain: "ontrack.infotech.monash.edu",
+    path: "/",
+    expires,
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax" as const,
+  };
+}
+
+async function withBrowserState(
+  prefix: string,
+  run: (storagePath: string) => Promise<void>,
+): Promise<void> {
+  const tempRoot = await mkdtemp(join(tmpdir(), prefix));
+  try {
+    await run(join(tempRoot, "browser-state.json"));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+function captureOptions(
+  storagePath: string,
+  browserAdapter: {
+    launch: () => Promise<unknown>;
+  },
+) {
+  return {
+    ssoUrl: SSO_URL,
+    apiBaseUrl: API_BASE_URL,
+    timeoutMs: 25,
+    headless: true,
+    browserStatePath: storagePath,
+    systemBrowserProfileReuseEnabled: () => false,
+    browserAdapter: browserAdapter as never,
+  };
+}
+
+test("buildContextOptionsWithStoredSession does not reuse an empty persisted state", async () => {
+  await withBrowserState("ontrack-empty-browser-state-", async (storagePath) => {
+    await writeFile(
+      storagePath,
+      JSON.stringify({ cookies: [], origins: [] }),
+      "utf8",
+    );
+    await chmod(storagePath, 0o640);
+
+    assert.equal(
+      buildContextOptionsWithStoredSession({
+        storagePath,
+        targetOrigin: TARGET_ORIGIN,
+      }),
+      undefined,
+    );
+    assert.equal((await stat(storagePath)).mode & 0o777, 0o640);
+
+    await writeFile(
+      storagePath,
+      JSON.stringify({
+        cookies: [],
+        origins: [{ origin: TARGET_ORIGIN, localStorage: [] }],
+      }),
+      "utf8",
+    );
+    assert.equal(
+      buildContextOptionsWithStoredSession({
+        storagePath,
+        targetOrigin: TARGET_ORIGIN,
+      }),
+      undefined,
+    );
+  });
+});
+
+test("buildContextOptionsWithStoredSession ignores expired persistent cookies but keeps session cookies", async () => {
+  await withBrowserState(
+    "ontrack-expired-browser-state-",
+    async (storagePath) => {
+      await writeFile(
+        storagePath,
+        JSON.stringify({
+          cookies: [sessionCookie("expired", "auth_token", 1)],
+          origins: [],
+        }),
+        "utf8",
+      );
+      assert.equal(
+        buildContextOptionsWithStoredSession({
+          storagePath,
+          targetOrigin: TARGET_ORIGIN,
+        }),
+        undefined,
+      );
+
+      const retainedCookie = sessionCookie("ontrack-token", "auth_token");
+      await writeFile(
+        storagePath,
+        JSON.stringify({ cookies: [retainedCookie], origins: [] }),
+        "utf8",
+      );
+      assert.deepEqual(
+        buildContextOptionsWithStoredSession({
+          storagePath,
+          targetOrigin: TARGET_ORIGIN,
+        }),
+        { storageState: { cookies: [retainedCookie], origins: [] } },
+      );
+    },
+  );
+});
+
+test("stored browser capture skips launch for empty state and invalidates a stale state after one bounded probe", async () => {
+  await withBrowserState(
+    "ontrack-stored-capture-state-",
+    async (storagePath) => {
+      let browserLaunches = 0;
+      let currentUrl = "about:blank";
+      const page = {
+        on: () => page,
+        url: () => currentUrl,
+        goto: async (url: string) => {
+          currentUrl = url;
+          return null;
+        },
+        evaluate: async () => null,
+      };
+      const context = {
+        newPage: async () => page,
+        cookies: async () => [],
+        storageState: async () => ({ cookies: [], origins: [] }),
+      };
+      const browserAdapter = {
+        launch: async () => {
+          browserLaunches += 1;
+          return {
+            newContext: async () => context,
+            close: async () => undefined,
+          };
+        },
+      };
+      const options = captureOptions(storagePath, browserAdapter);
+
+      await writeFile(
+        storagePath,
+        JSON.stringify({ cookies: [], origins: [] }),
+        "utf8",
+      );
+      assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
+      assert.equal(browserLaunches, 0);
+
+      await writeFile(
+        storagePath,
+        JSON.stringify({
+          cookies: [sessionCookie("stale")],
+          origins: [],
+        }),
+        "utf8",
+      );
+      assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
+      assert.equal(browserLaunches, 1);
+      await assert.rejects(() => readFile(storagePath, "utf8"), /ENOENT/);
+
+      assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
+      assert.equal(browserLaunches, 1);
+    },
+  );
+});
+
+test("failed stored browser probe never deletes a concurrently refreshed state generation", async () => {
+  await withBrowserState(
+    "ontrack-concurrent-browser-state-",
+    async (storagePath) => {
+      const replacement = {
+        cookies: [sessionCookie("new-generation")],
+        origins: [],
+      };
+      let replacementWritten = false;
+      let currentUrl = "about:blank";
+      const page = {
+        on: () => page,
+        url: () => currentUrl,
+        goto: async (url: string) => {
+          currentUrl = url;
+          if (!replacementWritten) {
+            replacementWritten = true;
+            await writeFile(storagePath, JSON.stringify(replacement), "utf8");
+          }
+          return null;
+        },
+        evaluate: async () => null,
+      };
+      const context = {
+        newPage: async () => page,
+        cookies: async () => [],
+        storageState: async () => ({ cookies: [], origins: [] }),
+      };
+
+      await writeFile(
+        storagePath,
+        JSON.stringify({
+          cookies: [sessionCookie("old-generation")],
+          origins: [],
+        }),
+        "utf8",
+      );
+      assert.equal(
+        await captureCredentialsFromStoredBrowserSession(
+          captureOptions(storagePath, {
+            launch: async () => ({
+              newContext: async () => context,
+              close: async () => undefined,
+            }),
+          }),
+        ),
+        null,
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(storagePath, "utf8")),
+        replacement,
+      );
+    },
+  );
+});
+
+test("stored browser capture restores its claimed state when context creation fails", async () => {
+  await withBrowserState(
+    "ontrack-browser-state-restore-",
+    async (storagePath) => {
+      const original = {
+        cookies: [sessionCookie("recoverable")],
+        origins: [],
+      };
+      await writeFile(storagePath, JSON.stringify(original), "utf8");
+
+      await assert.rejects(
+        () =>
+          captureCredentialsFromStoredBrowserSession(
+            captureOptions(storagePath, {
+              launch: async () => ({
+                newContext: async () => {
+                  throw new Error("context creation failed");
+                },
+                close: async () => undefined,
+              }),
+            }),
+          ),
+        /context creation failed/,
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(storagePath, "utf8")),
+        original,
+      );
+    },
+  );
+});
+
+test("successful stored browser probe never overwrites a concurrent state generation", async () => {
+  await withBrowserState(
+    "ontrack-browser-state-publish-",
+    async (storagePath) => {
+      const replacement = {
+        cookies: [sessionCookie("new-generation")],
+        origins: [],
+      };
+      const capturedCookies = [
+        sessionCookie("captured-token", "auth_token"),
+        sessionCookie("captured-user", "username"),
+      ];
+      let replacementWritten = false;
+      let currentUrl = "about:blank";
+      const page = {
+        on: () => page,
+        url: () => currentUrl,
+        goto: async (url: string) => {
+          currentUrl = url;
+          if (!replacementWritten) {
+            replacementWritten = true;
+            await writeFile(storagePath, JSON.stringify(replacement), "utf8");
+          }
+          return null;
+        },
+        evaluate: async () => null,
+      };
+      const context = {
+        newPage: async () => page,
+        cookies: async () => capturedCookies,
+        storageState: async () => ({
+          cookies: capturedCookies,
+          origins: [],
+        }),
+      };
+
+      await writeFile(
+        storagePath,
+        JSON.stringify({
+          cookies: [sessionCookie("old-generation")],
+          origins: [],
+        }),
+        "utf8",
+      );
+      assert.deepEqual(
+        await captureCredentialsFromStoredBrowserSession(
+          captureOptions(storagePath, {
+            launch: async () => ({
+              newContext: async () => context,
+              close: async () => undefined,
+            }),
+          }),
+        ),
+        {
+          authToken: "captured-token",
+          username: "captured-user",
+          source: "cookie",
+        },
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(storagePath, "utf8")),
+        replacement,
+      );
+    },
+  );
+});
+
+test("successful stored browser capture restores its claimed state when no fresh state can publish", async () => {
+  await withBrowserState(
+    "ontrack-browser-state-publish-restore-",
+    async (storagePath) => {
+      const original = {
+        cookies: [sessionCookie("recoverable")],
+        origins: [],
+      };
+      const capturedCookies = [
+        sessionCookie("captured-token", "auth_token"),
+        sessionCookie("captured-user", "username"),
+      ];
+      let currentUrl = "about:blank";
+      const page = {
+        on: () => page,
+        url: () => currentUrl,
+        goto: async (url: string) => {
+          currentUrl = url;
+          return null;
+        },
+        evaluate: async () => null,
+      };
+      const context = {
+        newPage: async () => page,
+        cookies: async () => capturedCookies,
+        storageState: async () => ({ cookies: [], origins: [] }),
+      };
+
+      await writeFile(storagePath, JSON.stringify(original), "utf8");
+      assert.deepEqual(
+        await captureCredentialsFromStoredBrowserSession(
+          captureOptions(storagePath, {
+            launch: async () => ({
+              newContext: async () => context,
+              close: async () => undefined,
+            }),
+          }),
+        ),
+        {
+          authToken: "captured-token",
+          username: "captured-user",
+          source: "cookie",
+        },
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(storagePath, "utf8")),
+        original,
+      );
+    },
+  );
+});

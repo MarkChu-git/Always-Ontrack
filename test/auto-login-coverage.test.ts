@@ -67,7 +67,7 @@ test('browser path/profile safety helpers cover unsupported platforms and missin
   assert.deepEqual(expanded, [{ label: 'No listing', userDataDir: '/profiles', profileDir: 'Default' }]);
 });
 
-test('browser state persistence fails closed for malformed state and exact-origin filtering', async () => {
+test('browser state persistence skips unusable state and exact-origin filtering fails closed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ontrack-state-coverage-'));
   const storagePath = join(root, 'state.json');
   try {
@@ -75,11 +75,9 @@ test('browser state persistence fails closed for malformed state and exact-origi
       storagePath,
       targetOrigin: 'https://ontrack.infotech.monash.edu',
     });
-    assert.deepEqual(JSON.parse(await readFile(storagePath, 'utf8')), { cookies: [], origins: [] });
+    await assert.rejects(() => readFile(storagePath, 'utf8'), /ENOENT/);
     await writeFile(storagePath, JSON.stringify({ cookies: [], origins: [{ origin: 'https://ontrack.infotech.monash.edu.evil', localStorage: [] }] }));
-    assert.deepEqual(buildContextOptionsWithStoredSession({ storagePath, targetOrigin: 'https://ontrack.infotech.monash.edu' }), {
-      storageState: { cookies: [], origins: [] },
-    });
+    assert.equal(buildContextOptionsWithStoredSession({ storagePath, targetOrigin: 'https://ontrack.infotech.monash.edu' }), undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
