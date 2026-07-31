@@ -2878,7 +2878,7 @@ function restoreClaimedBrowserSessionState(
   try {
     // Both paths are trusted siblings in the private CLI state directory.
     // codeql[js/path-injection]
-    linkSync(claimedPath, storagePath);
+    linkSync(claimedPath, storagePath); // lgtm[js/path-injection]
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       // Keep the claim recoverable when restoration failed for another reason.
@@ -2906,7 +2906,7 @@ function claimBrowserSessionState(
   try {
     // Both paths are trusted siblings in the private CLI state directory.
     // codeql[js/path-injection]
-    renameSync(storagePath, claimedPath);
+    renameSync(storagePath, claimedPath); // lgtm[js/path-injection]
   } catch {
     return null;
   }
@@ -2939,13 +2939,13 @@ async function publishCapturedBrowserSessionState(
       storagePath: candidatePath,
       targetOrigin,
     });
-    if (!existsSync(candidatePath)) {
+    if (!existsSync(candidatePath)) { // lgtm[js/path-injection]
       return false;
     }
     try {
       // A hard link atomically publishes only when storagePath is absent.
       // codeql[js/path-injection]
-      linkSync(candidatePath, storagePath);
+      linkSync(candidatePath, storagePath); // lgtm[js/path-injection]
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
