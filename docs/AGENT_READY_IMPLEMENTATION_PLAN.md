@@ -218,12 +218,20 @@ flowchart LR
 - `ontrack-auth-mcp`：只暴露 `auth.status`、`auth.ensure`、`auth.logout`，Token 和
   Cookie 永不返回给 LLM。
 - 浏览器能力通过 provider abstraction 隔离，候选为 Lightpanda（experimental）、
-  Chromium/system executable（fallback）和未来 remote CDP。
+  Chromium/system executable（fallback）和未来 remote CDP。Lightpanda 只能在同时设置
+  `ONTRACK_BROWSER=lightpanda`、`ONTRACK_EXPERIMENTAL_LIGHTPANDA=1`、绝对
+  `ONTRACK_LIGHTPANDA_PATH` 且运行 Bun `>=1.4.0` 时显式选择；不从 `PATH` 自动发现。
 - provider 只允许动态 import；`capabilities`、`schema` 及已认证的普通业务命令不得
   初始化 Playwright/CDP 或浏览器进程。
 - 服务器默认不安装 Chromium。Lightpanda 未通过实验门禁前不得成为生产默认路径。
 - 后续将 browser bootstrap 从核心包边界拆为可选 provider；`playwright-core`
   本身不是主要体积来源，但也不得被正常命令 eager-load。
+- Lightpanda provider 使用最小化子进程环境与 OS 分配的 loopback CDP endpoint；连接前
+  验证受信任二进制、loopback host 和 child-reported OS-assigned port。当前
+  Lightpanda CDP 没有客户端认证，无法证明 peer ownership，因此真实鉴权必须 fail
+  closed，只允许 credential-free public-page spike。
+- interactive capture、silent stored-state probe 与 provider startup 共享 hard deadline；
+  normal HTTP 命令不会加载 Playwright 或任何 browser provider。
 
 当前本机基线：
 
@@ -248,17 +256,20 @@ flowchart LR
 
 ### 6.4 Lightpanda 实验范围
 
-实验只使用本地或自托管 Lightpanda 二进制。Lightpanda Cloud 不接触真实 Monash
-凭证。实验环境使用独立 profile、独立日志目录和只读测试账号路径，并逐项记录：
+实验只使用由绝对 `ONTRACK_LIGHTPANDA_PATH` 指定的、本地或自托管且已审核的
+Lightpanda 二进制；不从 `PATH` 自动发现。Lightpanda Cloud 不接触真实 Monash 凭证。
+在 authenticated CDP transport 可用前，实验不得使用测试账号或任何真实凭证，只逐项记录
+公共登录页面的兼容性：
 
 1. Monash SSO 初始重定向；
 2. Cookie、SameSite 和 exact-origin 行为；
 3. 页面 JavaScript 与导航；
-4. Okta 表单加载和提交兼容性；
-5. Okta Verify/number challenge 是否能正确进入 human handoff；
-6. 验证后返回 OnTrack；
-7. 捕获 POST `/api/auth/access-token`；
-8. 使用所得 Token 只读 GET `/projects`。
+4. Okta 表单加载兼容性。
+
+表单提交、Okta Verify/number challenge、返回 OnTrack、捕获
+`POST /api/auth/access-token` 与只读 `GET /projects` 暂时全部标记为 blocked，而不是
+“未测试即通过”。只有在 CDP 提供 auth token、继承 listener FD、受权限保护的 Unix
+socket 或同等 peer-ownership 保证后，才允许继续这些凭证步骤。
 
 绝不在 spike 中调用 submission、plan、logout 或其他写/破坏性接口。每一步记录：
 
@@ -269,16 +280,33 @@ flowchart LR
 - CDP/Playwright 能力缺口；
 - 凭证是否始终留在受限进程与本地 store。
 
+2026-08-01 本地 credential-free 结果：Lightpanda nightly
+`1.0.0-nightly.8450+392bb4c7` 可通过 Playwright CDP 到达真实
+`https://monashuni.okta.com`，执行页面 JavaScript，读取 2 个公共登录 cookie，并在约
+2.5 秒后观察到 `identifier` 输入框。早期 credential-free auth-loop probe 的 10 秒
+deadline 在 10.61 秒退出；启用 credential fail-closed 后，真实 `login` 在 0.57 秒、
+启动 Lightpanda 前拒绝。两条路径均无残留进程。该结果只证明公共页面/CDP 基础兼容，
+不证明真实 OnTrack 鉴权可用。
+结果可由三重环境门禁后的 `bun run spike:lightpanda` 复现；该 harness 只返回
+origin、input/cookie 数量和 identifier-present 布尔值，不暴露 raw Browser、DOM 或
+cookie value。
+
 ### 6.5 失败策略与实验门禁
 
 Lightpanda 的 Web APIs/CDP 仍在演进，因此只能作为 experimental provider。升级为
 可选 server provider 前必须同时通过：
 
+- authenticated transport 或等价的 peer-ownership guarantee；
 - 完整只读认证矩阵；
 - 无 credential 泄漏的安全审查；
 - session/refresh 并发与崩溃恢复测试；
 - 相比 Chromium 有明确的启动、RSS 和安装体积收益；
 - 连续多次真实环境 smoke 无协议漂移。
+
+当前 CLI 在 Lightpanda plan 到达任何 saved cookie、用户名、密码、MFA 或 token 前即
+返回稳定 `browser_unavailable`；macOS/Linux 之外也 fail closed。即使未来通过上述门禁，
+Lightpanda 仍须保留为显式 opt-in，不成为服务器默认值；任何版本、信任、CDP、context
+隔离或 deadline 失败都不得降级到未验证浏览器或无限登录循环。
 
 若 Lightpanda 不兼容 Okta：
 

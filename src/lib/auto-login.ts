@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type {
   Browser,
@@ -97,9 +97,72 @@ export class SsoFallbackError extends Error {
   }
 }
 
+class SsoCaptureDeadline {
+  private readonly expiresAt: number;
+
+  constructor(timeoutMs: number) {
+    this.expiresAt = Date.now() + Math.max(0, timeoutMs);
+  }
+
+  remainingMs(): number {
+    return Math.max(0, this.expiresAt - Date.now());
+  }
+
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    const remainingMs = this.remainingMs();
+    if (remainingMs === 0) {
+      throw this.timeoutError();
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(this.timeoutError()), remainingMs);
+    });
+    try {
+      return await Promise.race([Promise.resolve().then(operation), timeout]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  async pause(maximumMs: number): Promise<void> {
+    const delayMs = Math.min(maximumMs, this.remainingMs());
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  private timeoutError(): SsoFallbackError {
+    return new SsoFallbackError(
+      "timeout",
+      "fallback",
+      "Timed out while waiting for the browser authentication flow.",
+    );
+  }
+}
+
+async function closeBrowserAtMost(
+  browser: Pick<Browser, "close">,
+  timeoutMs = 2_000,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([browser.close().catch(() => undefined), timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 /** Browser launch strategy selected at runtime. */
 export interface BrowserLaunchPlan {
-  source: "env" | "system" | "bundled";
+  source: "env" | "system" | "bundled" | "lightpanda";
   executablePath?: string;
 }
 
@@ -328,11 +391,51 @@ function candidateBrowserPaths(): string[] {
   return paths;
 }
 
+/** Resolve the operator-reviewed absolute Lightpanda binary path. */
+function resolveLightpandaExecutable(
+  env: NodeJS.ProcessEnv,
+  fileExists: (path: string) => boolean,
+): string {
+  const explicit = env.ONTRACK_LIGHTPANDA_PATH?.trim();
+  if (!explicit || !isAbsolute(explicit)) {
+    throw new SsoFallbackError(
+      "browser_unavailable",
+      "fallback",
+      "Experimental Lightpanda requires ONTRACK_LIGHTPANDA_PATH to be an explicit absolute path.",
+    );
+  }
+
+  // The executable override is trusted local operator configuration.
+  // codeql[js/path-injection]
+  if (!fileExists(explicit)) {
+    throw new SsoFallbackError(
+      "browser_unavailable",
+      "fallback",
+      `ONTRACK_LIGHTPANDA_PATH points to a missing executable: ${explicit}`,
+    );
+  }
+  return explicit;
+}
+
 /** Select browser launch strategy: explicit env path > system browser > bundled. */
 export function resolveBrowserLaunchPlan(
   env: NodeJS.ProcessEnv = process.env,
   fileExists: (path: string) => boolean = existsSync,
 ): BrowserLaunchPlan {
+  if (env.ONTRACK_BROWSER?.trim().toLowerCase() === "lightpanda") {
+    if (env.ONTRACK_EXPERIMENTAL_LIGHTPANDA?.trim() !== "1") {
+      throw new SsoFallbackError(
+        "browser_unavailable",
+        "fallback",
+        "Experimental Lightpanda requires the additional ONTRACK_EXPERIMENTAL_LIGHTPANDA=1 opt-in.",
+      );
+    }
+    return {
+      source: "lightpanda",
+      executablePath: resolveLightpandaExecutable(env, fileExists),
+    };
+  }
+
   const explicitBrowser = env.ONTRACK_BROWSER_PATH?.trim();
   if (explicitBrowser) {
     // The executable override is trusted local operator configuration.
@@ -700,8 +803,14 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
+  /** Trusted test/diagnostic seam; production resolves the operator environment. */
+  browserPlan?: BrowserLaunchPlan;
   /** Trusted adapter seam for isolating live-profile policy in tests. */
   systemBrowserProfileReuseEnabled?: () => boolean;
+  /** Trusted test seam for deterministic live-profile candidates. */
+  systemBrowserProfileCandidates?: SystemBrowserProfileLocation[];
+  /** Trusted test seam for the persistent-context launcher. */
+  systemBrowserProfileAdapter?: SystemBrowserProfileAdapter;
 }
 
 /** Candidate system browser profile location used for direct session reuse probe. */
@@ -709,6 +818,17 @@ export interface SystemBrowserProfileLocation {
   label: string;
   userDataDir: string;
   profileDir: string;
+}
+
+type PersistentContextLaunchOptions = Parameters<
+  typeof import("playwright-core").chromium.launchPersistentContext
+>[1];
+
+interface SystemBrowserProfileAdapter {
+  launchPersistentContext(
+    userDataDir: string,
+    options: PersistentContextLaunchOptions,
+  ): Promise<BrowserContext>;
 }
 
 /**
@@ -1669,6 +1789,9 @@ const MFA_CHALLENGE_NUMBER_SELECTORS = [
 const MFA_CHALLENGE_TEXT_SIGNAL =
   /number challenge|following number|enter the number|tap the number|okta verify|approve sign in|push notification/i;
 const MFA_CHALLENGE_NUMBER_TOKEN = /\b\d{1,3}\b/g;
+const TRUSTED_CREDENTIAL_ORIGINS = new Set([
+  "https://monashuni.okta.com",
+]);
 
 // MFA code input selectors for Google Authenticator / Okta Verify "enter code" flows.
 const MFA_CODE_INPUT_SELECTORS = [
@@ -1706,6 +1829,22 @@ function collectScopes(page: Page): ScopeRef[] {
     refs.push({ page, scope: frame });
   }
   return refs;
+}
+
+/** Restrict credential entry to reviewed HTTPS top-level IdP origins. */
+function collectCredentialScopes(page: Page): ScopeRef[] {
+  try {
+    const location = new URL(page.url());
+    if (
+      location.protocol === "https:" &&
+      TRUSTED_CREDENTIAL_ORIGINS.has(location.origin)
+    ) {
+      return [{ page, scope: page }];
+    }
+  } catch {
+    // Invalid and transient browser locations are never credential targets.
+  }
+  return [];
 }
 
 /** True when selector exists and is visibly interactable in a given scope. */
@@ -2609,6 +2748,7 @@ async function advanceGuidedSsoOnPage(
   onStep?: (step: SsoStep) => void,
 ): Promise<void> {
   const scopes = collectScopes(page);
+  const credentialScopes = collectCredentialScopes(page);
 
   if (!state.ssoEntryClicked) {
     const clickedEntry =
@@ -2627,7 +2767,7 @@ async function advanceGuidedSsoOnPage(
 
   if (!state.usernameSubmitted) {
     const hasUsernameField = await hasAnySelectorInScopes(
-      scopes,
+      credentialScopes,
       USERNAME_SELECTORS,
     );
     if (hasUsernameField) {
@@ -2635,14 +2775,14 @@ async function advanceGuidedSsoOnPage(
     }
 
     const usernameFilled = await fillFirstVisible(
-      scopes,
+      credentialScopes,
       USERNAME_SELECTORS,
       username,
     );
     if (usernameFilled) {
       onStep?.("username");
       state.usernameSubmitted = await submitAfterFieldFill(
-        scopes,
+        credentialScopes,
         USERNAME_CONTINUE_LABELS,
       );
       if (!state.usernameSubmitted) {
@@ -2653,7 +2793,7 @@ async function advanceGuidedSsoOnPage(
 
   if (!state.passwordSubmitted) {
     const hasPasswordField = await hasAnySelectorInScopes(
-      scopes,
+      credentialScopes,
       PASSWORD_SELECTORS,
     );
     if (hasPasswordField) {
@@ -2661,14 +2801,14 @@ async function advanceGuidedSsoOnPage(
     }
 
     const passwordFilled = await fillFirstVisible(
-      scopes,
+      credentialScopes,
       PASSWORD_SELECTORS,
       password,
     );
     if (passwordFilled) {
       onStep?.("password");
       state.passwordSubmitted = await submitAfterFieldFill(
-        scopes,
+        credentialScopes,
         PASSWORD_SUBMIT_LABELS,
       );
       if (!state.passwordSubmitted) {
@@ -2679,7 +2819,7 @@ async function advanceGuidedSsoOnPage(
 
   if (!state.mfaWaitNotified) {
     const handledSelection = await maybeHandleMfaMethodSelection(
-      scopes,
+      credentialScopes,
       state,
       chooseMfaMethod,
       onStep,
@@ -2696,7 +2836,7 @@ async function advanceGuidedSsoOnPage(
 
   if (state.expectsMfaCode && !state.mfaCodeSubmitted) {
     const submittedMfaCode = await maybeHandleMfaCodeEntry(
-      scopes,
+      credentialScopes,
       state,
       requestMfaCode,
       onStep,
@@ -2744,15 +2884,24 @@ async function advanceGuidedSsoOnPage(
   }
 }
 
-/** Launch playwright chromium with best-available executable resolution. */
+/** Launch a credential-safe Playwright Chromium provider. */
 async function launchBrowserForCapture(options: {
   headless: boolean;
   browserAdapter?: BrowserLaunchAdapter;
+  browserPlan?: BrowserLaunchPlan;
+  startupTimeoutMs: number;
 }): Promise<{
   browser: Pick<Browser, "newContext" | "close">;
   plan: BrowserLaunchPlan;
 }> {
-  const plan = resolveBrowserLaunchPlan();
+  const plan = options.browserPlan ?? resolveBrowserLaunchPlan();
+  if (plan.source === "lightpanda") {
+    throw new SsoFallbackError(
+      "browser_unavailable",
+      "fallback",
+      "Experimental Lightpanda uses unauthenticated local CDP and is restricted to credential-free compatibility spikes. Unset ONTRACK_BROWSER for real authentication.",
+    );
+  }
   const launchArgs =
     plan.executablePath !== undefined
       ? {
@@ -2843,22 +2992,28 @@ async function captureSsoCredentialsInternal(
   },
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
+  const deadline = new SsoCaptureDeadline(timeoutMs);
 
   // Browser launch plan supports env override, system browser, then bundled Chromium.
-  const launch = await launchBrowserForCapture({
-    headless: options.headless ?? false,
-    browserAdapter: options.browserAdapter,
-  });
+  const launch = await deadline.run(() =>
+    launchBrowserForCapture({
+      headless: options.headless ?? false,
+      browserAdapter: options.browserAdapter,
+      browserPlan: options.browserPlan,
+      startupTimeoutMs: Math.max(1, deadline.remainingMs()),
+    }),
+  );
   const browser = launch.browser;
 
-  const targetOrigin = new URL(options.apiBaseUrl).origin;
-  // Isolated context loads only sanitized, OnTrack-only persisted state when available.
-  const context = await browser.newContext(
-    buildContextOptionsWithStoredSession({ targetOrigin }),
-  );
-  const page = await context.newPage();
-  const seenPages = new Set<Page>();
-  let captured: LoginCredentials | null = null;
+  try {
+    const targetOrigin = new URL(options.apiBaseUrl).origin;
+    // Isolated context loads only sanitized, OnTrack-only persisted state when available.
+    const context = await deadline.run(() =>
+      browser.newContext(buildContextOptionsWithStoredSession({ targetOrigin })),
+    );
+    const page = await deadline.run(() => context.newPage());
+    const seenPages = new Set<Page>();
+    let captured: LoginCredentials | null = null;
 
   const setCaptured = (value: LoginCredentials | null): void => {
     // Capture first valid credential source and ignore later duplicates.
@@ -2944,12 +3099,12 @@ async function captureSsoCredentialsInternal(
     });
   };
 
-  registerPage(page);
-  context.on("page", (newPage: Page) => registerPage(newPage));
+    registerPage(page);
+    context.on("page", (newPage: Page) => registerPage(newPage));
 
-  try {
-    await page.goto(options.ssoUrl, { waitUntil: "domcontentloaded" });
-    const start = Date.now();
+    await deadline.run(() =>
+      page.goto(options.ssoUrl, { waitUntil: "domcontentloaded" }),
+    );
     let sawOktaVerifyChallenge = false;
     const guidedState: GuidedSsoRuntimeState | null = guidedLogin
       ? {
@@ -2971,7 +3126,7 @@ async function captureSsoCredentialsInternal(
         }
       : null;
 
-    while (!captured && Date.now() - start < timeoutMs) {
+    while (!captured && deadline.remainingMs() > 0) {
       for (const openPage of context.pages()) {
         if (captured) {
           break;
@@ -2981,19 +3136,21 @@ async function captureSsoCredentialsInternal(
 
         if (guidedLogin && guidedState) {
           // Guided mode actively interacts with fields/buttons every polling cycle.
-          await advanceGuidedSsoOnPage(
-            openPage,
-            guidedLogin.username,
-            guidedLogin.password,
-            guidedState,
-            guidedLogin.chooseMfaMethod,
-            guidedLogin.requestMfaCode,
-            guidedLogin.onMfaNumberChallenge,
-            guidedLogin.onStep,
+          await deadline.run(() =>
+            advanceGuidedSsoOnPage(
+              openPage,
+              guidedLogin.username,
+              guidedLogin.password,
+              guidedState,
+              guidedLogin.chooseMfaMethod,
+              guidedLogin.requestMfaCode,
+              guidedLogin.onMfaNumberChallenge,
+              guidedLogin.onStep,
+            ),
           );
         }
 
-        if (await detectSsoCaptcha(scopes)) {
+        if (await deadline.run(() => detectSsoCaptcha(scopes))) {
           throw new SsoFallbackError(
             "captcha",
             "fallback",
@@ -3001,7 +3158,7 @@ async function captureSsoCredentialsInternal(
           );
         }
 
-        if (await detectUnsupportedMfa(scopes)) {
+        if (await deadline.run(() => detectUnsupportedMfa(scopes))) {
           throw new SsoFallbackError(
             "unsupported_mfa",
             "fallback",
@@ -3009,7 +3166,7 @@ async function captureSsoCredentialsInternal(
           );
         }
 
-        if (await detectOktaVerifyChallenge(scopes)) {
+        if (await deadline.run(() => detectOktaVerifyChallenge(scopes))) {
           sawOktaVerifyChallenge = true;
           if (guidedState) {
             guidedState.sawOktaVerifyChallenge = true;
@@ -3025,7 +3182,11 @@ async function captureSsoCredentialsInternal(
           const pageOrigin = new URL(openPage.url()).origin;
           if (pageOrigin === targetOrigin) {
             // Some flows only expose credentials in localStorage after landing on origin.
-            setCaptured(await extractCredentialsFromLocalStorage(openPage));
+            setCaptured(
+              await deadline.run(() =>
+                extractCredentialsFromLocalStorage(openPage),
+              ),
+            );
           }
         } catch {
           // ignore invalid/intermediate URLs
@@ -3036,7 +3197,7 @@ async function captureSsoCredentialsInternal(
         break;
       }
 
-      const cookies = await context.cookies();
+      const cookies = await deadline.run(() => context.cookies());
       // Cookie extraction is final in-loop fallback before next polling tick.
       setCaptured(extractCredentialsFromCookieJar(cookies, targetOrigin));
 
@@ -3044,7 +3205,7 @@ async function captureSsoCredentialsInternal(
         break;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await deadline.pause(500);
     }
 
     if (!captured) {
@@ -3075,15 +3236,14 @@ async function captureSsoCredentialsInternal(
     }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
     try {
-      await saveBrowserSessionState(context, { targetOrigin });
+      await deadline.run(() => saveBrowserSessionState(context, { targetOrigin }));
     } catch {
       // non-fatal: login should still succeed even if state persistence is blocked
     }
+    return captured;
   } finally {
-    await browser.close();
+    await closeBrowserAtMost(browser);
   }
-
-  return captured;
 }
 
 /**
@@ -3122,9 +3282,10 @@ async function probeCredentialsInOpenContext(
   page: Page,
   options: AutoLoginOptions,
   timeoutMs: number,
+  operationDeadline = new SsoCaptureDeadline(timeoutMs),
 ): Promise<LoginCredentials | null> {
   const targetOrigin = new URL(options.apiBaseUrl).origin;
-  const deadline = Date.now() + timeoutMs;
+  const deadlineAt = Date.now() + timeoutMs;
   let capturedFromRequestHeaders: LoginCredentials | null = null;
 
   page.on("request", (...args: unknown[]) => {
@@ -3157,7 +3318,9 @@ async function probeCredentialsInOpenContext(
     try {
       const pageOrigin = new URL(page.url()).origin;
       if (pageOrigin === targetOrigin) {
-        const fromStorage = await extractCredentialsFromLocalStorage(page);
+        const fromStorage = await operationDeadline.run(() =>
+          extractCredentialsFromLocalStorage(page),
+        );
         if (fromStorage) {
           return fromStorage;
         }
@@ -3166,39 +3329,51 @@ async function probeCredentialsInOpenContext(
       // ignore unstable intermediate URLs
     }
 
-    return extractCredentialsFromCookieJar(
-      await context.cookies(),
-      targetOrigin,
-    );
+    const cookies = await operationDeadline.run(() => context.cookies());
+    return extractCredentialsFromCookieJar(cookies, targetOrigin);
   };
 
   const candidates = [`${targetOrigin}/home`, options.ssoUrl];
   for (const candidate of candidates) {
-    const remaining = deadline - Date.now();
+    const remaining = Math.min(
+      deadlineAt - Date.now(),
+      operationDeadline.remainingMs(),
+    );
     if (remaining <= 0) {
       break;
     }
     try {
-      await page.goto(candidate, {
-        waitUntil: "domcontentloaded",
-        timeout: Math.min(remaining, 8_000),
-      });
-    } catch {
+      await operationDeadline.run(() =>
+        page.goto(candidate, {
+          waitUntil: "domcontentloaded",
+          timeout: Math.min(remaining, 8_000),
+        }),
+      );
+    } catch (error) {
+      if (error instanceof SsoFallbackError && error.reason === "timeout") {
+        throw error;
+      }
       // Continue probing state even if navigation failed; cookies/storage may still be readable.
     }
 
+    if (operationDeadline.remainingMs() === 0) {
+      return null;
+    }
     const immediate = await checkCaptured();
     if (immediate) {
       return immediate;
     }
   }
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadlineAt && operationDeadline.remainingMs() > 0) {
     const maybe = await checkCaptured();
     if (maybe) {
       return maybe;
     }
-    const remaining = deadline - Date.now();
+    const remaining = Math.min(
+      deadlineAt - Date.now(),
+      operationDeadline.remainingMs(),
+    );
     if (remaining > 0) {
       await new Promise((resolve) => setTimeout(resolve, Math.min(400, remaining)));
     }
@@ -3341,6 +3516,7 @@ async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
+  const deadline = new SsoCaptureDeadline(timeoutMs);
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   const claim = claimBrowserSessionState(targetOrigin);
   if (!claim) {
@@ -3349,10 +3525,14 @@ async function captureCredentialsFromPersistedStateFile(
 
   let launch: Awaited<ReturnType<typeof launchBrowserForCapture>>;
   try {
-    launch = await launchBrowserForCapture({
-      headless: options.headless ?? true,
-      browserAdapter: options.browserAdapter,
-    });
+    launch = await deadline.run(() =>
+      launchBrowserForCapture({
+        headless: options.headless ?? true,
+        browserAdapter: options.browserAdapter,
+        browserPlan: options.browserPlan,
+        startupTimeoutMs: Math.max(1, deadline.remainingMs()),
+      }),
+    );
   } catch (error) {
     restoreClaimedBrowserSessionState(claim);
     throw error;
@@ -3363,13 +3543,14 @@ async function captureCredentialsFromPersistedStateFile(
     let context: BrowserContext;
     let captured: LoginCredentials | null;
     try {
-      context = await browser.newContext(claim.contextOptions);
-      const page = await context.newPage();
+      context = await deadline.run(() => browser.newContext(claim.contextOptions));
+      const page = await deadline.run(() => context.newPage());
       captured = await probeCredentialsInOpenContext(
         context,
         page,
         options,
-        timeoutMs,
+        deadline.remainingMs(),
+        deadline,
       );
     } catch (error) {
       restoreClaimedBrowserSessionState(claim);
@@ -3381,10 +3562,12 @@ async function captureCredentialsFromPersistedStateFile(
       return null;
     }
     try {
-      const published = await publishCapturedBrowserSessionState(
-        context,
-        claim.location,
-        targetOrigin,
+      const published = await deadline.run(() =>
+        publishCapturedBrowserSessionState(
+          context,
+          claim.location,
+          targetOrigin,
+        ),
       );
       if (!published) {
         restoreClaimedBrowserSessionState(claim);
@@ -3397,7 +3580,7 @@ async function captureCredentialsFromPersistedStateFile(
     }
     return captured;
   } finally {
-    await browser.close();
+    await closeBrowserAtMost(browser);
   }
 }
 
@@ -3406,73 +3589,93 @@ async function captureCredentialsFromSystemBrowserProfile(
   options: AutoLoginOptions,
   timeoutMs: number,
 ): Promise<LoginCredentials | null> {
-  const profileCandidates = expandSystemBrowserProfileCandidates(
-    resolveSystemBrowserUserDataDirs(),
-    {
+  const deadline = new SsoCaptureDeadline(timeoutMs);
+  const profileCandidates =
+    options.systemBrowserProfileCandidates ??
+    expandSystemBrowserProfileCandidates(resolveSystemBrowserUserDataDirs(), {
       profileOverride: process.env.ONTRACK_BROWSER_PROFILE_DIR,
-    },
-  );
+    });
 
   if (profileCandidates.length === 0) {
     return null;
   }
 
-  let playwrightModule: typeof import("playwright-core");
-  try {
-    playwrightModule = await import("playwright-core");
-  } catch {
-    return null;
-  }
-
   let launchPlan: BrowserLaunchPlan;
   try {
-    launchPlan = resolveBrowserLaunchPlan();
+    launchPlan = options.browserPlan ?? resolveBrowserLaunchPlan();
   } catch {
     return null;
   }
 
   // Live profile probing only makes sense with a concrete system browser executable.
-  if (!launchPlan.executablePath) {
+  // Lightpanda has no persistent user-data profile support.
+  if (!launchPlan.executablePath || launchPlan.source === "lightpanda") {
     return null;
   }
 
-  const deadline = Date.now() + timeoutMs;
+  let launchPersistentContext: (
+    userDataDir: string,
+    options: PersistentContextLaunchOptions,
+  ) => Promise<BrowserContext>;
+  if (options.systemBrowserProfileAdapter) {
+    launchPersistentContext = (userDataDir, launchOptions) =>
+      options.systemBrowserProfileAdapter!.launchPersistentContext(
+        userDataDir,
+        launchOptions,
+      );
+  } else {
+    try {
+      const playwrightModule = await deadline.run(() => import("playwright-core"));
+      launchPersistentContext = (userDataDir, launchOptions) =>
+        playwrightModule.chromium.launchPersistentContext(
+          userDataDir,
+          launchOptions,
+        );
+    } catch (error) {
+      if (error instanceof SsoFallbackError && error.reason === "timeout") {
+        throw error;
+      }
+      return null;
+    }
+  }
+
   for (const candidate of profileCandidates) {
-    const remaining = deadline - Date.now();
+    const remaining = deadline.remainingMs();
     if (remaining <= 0) {
       break;
     }
     let context: BrowserContext | null = null;
     try {
-      context = await playwrightModule.chromium.launchPersistentContext(
-        candidate.userDataDir,
-        {
+      context = await deadline.run(() =>
+        launchPersistentContext(candidate.userDataDir, {
           headless: options.headless ?? true,
           executablePath: launchPlan.executablePath,
           args: [`--profile-directory=${candidate.profileDir}`],
-        },
+          timeout: remaining,
+        }),
       );
 
-      const page = context.pages()[0] ?? (await context.newPage());
+      const page =
+        context.pages()[0] ?? (await deadline.run(() => context!.newPage()));
       const captured = await probeCredentialsInOpenContext(
         context,
         page,
         options,
-        Math.min(remaining, 10_000),
+        Math.min(deadline.remainingMs(), 10_000),
+        deadline,
       );
       if (captured) {
         // Never copy a real system browser profile's full storage state into CLI state.
         return captured;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof SsoFallbackError && error.reason === "timeout") {
+        throw error;
+      }
       // Profile can be locked by a running browser or blocked by OS policy; continue next candidate.
     } finally {
       if (context) {
-        try {
-          await context.close();
-        } catch {
-          // ignore close failures
-        }
+        await closeBrowserAtMost(context);
       }
     }
   }

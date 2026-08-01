@@ -83,8 +83,11 @@ engine.
 
 ### Requirements
 
-- Bun `1.3.14+`
+- Bun `1.3.14+` for the HTTP CLI and Auth MCP. The experimental Lightpanda
+  provider additionally requires Bun `1.4.0+`.
 - macOS, Linux, or Windows
+- The Lightpanda spike is currently limited to macOS/Linux; Windows fails
+  closed until executable ACL validation is implemented.
 - Network access when you choose to install a reviewed browser runtime manually
 
 ### Global install
@@ -735,7 +738,10 @@ That makes them a better fit for:
 | Variable | Purpose | Notes |
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | Override the default API base URL | Defaults to Monash OnTrack API |
-| `ONTRACK_BROWSER_PATH` | Set the browser executable path for SSO automation | Highest priority browser override |
+| `ONTRACK_BROWSER_PATH` | Set the Chromium-family browser executable path for SSO automation | Used unless the explicit Lightpanda experiment is enabled |
+| `ONTRACK_BROWSER` | Set to `lightpanda` only with the two Lightpanda gates below | Credential-free compatibility spike; real login fails closed |
+| `ONTRACK_EXPERIMENTAL_LIGHTPANDA` | Set to `1` to acknowledge the Lightpanda experiment | Required together with `ONTRACK_BROWSER=lightpanda` |
+| `ONTRACK_LIGHTPANDA_PATH` | Absolute path to the reviewed local Lightpanda binary | Required for the experiment; the CLI never discovers Lightpanda from `PATH` |
 | `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | Explicitly allow live browser-profile credential discovery | Disabled by default; do not enable for shared/untrusted profiles |
 | `ONTRACK_BROWSER_USER_DATA_DIR` | Override Chromium/Chrome user data root | Used only with `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` |
 | `ONTRACK_BROWSER_PROFILE_DIR` | Override profile directory name under user data root | Used only with explicit profile reuse; defaults to `Default` |
@@ -743,6 +749,39 @@ That makes them a better fit for:
 | `NO_COLOR` | Disable colored output | Useful for plain logs or CI |
 | `XDG_CONFIG_HOME` | Override the config root on Linux and macOS | Affects session storage |
 | `APPDATA` | Config root on Windows | Affects session storage |
+
+Lightpanda is an explicit, local-only, credential-free experiment. It is enabled only when all
+of the following are true: `ONTRACK_BROWSER=lightpanda`,
+`ONTRACK_EXPERIMENTAL_LIGHTPANDA=1`, an absolute
+`ONTRACK_LIGHTPANDA_PATH`, and Bun `1.4.0+`. The provider starts a local
+Lightpanda process with a minimal environment and an OS-assigned loopback CDP
+endpoint. It validates both the reviewed executable and the returned endpoint
+before connecting. Compatibility work has a hard end-to-end deadline; an
+unsupported provider, failed validation, or deadline returns a stable error
+rather than silently falling back or retrying forever.
+
+The normal HTTP CLI and Auth MCP do not load Playwright or any browser provider.
+Lightpanda `serve` currently exposes unauthenticated loopback CDP, so the CLI
+refuses to use it for saved cookies, username/password, MFA, token capture, or
+any real authentication. Real login must use the reviewed Chromium/system
+provider. Do not use this experiment as a server default or assume it can bypass
+Monash/Okta policy. Lightpanda can become an auth provider only after it offers
+an authenticated transport, inherited listener FD, protected Unix socket, or an
+equivalent peer-ownership guarantee.
+
+From a development checkout, the only supported Lightpanda entrypoint is the
+credential-free public-page probe:
+
+```bash
+ONTRACK_BROWSER=lightpanda \
+ONTRACK_EXPERIMENTAL_LIGHTPANDA=1 \
+ONTRACK_LIGHTPANDA_PATH=/absolute/path/to/lightpanda \
+bun run spike:lightpanda
+```
+
+It fetches the public OnTrack auth-method redirect, inspects only the allowlisted
+Okta login origin, returns counts/booleans instead of DOM or cookie values, and
+never fills, clicks, submits, loads saved state, or captures tokens.
 
 ## Files and directories
 
