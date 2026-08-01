@@ -40,3 +40,6 @@ graphify-out/reflections/
 graphify-out/20??-??-??/
 .DS_Store
 npm-debug.log*
+
+# Local lightpanda binary (experimental browser provider, downloaded per machine).
+/bin/lightpanda

@@ -18,6 +18,16 @@ interface FakeBrowserOptions {
   captcha?: boolean;
   unsupportedMfa?: boolean;
   guidedFields?: boolean;
+  visibilityNeverSettles?: boolean;
+  newContextError?: Error;
+  guidedRedirectAfterPassword?: string;
+  delayedFillAfterMs?: number;
+  lifecycle?: {
+    closeCalls: number;
+    fillCalls?: number;
+    fillAttempts?: number;
+    closed?: boolean;
+  };
 }
 
 function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter {
@@ -43,7 +53,24 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
     first: () => field,
     nth: () => field,
     count: async () => 1,
-    isVisible: async () => true,
+    isVisible: async () => !options.lifecycle?.closed,
+    fill: async (value: string) => {
+      if (options.lifecycle) {
+        options.lifecycle.fillAttempts = (options.lifecycle.fillAttempts ?? 0) + 1;
+      }
+      if (options.delayedFillAfterMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.delayedFillAfterMs));
+      }
+      if (options.lifecycle?.closed) {
+        return;
+      }
+      if (options.lifecycle) {
+        options.lifecycle.fillCalls = (options.lifecycle.fillCalls ?? 0) + 1;
+      }
+      if (value === 'secret' && options.guidedRedirectAfterPassword) {
+        url = options.guidedRedirectAfterPassword;
+      }
+    },
   };
   const page = {
     url: () => url,
@@ -68,6 +95,9 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
       nth: () => textLocator,
       count: async () => 1,
       isVisible: async () => Boolean(
+        options.visibilityNeverSettles
+          ? await new Promise<boolean>(() => undefined)
+          :
         (options.captcha && pattern.test('captcha')) ||
         (options.unsupportedMfa && pattern.test('security key')),
       ),
@@ -114,10 +144,27 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
   };
   return {
     launch: async () => ({
-      newContext: async () => context,
-      close: async () => undefined,
+      newContext: async () => {
+        if (options.newContextError) throw options.newContextError;
+        return context;
+      },
+      close: async () => {
+        if (options.lifecycle) {
+          options.lifecycle.closeCalls += 1;
+          options.lifecycle.closed = true;
+        }
+      },
     }),
   };
+}
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('test deadline exceeded')), timeoutMs),
+    ),
+  ]);
 }
 
 test('injected browser Adapter captures credentials from an exact OnTrack redirect without browser/network I/O', async () => {
@@ -206,15 +253,141 @@ test('browser Adapter maps CAPTCHA and unsupported MFA to explicit non-retryable
 test('guided capture records terminal steps while using only fake visible selectors', async () => {
   const steps: string[] = [];
   const credentials = await captureSsoCredentialsWithGuidedLogin({
-    ssoUrl: 'https://sso.example/login',
+    ssoUrl: 'https://monashuni.okta.com/login',
     apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
     username: 'student',
     password: 'secret',
     browserAdapter: createBrowserAdapter({
       guidedFields: true,
-      urlAfterGoto: 'https://ontrack.infotech.monash.edu/sign_in?authToken=guided-token&username=guided-user',
+      urlAfterGoto: 'https://monashuni.okta.com/login',
+      guidedRedirectAfterPassword: 'https://ontrack.infotech.monash.edu/sign_in?authToken=guided-token&username=guided-user',
     }),
   }, (step) => steps.push(step));
   assert.equal(credentials.authToken, 'guided-token');
   assert.deepEqual(steps, ['username', 'password', 'completed']);
+});
+
+test('capture enforces one hard deadline when a selector operation never settles', async () => {
+  const lifecycle = { closeCalls: 0 };
+
+  await assert.rejects(
+    () => settleWithin(captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      timeoutMs: 20,
+      browserAdapter: createBrowserAdapter({
+        visibilityNeverSettles: true,
+        lifecycle,
+      }),
+    }), 150),
+    (error: unknown) =>
+      error instanceof SsoFallbackError && error.reason === 'timeout',
+  );
+
+  assert.equal(lifecycle.closeCalls, 1);
+});
+
+test('guided capture never fills credentials into an untrusted top-level origin', async () => {
+  const lifecycle = { closeCalls: 0, fillCalls: 0 };
+
+  await assert.rejects(
+    () => captureSsoCredentialsWithGuidedLogin({
+      ssoUrl: 'https://evil.example/phish',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      username: 'student',
+      password: 'secret',
+      timeoutMs: 20,
+      browserAdapter: createBrowserAdapter({
+        guidedFields: true,
+        urlAfterGoto: 'https://evil.example/phish',
+        lifecycle,
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof SsoFallbackError &&
+      (error.reason === 'selector_missing' || error.reason === 'timeout'),
+  );
+
+  assert.equal(lifecycle.fillCalls, 0);
+  assert.equal(lifecycle.closeCalls, 1);
+});
+
+test('deadline closes the browser before an in-flight credential fill can complete', async () => {
+  const lifecycle = {
+    closeCalls: 0,
+    fillCalls: 0,
+    fillAttempts: 0,
+    closed: false,
+  };
+
+  await assert.rejects(
+    () => captureSsoCredentialsWithGuidedLogin({
+      ssoUrl: 'https://monashuni.okta.com/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      username: 'student',
+      password: 'secret',
+      timeoutMs: 20,
+      browserAdapter: createBrowserAdapter({
+        guidedFields: true,
+        urlAfterGoto: 'https://monashuni.okta.com/login',
+        delayedFillAfterMs: 50,
+        lifecycle,
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof SsoFallbackError && error.reason === 'timeout',
+  );
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(lifecycle.fillAttempts, 1);
+  assert.equal(lifecycle.fillCalls, 0);
+  assert.equal(lifecycle.closeCalls, 1);
+  assert.equal(lifecycle.closed, true);
+});
+
+test('capture closes a launched browser when isolated context creation fails', async () => {
+  const lifecycle = { closeCalls: 0 };
+
+  await assert.rejects(
+    () => captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      timeoutMs: 50,
+      browserAdapter: createBrowserAdapter({
+        newContextError: new Error('context creation failed'),
+        lifecycle,
+      }),
+    }),
+    /context creation failed/,
+  );
+
+  assert.equal(lifecycle.closeCalls, 1);
+});
+
+test('credential capture fails closed before launching unauthenticated Lightpanda CDP', async () => {
+  let launchCalls = 0;
+
+  await assert.rejects(
+    () => captureSsoCredentials({
+      ssoUrl: 'https://monashuni.okta.com/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      timeoutMs: 50,
+      browserPlan: {
+        source: 'lightpanda',
+        executablePath: '/trusted/lightpanda',
+      },
+      browserAdapter: {
+        launch: async () => {
+          launchCalls += 1;
+          throw new Error('must not launch');
+        },
+      },
+    }),
+    (error: unknown) =>
+      error instanceof SsoFallbackError &&
+      error.reason === 'browser_unavailable' &&
+      /unauthenticated.*CDP/i.test(error.message),
+  );
+
+  assert.equal(launchCalls, 0);
 });

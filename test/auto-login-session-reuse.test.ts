@@ -16,6 +16,7 @@ import {
   buildContextOptionsWithStoredSession,
   captureCredentialsFromStoredBrowserSession,
   setBrowserSessionStatePathForTests,
+  SsoFallbackError,
 } from "../src/lib/auto-login.js";
 
 const SSO_URL = "https://identity.example/sso";
@@ -82,6 +83,15 @@ function captureOptions(
     systemBrowserProfileReuseEnabled: () => false,
     browserAdapter: browserAdapter as never,
   };
+}
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("test deadline exceeded")), timeoutMs),
+    ),
+  ]);
 }
 
 test("buildContextOptionsWithStoredSession does not reuse an empty persisted state", async () => {
@@ -343,6 +353,89 @@ test("stored browser capture restores its claimed state when context creation fa
         JSON.parse(await readFile(storagePath, "utf8")),
         original,
       );
+    },
+  );
+});
+
+test("stored browser capture applies one hard deadline and closes a hung probe", async () => {
+  await withBrowserState(
+    "ontrack-browser-state-deadline-",
+    async (storagePath) => {
+      const original = {
+        cookies: [sessionCookie("recoverable")],
+        origins: [],
+      };
+      let closeCalls = 0;
+      await writeFile(storagePath, JSON.stringify(original), "utf8");
+
+      await assert.rejects(
+        () => settleWithin(
+          captureCredentialsFromStoredBrowserSession(
+            captureOptions({
+              launch: async () => ({
+                newContext: async () => ({
+                  newPage: async () => ({
+                    on: () => undefined,
+                    url: () => "about:blank",
+                    goto: async () => new Promise<never>(() => undefined),
+                    evaluate: async () => null,
+                  }),
+                  cookies: async () => [],
+                  storageState: async () => original,
+                }),
+                close: async () => {
+                  closeCalls += 1;
+                },
+              }),
+            }),
+          ),
+          150,
+        ),
+        (error: unknown) =>
+          error instanceof SsoFallbackError && error.reason === "timeout",
+      );
+
+      assert.equal(closeCalls, 1);
+      assert.deepEqual(JSON.parse(await readFile(storagePath, "utf8")), original);
+    },
+  );
+});
+
+test("opted-in system profile launch cannot exceed the shared silent-auth deadline", async () => {
+  await withBrowserState(
+    "ontrack-system-profile-deadline-",
+    async () => {
+      let launchCalls = 0;
+      await assert.rejects(
+        () => settleWithin(
+          captureCredentialsFromStoredBrowserSession({
+            ssoUrl: SSO_URL,
+            apiBaseUrl: API_BASE_URL,
+            timeoutMs: 25,
+            headless: true,
+            systemBrowserProfileReuseEnabled: () => true,
+            systemBrowserProfileCandidates: [{
+              label: "Test profile",
+              userDataDir: "/trusted/profile",
+              profileDir: "Default",
+            }],
+            browserPlan: {
+              source: "system",
+              executablePath: "/trusted/chrome",
+            },
+            systemBrowserProfileAdapter: {
+              launchPersistentContext: async () => {
+                launchCalls += 1;
+                return new Promise<never>(() => undefined);
+              },
+            },
+          }),
+          150,
+        ),
+        (error: unknown) =>
+          error instanceof SsoFallbackError && error.reason === "timeout",
+      );
+      assert.equal(launchCalls, 1);
     },
   );
 });

@@ -220,6 +220,57 @@ test("resolveBrowserLaunchPlan selects system browser when available", () => {
   assert.equal((plan.executablePath || "").length > 0, true);
 });
 
+test("resolveBrowserLaunchPlan selects lightpanda via ONTRACK_BROWSER with explicit path", () => {
+  const plan = resolveBrowserLaunchPlan(
+    {
+      ONTRACK_BROWSER: "lightpanda",
+      ONTRACK_EXPERIMENTAL_LIGHTPANDA: "1",
+      ONTRACK_LIGHTPANDA_PATH: "/opt/lp/lightpanda",
+    } as NodeJS.ProcessEnv,
+    (path) => path === "/opt/lp/lightpanda",
+  );
+  assert.deepEqual(plan, {
+    source: "lightpanda",
+    executablePath: "/opt/lp/lightpanda",
+  });
+});
+
+test("resolveBrowserLaunchPlan requires a second explicit Lightpanda opt-in", () => {
+  assert.throws(
+    () => resolveBrowserLaunchPlan({
+      ONTRACK_BROWSER: "lightpanda",
+      ONTRACK_LIGHTPANDA_PATH: "/opt/lp/lightpanda",
+    } as NodeJS.ProcessEnv, () => true),
+    /experimental.*opt-in/i,
+  );
+});
+
+test("resolveBrowserLaunchPlan never discovers experimental lightpanda from PATH", () => {
+  assert.throws(
+    () =>
+      resolveBrowserLaunchPlan(
+        {
+          ONTRACK_BROWSER: "LIGHTPANDA",
+          ONTRACK_EXPERIMENTAL_LIGHTPANDA: "1",
+          PATH: "/usr/bin:/opt/lp/bin",
+        } as NodeJS.ProcessEnv,
+        (path) => path === "/opt/lp/bin/lightpanda",
+      ),
+    /ONTRACK_LIGHTPANDA_PATH.*absolute/i,
+  );
+});
+
+test("resolveBrowserLaunchPlan rejects a missing explicit lightpanda binary", () => {
+  assert.throws(
+    () => resolveBrowserLaunchPlan({
+      ONTRACK_BROWSER: "lightpanda",
+      ONTRACK_EXPERIMENTAL_LIGHTPANDA: "1",
+      ONTRACK_LIGHTPANDA_PATH: "/missing/lightpanda",
+    } as NodeJS.ProcessEnv, () => false),
+    /missing executable/i,
+  );
+});
+
 test("resolveBrowserSessionStatePath uses explicit env override when provided", () => {
   const path = resolveBrowserSessionStatePath(
     {
