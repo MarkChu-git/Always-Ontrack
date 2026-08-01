@@ -1,6 +1,8 @@
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const packagePrefix = 'package/';
 const requiredEntries = [
@@ -15,7 +17,10 @@ const requiredEntries = [
 export interface PackageVerification {
   entries: string[];
   cliOutput: string;
+  authMcpVersion: string;
 }
+
+const authMcpSmokeTimeoutMs = 10_000;
 
 function isSafeEntry(entry: string): boolean {
   const normalized = entry.endsWith('/') ? entry.slice(0, -1) : entry;
@@ -110,6 +115,53 @@ async function assertRegularTree(root: string): Promise<void> {
   await Promise.all(children.map((child) => assertRegularTree(join(root, child))));
 }
 
+async function withinDeadline<T>(operation: Promise<T>, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), authMcpSmokeTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function verifyInstalledAuthMcp(
+  authMcpPath: string,
+  packageRoot: string,
+  expectedVersion: string,
+): Promise<string> {
+  const client = new Client({ name: 'ontrack-package-verifier', version: '1.0.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [authMcpPath],
+    cwd: packageRoot,
+    stderr: 'pipe',
+  });
+
+  try {
+    await withinDeadline(
+      client.connect(transport),
+      'packed Auth MCP did not initialize before the verification deadline',
+    );
+    const serverVersion = client.getServerVersion()?.version;
+    if (serverVersion !== expectedVersion) {
+      throw new Error('packed Auth MCP version does not match package.json');
+    }
+    return serverVersion;
+  } finally {
+    await withinDeadline(
+      client.close().catch(() => undefined),
+      'packed Auth MCP did not close before the verification deadline',
+    );
+  }
+}
+
 export async function verifyPackageTarball(tarballPath: string): Promise<PackageVerification> {
   const resolvedTarball = resolve(tarballPath);
   if (!resolvedTarball.endsWith('.tgz')) {
@@ -136,10 +188,12 @@ export async function verifyPackageTarball(tarballPath: string): Promise<Package
       await readFile(join(packageRoot, 'package.json'), 'utf8'),
     ) as {
       name?: unknown;
+      version?: unknown;
       bin?: unknown;
     };
     if (
       manifest.name !== 'ontrack-cli' ||
+      typeof manifest.version !== 'string' ||
       !manifest.bin ||
       typeof manifest.bin !== 'object' ||
       (manifest.bin as Record<string, unknown>).ontrack !== './dist/cli.js' ||
@@ -160,7 +214,31 @@ export async function verifyPackageTarball(tarballPath: string): Promise<Package
       throw new Error('packed Auth MCP is missing its Bun executable entrypoint');
     }
     const cli = await run([process.execPath, cliPath, '--help'], packageRoot);
-    return { entries, cliOutput: `${cli.stdout}${cli.stderr}` };
+
+    const installationRoot = join(extractionRoot, 'installation');
+    await mkdir(installationRoot);
+    await writeFile(
+      join(installationRoot, 'package.json'),
+      JSON.stringify({ private: true }),
+      { mode: 0o600 },
+    );
+    await run(
+      [process.execPath, 'install', '--production', '--ignore-scripts', '--no-save', resolvedTarball],
+      installationRoot,
+    );
+    const installedPackageRoot = await realpath(
+      join(installationRoot, 'node_modules', 'ontrack-cli'),
+    );
+    const installedAuthMcpPath = await realpath(
+      join(installedPackageRoot, 'dist', 'auth-mcp.js'),
+    );
+    assertChildPath(installedPackageRoot, installedAuthMcpPath);
+    const authMcpVersion = await verifyInstalledAuthMcp(
+      installedAuthMcpPath,
+      installedPackageRoot,
+      manifest.version,
+    );
+    return { entries, cliOutput: `${cli.stdout}${cli.stderr}`, authMcpVersion };
   } finally {
     await rm(extractionRoot, { recursive: true, force: true });
   }
@@ -171,7 +249,9 @@ async function main(args: string[]): Promise<void> {
     throw new Error('usage: bun scripts/verify-package.ts <package.tgz>');
   }
   const result = await verifyPackageTarball(args[0]);
-  console.log(`Verified ${result.entries.length} package files and packed CLI help output.`);
+  console.log(
+    `Verified ${result.entries.length} package files, packed CLI help, and Auth MCP ${result.authMcpVersion}.`,
+  );
 }
 
 if (import.meta.main) {

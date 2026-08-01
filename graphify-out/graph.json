@@ -97,8 +97,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "package_repository",
-      "community": 15,
-      "community_name": "package.json",
+      "community": 58,
+      "community_name": "repository",
       "norm_label": "repository"
     },
     {
@@ -108,8 +108,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "package_repository_type",
-      "community": 15,
-      "community_name": "package.json",
+      "community": 58,
+      "community_name": "repository",
       "norm_label": "type"
     },
     {
@@ -119,8 +119,8 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "package_repository_url",
-      "community": 15,
-      "community_name": "package.json",
+      "community": 58,
+      "community_name": "repository",
       "norm_label": "url"
     },
     {
@@ -1021,8 +1021,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "scripts_check_gitnexus_mcp",
-      "community": 13,
-      "community_name": "auth-mcp-server.ts",
+      "community": 18,
+      "community_name": "verify-package.ts",
       "norm_label": "check-gitnexus-mcp.ts"
     },
     {
@@ -1032,8 +1032,8 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "scripts_check_gitnexus_mcp_expectedtools",
-      "community": 13,
-      "community_name": "auth-mcp-server.ts",
+      "community": 18,
+      "community_name": "verify-package.ts",
       "norm_label": "expectedtools"
     },
     {
@@ -1043,8 +1043,8 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "scripts_check_gitnexus_mcp_within",
-      "community": 13,
-      "community_name": "auth-mcp-server.ts",
+      "community": 18,
+      "community_name": "verify-package.ts",
       "norm_label": "within()"
     },
     {
@@ -1054,8 +1054,8 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "scripts_check_gitnexus_mcp_resulttext",
-      "community": 13,
-      "community_name": "auth-mcp-server.ts",
+      "community": 18,
+      "community_name": "verify-package.ts",
       "norm_label": "resulttext()"
     },
     {
@@ -1065,8 +1065,8 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "scripts_check_gitnexus_mcp_transport",
-      "community": 13,
-      "community_name": "auth-mcp-server.ts",
+      "community": 18,
+      "community_name": "verify-package.ts",
       "norm_label": "transport"
     },
     {
@@ -1076,8 +1076,8 @@
       "source_location": "L32",
       "_origin": "ast",
       "id": "scripts_check_gitnexus_mcp_client",
-      "community": 13,
-      "community_name": "auth-mcp-server.ts",
+      "community": 18,
+      "community_name": "verify-package.ts",
       "norm_label": "client"
     },
     {
@@ -1381,7 +1381,7 @@
       "label": "requiredEntries",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L6",
+      "source_location": "L8",
       "_origin": "ast",
       "id": "scripts_verify_package_requiredentries",
       "community": 18,
@@ -1392,7 +1392,7 @@
       "label": "PackageVerification",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L15",
+      "source_location": "L17",
       "_origin": "ast",
       "id": "scripts_verify_package_packageverification",
       "community": 18,
@@ -1403,7 +1403,7 @@
       "label": "isSafeEntry()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L20",
+      "source_location": "L25",
       "_origin": "ast",
       "id": "scripts_verify_package_issafeentry",
       "community": 18,
@@ -1414,7 +1414,7 @@
       "label": "isAllowedEntry()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L28",
+      "source_location": "L33",
       "_origin": "ast",
       "id": "scripts_verify_package_isallowedentry",
       "community": 18,
@@ -1425,7 +1425,7 @@
       "label": "validateTarEntries()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L42",
+      "source_location": "L47",
       "_origin": "ast",
       "id": "scripts_verify_package_validatetarentries",
       "community": 18,
@@ -1436,7 +1436,7 @@
       "label": "validateTarEntryTypes()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L69",
+      "source_location": "L74",
       "_origin": "ast",
       "id": "scripts_verify_package_validatetarentrytypes",
       "community": 18,
@@ -1447,7 +1447,7 @@
       "label": "run()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L81",
+      "source_location": "L86",
       "_origin": "ast",
       "id": "scripts_verify_package_run",
       "community": 18,
@@ -1458,7 +1458,7 @@
       "label": "assertChildPath()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L94",
+      "source_location": "L99",
       "_origin": "ast",
       "id": "scripts_verify_package_assertchildpath",
       "community": 18,
@@ -1469,7 +1469,7 @@
       "label": "assertRegularTree()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L101",
+      "source_location": "L106",
       "_origin": "ast",
       "id": "scripts_verify_package_assertregulartree",
       "community": 18,
@@ -1477,10 +1477,32 @@
       "norm_label": "assertregulartree()"
     },
     {
+      "label": "withinDeadline()",
+      "file_type": "code",
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L118",
+      "_origin": "ast",
+      "id": "scripts_verify_package_withindeadline",
+      "community": 18,
+      "community_name": "verify-package.ts",
+      "norm_label": "withindeadline()"
+    },
+    {
+      "label": "verifyInstalledAuthMcp()",
+      "file_type": "code",
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L134",
+      "_origin": "ast",
+      "id": "scripts_verify_package_verifyinstalledauthmcp",
+      "community": 18,
+      "community_name": "verify-package.ts",
+      "norm_label": "verifyinstalledauthmcp()"
+    },
+    {
       "label": "verifyPackageTarball()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L113",
+      "source_location": "L165",
       "_origin": "ast",
       "id": "scripts_verify_package_verifypackagetarball",
       "community": 18,
@@ -1491,7 +1513,7 @@
       "label": "main()",
       "file_type": "code",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L169",
+      "source_location": "L247",
       "_origin": "ast",
       "id": "scripts_verify_package_main",
       "community": 18,
@@ -1513,7 +1535,7 @@
       "label": "nextActionSchema",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L13",
+      "source_location": "L14",
       "_origin": "ast",
       "id": "src_auth_mcp_server_nextactionschema",
       "community": 13,
@@ -1524,7 +1546,7 @@
       "label": "toolResultSchema",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L18",
+      "source_location": "L19",
       "_origin": "ast",
       "id": "src_auth_mcp_server_toolresultschema",
       "community": 13,
@@ -1535,7 +1557,7 @@
       "label": "ToolResult",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L26",
+      "source_location": "L27",
       "_origin": "ast",
       "id": "src_auth_mcp_server_toolresult",
       "community": 13,
@@ -1546,7 +1568,7 @@
       "label": "AuthMcpDependencies",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L28",
+      "source_location": "L29",
       "_origin": "ast",
       "id": "src_auth_mcp_server_authmcpdependencies",
       "community": 13,
@@ -1557,7 +1579,7 @@
       "label": ".createBroker()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L29",
+      "source_location": "L30",
       "_origin": "ast",
       "id": "src_auth_mcp_server_authmcpdependencies_createbroker",
       "community": 13,
@@ -1568,7 +1590,7 @@
       "label": ".clearSession()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L30",
+      "source_location": "L31",
       "_origin": "ast",
       "id": "src_auth_mcp_server_authmcpdependencies_clearsession",
       "community": 13,
@@ -1579,7 +1601,7 @@
       "label": ".clearBrowserSessionState()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L31",
+      "source_location": "L32",
       "_origin": "ast",
       "id": "src_auth_mcp_server_authmcpdependencies_clearbrowsersessionstate",
       "community": 13,
@@ -1590,7 +1612,7 @@
       "label": "defaultDependencies()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L34",
+      "source_location": "L35",
       "_origin": "ast",
       "id": "src_auth_mcp_server_defaultdependencies",
       "community": 13,
@@ -1601,7 +1623,7 @@
       "label": "toolResponse()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L42",
+      "source_location": "L43",
       "_origin": "ast",
       "id": "src_auth_mcp_server_toolresponse",
       "community": 13,
@@ -1612,7 +1634,7 @@
       "label": "configuredBaseUrl()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L57",
+      "source_location": "L58",
       "_origin": "ast",
       "id": "src_auth_mcp_server_configuredbaseurl",
       "community": 13,
@@ -1623,7 +1645,7 @@
       "label": "createAuthMcpServer()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L62",
+      "source_location": "L63",
       "_origin": "ast",
       "id": "src_auth_mcp_server_createauthmcpserver",
       "community": 13,
@@ -1634,7 +1656,7 @@
       "label": "serveAuthMcp()",
       "file_type": "code",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L258",
+      "source_location": "L259",
       "_origin": "ast",
       "id": "src_auth_mcp_server_serveauthmcp",
       "community": 13,
@@ -1681,8 +1703,8 @@
       "source_location": "L139",
       "_origin": "ast",
       "id": "src_cli_sessionfromaccesstokencapture",
-      "community": 45,
-      "community_name": "auth.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "sessionfromaccesstokencapture()"
     },
     {
@@ -1692,8 +1714,8 @@
       "source_location": "L162",
       "_origin": "ast",
       "id": "src_cli_help",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "help()"
     },
     {
@@ -1857,8 +1879,8 @@
       "source_location": "L440",
       "_origin": "ast",
       "id": "src_cli_optionalflagargs",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "optionalflagargs()"
     },
     {
@@ -1868,8 +1890,8 @@
       "source_location": "L449",
       "_origin": "ast",
       "id": "src_cli_promptrequired",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "promptrequired()"
     },
     {
@@ -1879,8 +1901,8 @@
       "source_location": "L460",
       "_origin": "ast",
       "id": "src_cli_prompttaskselectorflags",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "prompttaskselectorflags()"
     },
     {
@@ -1901,8 +1923,8 @@
       "source_location": "L476",
       "_origin": "ast",
       "id": "src_cli_parsetaskselectortokens",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "parsetaskselectortokens()"
     },
     {
@@ -1912,8 +1934,8 @@
       "source_location": "L501",
       "_origin": "ast",
       "id": "src_cli_buildtaskselectorargs",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "buildtaskselectorargs()"
     },
     {
@@ -1923,8 +1945,8 @@
       "source_location": "L514",
       "_origin": "ast",
       "id": "src_cli_prompttaskbatchselectorflags",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "prompttaskbatchselectorflags()"
     },
     {
@@ -1934,8 +1956,8 @@
       "source_location": "L546",
       "_origin": "ast",
       "id": "src_cli_prompttaskselectorfromtasklist",
-      "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "prompttaskselectorfromtasklist()"
     },
     {
@@ -1945,8 +1967,8 @@
       "source_location": "L845",
       "_origin": "ast",
       "id": "src_cli_promptguidedtaskselector",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "promptguidedtaskselector()"
     },
     {
@@ -1956,8 +1978,8 @@
       "source_location": "L882",
       "_origin": "ast",
       "id": "src_cli_expandhomepath",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "expandhomepath()"
     },
     {
@@ -1967,8 +1989,8 @@
       "source_location": "L894",
       "_origin": "ast",
       "id": "src_cli_promptguidedoutputdirectory",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "promptguidedoutputdirectory()"
     },
     {
@@ -1978,8 +2000,8 @@
       "source_location": "L916",
       "_origin": "ast",
       "id": "src_cli_promptuploadfiles",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "promptuploadfiles()"
     },
     {
@@ -1989,8 +2011,8 @@
       "source_location": "L930",
       "_origin": "ast",
       "id": "src_cli_runwelcomeaction",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "runwelcomeaction()"
     },
     {
@@ -2000,8 +2022,8 @@
       "source_location": "L1065",
       "_origin": "ast",
       "id": "src_cli_handlewelcome",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "handlewelcome()"
     },
     {
@@ -2034,7 +2056,7 @@
       "_origin": "ast",
       "id": "src_cli_flattentasks",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "flattentasks()"
     },
     {
@@ -2077,8 +2099,8 @@
       "source_location": "L1237",
       "_origin": "ast",
       "id": "src_cli_extractinboxprojectid",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 54,
+      "community_name": "handleInbox",
       "norm_label": "extractinboxprojectid()"
     },
     {
@@ -2143,8 +2165,8 @@
       "source_location": "L1310",
       "_origin": "ast",
       "id": "src_cli_dedupeinboxtasks",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 54,
+      "community_name": "handleInbox",
       "norm_label": "dedupeinboxtasks()"
     },
     {
@@ -2154,8 +2176,8 @@
       "source_location": "L1320",
       "_origin": "ast",
       "id": "src_cli_getunittaskdefinitions",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "getunittaskdefinitions()"
     },
     {
@@ -2176,8 +2198,8 @@
       "source_location": "L1337",
       "_origin": "ast",
       "id": "src_cli_derivedefaultsubmissiontrigger",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "derivedefaultsubmissiontrigger()"
     },
     {
@@ -2187,8 +2209,8 @@
       "source_location": "L1348",
       "_origin": "ast",
       "id": "src_cli_parsesubmissiontrigger",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "parsesubmissiontrigger()"
     },
     {
@@ -2198,8 +2220,8 @@
       "source_location": "L1362",
       "_origin": "ast",
       "id": "src_cli_readuploadfiles",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "readuploadfiles()"
     },
     {
@@ -2220,8 +2242,8 @@
       "source_location": "L1406",
       "_origin": "ast",
       "id": "src_cli_loadprojectswithtaskmetadata",
-      "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "loadprojectswithtaskmetadata()"
     },
     {
@@ -2232,7 +2254,7 @@
       "_origin": "ast",
       "id": "src_cli_buildinboxfallbacktasksfromprojectdetails",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "buildinboxfallbacktasksfromprojectdetails()"
     },
     {
@@ -2319,8 +2341,8 @@
       "source_location": "L1675",
       "_origin": "ast",
       "id": "src_cli_handlelogin",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "handlelogin()"
     },
     {
@@ -2363,8 +2385,8 @@
       "source_location": "L2158",
       "_origin": "ast",
       "id": "src_cli_counttasksbystatus",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 54,
+      "community_name": "handleInbox",
       "norm_label": "counttasksbystatus()"
     },
     {
@@ -2419,7 +2441,7 @@
       "_origin": "ast",
       "id": "src_cli_handleunittasks",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "handleunittasks()"
     },
     {
@@ -2430,7 +2452,7 @@
       "_origin": "ast",
       "id": "src_cli_handletasks",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "handletasks()"
     },
     {
@@ -2518,7 +2540,7 @@
       "_origin": "ast",
       "id": "src_cli_handleinbox",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "handleinbox()"
     },
     {
@@ -2529,7 +2551,7 @@
       "_origin": "ast",
       "id": "src_cli_handletaskshow",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "handletaskshow()"
     },
     {
@@ -2561,8 +2583,8 @@
       "source_location": "L2845",
       "_origin": "ast",
       "id": "src_cli_loadplannercontext",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "loadplannercontext()"
     },
     {
@@ -2583,8 +2605,8 @@
       "source_location": "L2911",
       "_origin": "ast",
       "id": "src_cli_plannerreadback",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 8,
+      "community_name": "cli.ts",
       "norm_label": "plannerreadback()"
     },
     {
@@ -2594,8 +2616,8 @@
       "source_location": "L2929",
       "_origin": "ast",
       "id": "src_cli_requestedidempotencykey",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "requestedidempotencykey()"
     },
     {
@@ -2605,8 +2627,8 @@
       "source_location": "L2934",
       "_origin": "ast",
       "id": "src_cli_claimconfirmedwrite",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "claimconfirmedwrite()"
     },
     {
@@ -2616,8 +2638,8 @@
       "source_location": "L2962",
       "_origin": "ast",
       "id": "src_cli_replayedwriteoutput",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "replayedwriteoutput()"
     },
     {
@@ -2627,8 +2649,8 @@
       "source_location": "L2982",
       "_origin": "ast",
       "id": "src_cli_recordunknownwrite",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "recordunknownwrite()"
     },
     {
@@ -2638,8 +2660,8 @@
       "source_location": "L3003",
       "_origin": "ast",
       "id": "src_cli_isdefinitivewriterejection",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "isdefinitivewriterejection()"
     },
     {
@@ -2649,8 +2671,8 @@
       "source_location": "L3014",
       "_origin": "ast",
       "id": "src_cli_handleplansetdates",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "handleplansetdates()"
     },
     {
@@ -2660,8 +2682,8 @@
       "source_location": "L3160",
       "_origin": "ast",
       "id": "src_cli_handleplanreset",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "handleplanreset()"
     },
     {
@@ -2671,8 +2693,8 @@
       "source_location": "L3274",
       "_origin": "ast",
       "id": "src_cli_handleplancommand",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "handleplancommand()"
     },
     {
@@ -2803,8 +2825,8 @@
       "source_location": "L3707",
       "_origin": "ast",
       "id": "src_cli_handlesubmissionupload",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "handlesubmissionupload()"
     },
     {
@@ -2826,7 +2848,7 @@
       "_origin": "ast",
       "id": "src_cli_filterprojectsforwatch",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "filterprojectsforwatch()"
     },
     {
@@ -2837,7 +2859,7 @@
       "_origin": "ast",
       "id": "src_cli_rethrowwatchauthfailure",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "rethrowwatchauthfailure()"
     },
     {
@@ -2848,7 +2870,7 @@
       "_origin": "ast",
       "id": "src_cli_buildwatchsnapshot",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "buildwatchsnapshot()"
     },
     {
@@ -2858,8 +2880,8 @@
       "source_location": "L4072",
       "_origin": "ast",
       "id": "src_cli_describewatchevent",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 54,
+      "community_name": "handleInbox",
       "norm_label": "describewatchevent()"
     },
     {
@@ -3067,8 +3089,8 @@
       "source_location": "L128",
       "_origin": "ast",
       "id": "src_lib_agent_protocol_configureagentoutputcontext",
-      "community": 4,
-      "community_name": "agent-protocol.ts",
+      "community": 8,
+      "community_name": "cli.ts",
       "norm_label": "configureagentoutputcontext()"
     },
     {
@@ -3848,8 +3870,8 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker",
-      "community": 47,
-      "community_name": "OnTrackAuthBroker",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": "ontrackauthbroker"
     },
     {
@@ -3859,8 +3881,8 @@
       "source_location": "L55",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker_ensure",
-      "community": 47,
-      "community_name": "OnTrackAuthBroker",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": ".ensure()"
     },
     {
@@ -3870,8 +3892,8 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker_status",
-      "community": 47,
-      "community_name": "OnTrackAuthBroker",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": ".status()"
     },
     {
@@ -3881,8 +3903,8 @@
       "source_location": "L57",
       "_origin": "ast",
       "id": "src_lib_auth_broker_ontrackauthbroker_currentsession",
-      "community": 47,
-      "community_name": "OnTrackAuthBroker",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": ".currentsession()"
     },
     {
@@ -3947,8 +3969,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authensureoptions",
-      "community": 47,
-      "community_name": "OnTrackAuthBroker",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": "authensureoptions"
     },
     {
@@ -3958,8 +3980,8 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntimeresult",
-      "community": 47,
-      "community_name": "OnTrackAuthBroker",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": "authruntimeresult"
     },
     {
@@ -4046,8 +4068,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntime",
-      "community": 16,
-      "community_name": "auth-runtime.ts",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": "authruntime"
     },
     {
@@ -4057,8 +4079,8 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "src_lib_auth_runtime_authruntime_ensure",
-      "community": 16,
-      "community_name": "auth-runtime.ts",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": ".ensure()"
     },
     {
@@ -4168,7 +4190,7 @@
       "_origin": "ast",
       "id": "src_lib_auth",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "auth.ts"
     },
     {
@@ -4179,7 +4201,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_authfailurekind",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "authfailurekind"
     },
     {
@@ -4189,8 +4211,8 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "src_lib_auth_sessionusability",
-      "community": 45,
-      "community_name": "auth.ts",
+      "community": 16,
+      "community_name": "auth-runtime.ts",
       "norm_label": "sessionusability"
     },
     {
@@ -4201,7 +4223,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_ontrackhttperror",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "ontrackhttperror"
     },
     {
@@ -4212,7 +4234,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_ontrackhttperror_constructor",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": ".constructor()"
     },
     {
@@ -4223,7 +4245,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_classifyauthfailure",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "classifyauthfailure()"
     },
     {
@@ -4234,7 +4256,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_migratelegacysession",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "migratelegacysession()"
     },
     {
@@ -4245,7 +4267,7 @@
       "_origin": "ast",
       "id": "src_lib_auth_createsessionfromaccesstoken",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "createsessionfromaccesstoken()"
     },
     {
@@ -4344,7 +4366,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "ssocapturedeadline"
     },
     {
@@ -4355,7 +4377,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_constructor",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": ".constructor()"
     },
     {
@@ -4366,7 +4388,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_remainingms",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": ".remainingms()"
     },
     {
@@ -4377,7 +4399,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_run",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": ".run()"
     },
     {
@@ -4388,7 +4410,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_pause",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": ".pause()"
     },
     {
@@ -4399,7 +4421,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_timeouterror",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": ".timeouterror()"
     },
     {
@@ -4410,7 +4432,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_closebrowseratmost",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "closebrowseratmost()"
     },
     {
@@ -4465,7 +4487,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_istargetontrackurl",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "istargetontrackurl()"
     },
     {
@@ -4476,7 +4498,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_istargetontrackauthurl",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "istargetontrackauthurl()"
     },
     {
@@ -4486,8 +4508,8 @@
       "source_location": "L209",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromurl",
-      "community": 10,
-      "community_name": "auto-login.test.ts",
+      "community": 46,
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "extractcredentialsfromurl()"
     },
     {
@@ -4520,7 +4542,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromrequestheaders",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "extractcredentialsfromrequestheaders()"
     },
     {
@@ -4530,8 +4552,8 @@
       "source_location": "L341",
       "_origin": "ast",
       "id": "src_lib_auto_login_candidatebrowserpaths",
-      "community": 23,
-      "community_name": "launchBrowserForCapture",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": "candidatebrowserpaths()"
     },
     {
@@ -4541,8 +4563,8 @@
       "source_location": "L395",
       "_origin": "ast",
       "id": "src_lib_auto_login_resolvelightpandaexecutable",
-      "community": 23,
-      "community_name": "launchBrowserForCapture",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": "resolvelightpandaexecutable()"
     },
     {
@@ -4552,8 +4574,8 @@
       "source_location": "L421",
       "_origin": "ast",
       "id": "src_lib_auto_login_resolvebrowserlaunchplan",
-      "community": 23,
-      "community_name": "launchBrowserForCapture",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": "resolvebrowserlaunchplan()"
     },
     {
@@ -4673,8 +4695,8 @@
       "source_location": "L755",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromlocalstorage",
-      "community": 21,
-      "community_name": "extractCredentialsFromStorageEntries",
+      "community": 46,
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "extractcredentialsfromlocalstorage()"
     },
     {
@@ -4717,8 +4739,8 @@
       "source_location": "L827",
       "_origin": "ast",
       "id": "src_lib_auto_login_systembrowserprofileadapter",
-      "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": "systembrowserprofileadapter"
     },
     {
@@ -4728,8 +4750,8 @@
       "source_location": "L828",
       "_origin": "ast",
       "id": "src_lib_auto_login_systembrowserprofileadapter_launchpersistentcontext",
-      "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": ".launchpersistentcontext()"
     },
     {
@@ -4761,8 +4783,8 @@
       "source_location": "L875",
       "_origin": "ast",
       "id": "src_lib_auto_login_resolvemanagedbrowsersessionstatepath",
-      "community": 10,
-      "community_name": "auto-login.test.ts",
+      "community": 38,
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "resolvemanagedbrowsersessionstatepath()"
     },
     {
@@ -4773,7 +4795,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_resolvetrustedexistingbrowsersessionstatelocation",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "resolvetrustedexistingbrowsersessionstatelocation()"
     },
     {
@@ -4795,7 +4817,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_asserttrustedbrowsersessionstatedirectory",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "asserttrustedbrowsersessionstatedirectory()"
     },
     {
@@ -4806,7 +4828,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_recoverorphanedbrowsersessionstate",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "recoverorphanedbrowsersessionstate()"
     },
     {
@@ -4817,7 +4839,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_removebrowsersessionstateentryifsame",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "removebrowsersessionstateentryifsame()"
     },
     {
@@ -4828,7 +4850,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_writebrowsersessionstateifabsent",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "writebrowsersessionstateifabsent()"
     },
     {
@@ -4916,7 +4938,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_isrecord",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "isrecord()"
     },
     {
@@ -4927,7 +4949,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_isbrowserstoragecookie",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "isbrowserstoragecookie()"
     },
     {
@@ -4938,7 +4960,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_isbrowserstorageorigin",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "isbrowserstorageorigin()"
     },
     {
@@ -4949,7 +4971,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_isbrowserstoragestate",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "isbrowserstoragestate()"
     },
     {
@@ -4960,7 +4982,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_filterbrowsersessionstate",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "filterbrowsersessionstate()"
     },
     {
@@ -4971,7 +4993,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_hasreusablebrowsersessionstate",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "hasreusablebrowsersessionstate()"
     },
     {
@@ -4981,8 +5003,8 @@
       "source_location": "L1532",
       "_origin": "ast",
       "id": "src_lib_auto_login_writeprivatebrowsersessionstate",
-      "community": 10,
-      "community_name": "auto-login.test.ts",
+      "community": 38,
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "writeprivatebrowsersessionstate()"
     },
     {
@@ -5003,8 +5025,8 @@
       "source_location": "L1557",
       "_origin": "ast",
       "id": "src_lib_auto_login_savebrowsersessionstate",
-      "community": 10,
-      "community_name": "auto-login.test.ts",
+      "community": 38,
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "savebrowsersessionstate()"
     },
     {
@@ -5014,8 +5036,8 @@
       "source_location": "L1578",
       "_origin": "ast",
       "id": "src_lib_auto_login_buildcontextoptionswithstoredsession",
-      "community": 10,
-      "community_name": "auto-login.test.ts",
+      "community": 38,
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "buildcontextoptionswithstoredsession()"
     },
     {
@@ -5114,7 +5136,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_blocked_link_hosts",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "blocked_link_hosts"
     },
     {
@@ -5135,7 +5157,7 @@
       "source_location": "L1725",
       "_origin": "ast",
       "id": "src_lib_auto_login_summarizepagelocations",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "summarizepagelocations()"
     },
@@ -5147,7 +5169,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_interactionscope",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "interactionscope"
     },
     {
@@ -5246,7 +5268,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_collectscopes",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "collectscopes()"
     },
     {
@@ -5268,7 +5290,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_canuseselector",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "canuseselector()"
     },
     {
@@ -5279,7 +5301,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_fillfirstvisible",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "fillfirstvisible()"
     },
     {
@@ -5290,7 +5312,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clicklikelyactioncontrol",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "clicklikelyactioncontrol()"
     },
     {
@@ -5301,7 +5323,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_issafeactionlink",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "issafeactionlink()"
     },
     {
@@ -5312,7 +5334,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clickfirstvisible",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "clickfirstvisible()"
     },
     {
@@ -5322,7 +5344,7 @@
       "source_location": "L1991",
       "_origin": "ast",
       "id": "src_lib_auto_login_hastextsignal",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "hastextsignal()"
     },
@@ -5333,7 +5355,7 @@
       "source_location": "L2009",
       "_origin": "ast",
       "id": "src_lib_auto_login_detectssocaptcha",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "detectssocaptcha()"
     },
@@ -5344,7 +5366,7 @@
       "source_location": "L2023",
       "_origin": "ast",
       "id": "src_lib_auto_login_detectunsupportedmfa",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "detectunsupportedmfa()"
     },
@@ -5355,7 +5377,7 @@
       "source_location": "L2052",
       "_origin": "ast",
       "id": "src_lib_auto_login_detectoktaverifychallenge",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "detectoktaverifychallenge()"
     },
@@ -5421,7 +5443,7 @@
       "source_location": "L2193",
       "_origin": "ast",
       "id": "src_lib_auto_login_canuseselectorinscopes",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "canuseselectorinscopes()"
     },
@@ -5433,7 +5455,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_hasanyselectorinscopes",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "hasanyselectorinscopes()"
     },
     {
@@ -5554,7 +5576,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_maybehandlemfacodeentry",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "maybehandlemfacodeentry()"
     },
     {
@@ -5565,7 +5587,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_fillmfacodeinputs",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "fillmfacodeinputs()"
     },
     {
@@ -5576,7 +5598,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_submitafterfieldfill",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "submitafterfieldfill()"
     },
     {
@@ -5587,7 +5609,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_advanceguidedssoonpage",
       "community": 20,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "advanceGuidedSsoOnPage",
       "norm_label": "advanceguidedssoonpage()"
     },
     {
@@ -5608,7 +5630,7 @@
       "source_location": "L2979",
       "_origin": "ast",
       "id": "src_lib_auto_login_capturessocredentialsinternal",
-      "community": 20,
+      "community": 46,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "capturessocredentialsinternal()"
     },
@@ -5619,8 +5641,8 @@
       "source_location": "L3253",
       "_origin": "ast",
       "id": "src_lib_auto_login_capturecredentialsfromstoredbrowsersession",
-      "community": 14,
-      "community_name": "auth-broker.ts",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": "capturecredentialsfromstoredbrowsersession()"
     },
     {
@@ -5631,7 +5653,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_probecredentialsinopencontext",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "probecredentialsinopencontext()"
     },
     {
@@ -5652,8 +5674,8 @@
       "source_location": "L3396",
       "_origin": "ast",
       "id": "src_lib_auto_login_restoreclaimedbrowsersessionstate",
-      "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community": 46,
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "restoreclaimedbrowsersessionstate()"
     },
     {
@@ -5664,7 +5686,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_claimbrowsersessionstate",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "claimbrowsersessionstate()"
     },
     {
@@ -5675,7 +5697,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_publishcapturedbrowsersessionstate",
       "community": 38,
-      "community_name": "isBrowserStorageState",
+      "community_name": "buildContextOptionsWithStoredSession",
       "norm_label": "publishcapturedbrowsersessionstate()"
     },
     {
@@ -5686,7 +5708,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_capturecredentialsfrompersistedstatefile",
       "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "capturecredentialsfrompersistedstatefile()"
     },
     {
@@ -5696,8 +5718,8 @@
       "source_location": "L3588",
       "_origin": "ast",
       "id": "src_lib_auto_login_capturecredentialsfromsystembrowserprofile",
-      "community": 46,
-      "community_name": "captureCredentialsFromPersistedStateFile",
+      "community": 10,
+      "community_name": "auto-login.test.ts",
       "norm_label": "capturecredentialsfromsystembrowserprofile()"
     },
     {
@@ -6103,8 +6125,8 @@
       "source_location": "L214",
       "_origin": "ast",
       "id": "src_lib_command_spec_buildcapabilities",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 6,
+      "community_name": "command-spec.ts",
       "norm_label": "buildcapabilities()"
     },
     {
@@ -7406,6 +7428,61 @@
       "norm_label": "launchlightpandapublicspike()"
     },
     {
+      "label": "package-metadata.ts",
+      "file_type": "code",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "src_lib_package_metadata",
+      "community": 13,
+      "community_name": "auth-mcp-server.ts",
+      "norm_label": "package-metadata.ts"
+    },
+    {
+      "label": "PackageManifest",
+      "file_type": "code",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L3",
+      "_origin": "ast",
+      "id": "src_lib_package_metadata_packagemanifest",
+      "community": 13,
+      "community_name": "auth-mcp-server.ts",
+      "norm_label": "packagemanifest"
+    },
+    {
+      "label": "require",
+      "file_type": "code",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L7",
+      "_origin": "ast",
+      "id": "src_lib_package_metadata_require",
+      "community": 13,
+      "community_name": "auth-mcp-server.ts",
+      "norm_label": "require"
+    },
+    {
+      "label": "manifest",
+      "file_type": "code",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L8",
+      "_origin": "ast",
+      "id": "src_lib_package_metadata_manifest",
+      "community": 13,
+      "community_name": "auth-mcp-server.ts",
+      "norm_label": "manifest"
+    },
+    {
+      "label": "packageVersion",
+      "file_type": "code",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L17",
+      "_origin": "ast",
+      "id": "src_lib_package_metadata_packageversion",
+      "community": 13,
+      "community_name": "auth-mcp-server.ts",
+      "norm_label": "packageversion"
+    },
+    {
       "label": "planner.ts",
       "file_type": "code",
       "source_file": "src/lib/planner.ts",
@@ -7643,8 +7720,8 @@
       "source_location": "L256",
       "_origin": "ast",
       "id": "src_lib_planner_buildresettargetdatesmutation",
-      "community": 58,
-      "community_name": "handleSubmissionUpload",
+      "community": 19,
+      "community_name": "planner.ts",
       "norm_label": "buildresettargetdatesmutation()"
     },
     {
@@ -7841,8 +7918,8 @@
       "source_location": "L246",
       "_origin": "ast",
       "id": "src_lib_session_savesession",
-      "community": 11,
-      "community_name": "session.ts",
+      "community": 14,
+      "community_name": "auth-broker.ts",
       "norm_label": "savesession()"
     },
     {
@@ -7918,8 +7995,8 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskview",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 19,
+      "community_name": "planner.ts",
       "norm_label": "studenttaskview"
     },
     {
@@ -7929,8 +8006,8 @@
       "source_location": "L47",
       "_origin": "ast",
       "id": "src_lib_student_task_view_studenttaskrow",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "studenttaskrow"
     },
     {
@@ -8446,7 +8523,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_types",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "types.ts"
     },
@@ -8468,7 +8545,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "src_lib_types_ontrackuser",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "ontrackuser"
     },
@@ -8491,7 +8568,7 @@
       "_origin": "ast",
       "id": "src_lib_types_accesstokenresponse",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "accesstokenresponse"
     },
     {
@@ -8502,7 +8579,7 @@
       "_origin": "ast",
       "id": "src_lib_types_credentialsource",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "credentialsource"
     },
     {
@@ -8534,8 +8611,8 @@
       "source_location": "L104",
       "_origin": "ast",
       "id": "src_lib_types_taskuploadrequirement",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 35,
+      "community_name": "submission-lifecycle.ts",
       "norm_label": "taskuploadrequirement"
     },
     {
@@ -8545,8 +8622,8 @@
       "source_location": "L116",
       "_origin": "ast",
       "id": "src_lib_types_taskdefinitionsummary",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 19,
+      "community_name": "planner.ts",
       "norm_label": "taskdefinitionsummary"
     },
     {
@@ -8556,7 +8633,7 @@
       "source_location": "L134",
       "_origin": "ast",
       "id": "src_lib_types_tasksummary",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "tasksummary"
     },
@@ -8567,7 +8644,7 @@
       "source_location": "L189",
       "_origin": "ast",
       "id": "src_lib_types_inboxtask",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "inboxtask"
     },
@@ -8578,8 +8655,8 @@
       "source_location": "L205",
       "_origin": "ast",
       "id": "src_lib_types_projectsummary",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 0,
+      "community_name": "student-task-view.ts",
       "norm_label": "projectsummary"
     },
     {
@@ -8589,8 +8666,8 @@
       "source_location": "L225",
       "_origin": "ast",
       "id": "src_lib_types_taskselector",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "taskselector"
     },
     {
@@ -8600,7 +8677,7 @@
       "source_location": "L237",
       "_origin": "ast",
       "id": "src_lib_types_taskbatchselector",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "taskbatchselector"
     },
@@ -8633,7 +8710,7 @@
       "source_location": "L282",
       "_origin": "ast",
       "id": "src_lib_types_watcheventtype",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "watcheventtype"
     },
@@ -8644,7 +8721,7 @@
       "source_location": "L285",
       "_origin": "ast",
       "id": "src_lib_types_watchevent",
-      "community": 39,
+      "community": 45,
       "community_name": "types.ts",
       "norm_label": "watchevent"
     },
@@ -8666,8 +8743,8 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "src_lib_utils_normalizebaseurl",
-      "community": 48,
-      "community_name": "printJson",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "normalizebaseurl()"
     },
     {
@@ -8688,8 +8765,8 @@
       "source_location": "L80",
       "_origin": "ast",
       "id": "src_lib_utils_prompt",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "prompt()"
     },
     {
@@ -8721,8 +8798,8 @@
       "source_location": "L168",
       "_origin": "ast",
       "id": "src_lib_utils_openexternal",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "openexternal()"
     },
     {
@@ -8777,7 +8854,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_formatdate",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "formatdate()"
     },
     {
@@ -8920,7 +8997,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_tointeger",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "tointeger()"
     },
     {
@@ -8931,7 +9008,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_tostringvalue",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "tostringvalue()"
     },
     {
@@ -9051,8 +9128,8 @@
       "source_location": "L634",
       "_origin": "ast",
       "id": "src_lib_utils_toredactederror",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "toredactederror()"
     },
     {
@@ -9074,7 +9151,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_gettaskdefinitionid",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "gettaskdefinitionid()"
     },
     {
@@ -9085,7 +9162,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_gettaskabbreviation",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "gettaskabbreviation()"
     },
     {
@@ -9096,7 +9173,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_gettaskname",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "gettaskname()"
     },
     {
@@ -9107,7 +9184,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_gettaskduedate",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "gettaskduedate()"
     },
     {
@@ -9118,7 +9195,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_gettaskcompletiondate",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "gettaskcompletiondate()"
     },
     {
@@ -9129,7 +9206,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_gettaskstatus",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "gettaskstatus()"
     },
     {
@@ -9140,7 +9217,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_issametask",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "issametask()"
     },
     {
@@ -9151,7 +9228,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_findtaskbydefinitionid",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "findtaskbydefinitionid()"
     },
     {
@@ -9162,7 +9239,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_findtaskbylegacyid",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "findtaskbylegacyid()"
     },
     {
@@ -9173,7 +9250,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_findtaskbyabbr",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "findtaskbyabbr()"
     },
     {
@@ -9183,8 +9260,8 @@
       "source_location": "L732",
       "_origin": "ast",
       "id": "src_lib_utils_resolvedtaskselector",
-      "community": 39,
-      "community_name": "types.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "resolvedtaskselector"
     },
     {
@@ -9205,8 +9282,8 @@
       "source_location": "L769",
       "_origin": "ast",
       "id": "src_lib_utils_parsetaskbatchselectorargs",
-      "community": 3,
-      "community_name": "utils.ts",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "parsetaskbatchselectorargs()"
     },
     {
@@ -9216,8 +9293,8 @@
       "source_location": "L822",
       "_origin": "ast",
       "id": "src_lib_utils_parsetaskselectorargs",
-      "community": 3,
-      "community_name": "utils.ts",
+      "community": 48,
+      "community_name": "printJson",
       "norm_label": "parsetaskselectorargs()"
     },
     {
@@ -9228,7 +9305,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_toresolvedtaskselector",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "toresolvedtaskselector()"
     },
     {
@@ -9239,7 +9316,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_resolvetaskselector",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "resolvetaskselector()"
     },
     {
@@ -9250,7 +9327,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_resolvetaskbatchselector",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "resolvetaskbatchselector()"
     },
     {
@@ -9261,7 +9338,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_filtertasksbystatus",
       "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community_name": "handleInbox",
       "norm_label": "filtertasksbystatus()"
     },
     {
@@ -9348,8 +9425,8 @@
       "source_location": "L1069",
       "_origin": "ast",
       "id": "src_lib_utils_getfeedbacktext",
-      "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community": 8,
+      "community_name": "cli.ts",
       "norm_label": "getfeedbacktext()"
     },
     {
@@ -9392,8 +9469,8 @@
       "source_location": "L1133",
       "_origin": "ast",
       "id": "src_lib_utils_getlatestfeedbacktimestamp",
-      "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "getlatestfeedbacktimestamp()"
     },
     {
@@ -9414,8 +9491,8 @@
       "source_location": "L1173",
       "_origin": "ast",
       "id": "src_lib_utils_makewatchtaskkey",
-      "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "makewatchtaskkey()"
     },
     {
@@ -9480,8 +9557,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_lib_welcome",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "welcome.ts"
     },
     {
@@ -9491,8 +9568,8 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "src_lib_welcome_welcomemenuitem",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "welcomemenuitem"
     },
     {
@@ -9502,8 +9579,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "src_lib_welcome_base_welcome_menu",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "base_welcome_menu"
     },
     {
@@ -9513,8 +9590,8 @@
       "source_location": "L115",
       "_origin": "ast",
       "id": "src_lib_welcome_getwelcomemenuitems",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "getwelcomemenuitems()"
     },
     {
@@ -9524,8 +9601,8 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "src_lib_welcome_parsewelcomeselection",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "parsewelcomeselection()"
     },
     {
@@ -9634,8 +9711,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_api_test",
-      "community": 1,
-      "community_name": "SessionData",
+      "community": 45,
+      "community_name": "types.ts",
       "norm_label": "api.test.ts"
     },
     {
@@ -9645,8 +9722,8 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "test_api_test_session",
-      "community": 1,
-      "community_name": "SessionData",
+      "community": 45,
+      "community_name": "types.ts",
       "norm_label": "session"
     },
     {
@@ -9656,8 +9733,8 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "test_api_test_mockfetch",
-      "community": 1,
-      "community_name": "SessionData",
+      "community": 45,
+      "community_name": "types.ts",
       "norm_label": "mockfetch()"
     },
     {
@@ -9708,7 +9785,7 @@
       "label": "withClient()",
       "file_type": "code",
       "source_file": "test/auth-mcp.test.ts",
-      "source_location": "L10",
+      "source_location": "L11",
       "_origin": "ast",
       "id": "test_auth_mcp_test_withclient",
       "community": 13,
@@ -9767,7 +9844,7 @@
       "_origin": "ast",
       "id": "test_auth_test",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "auth.test.ts"
     },
     {
@@ -9778,7 +9855,7 @@
       "_origin": "ast",
       "id": "test_auth_test_legacy",
       "community": 45,
-      "community_name": "auth.ts",
+      "community_name": "types.ts",
       "norm_label": "legacy"
     },
     {
@@ -10404,8 +10481,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_utils_coverage_test",
-      "community": 54,
-      "community_name": "utils-coverage.test.ts",
+      "community": 3,
+      "community_name": "utils.ts",
       "norm_label": "utils-coverage.test.ts"
     },
     {
@@ -10448,8 +10525,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "test_welcome_test",
-      "community": 8,
-      "community_name": "cli.ts",
+      "community": 55,
+      "community_name": "runWelcomeAction",
       "norm_label": "welcome.test.ts"
     },
     {
@@ -11809,7 +11886,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L82",
+      "source_location": "L87",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_run",
@@ -12464,8 +12541,20 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L149",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_verify_package_verifyinstalledauthmcp",
+      "target": "scripts_check_gitnexus_mcp_client"
+    },
+    {
+      "relation": "references",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
       "source_file": "test/auth-mcp.test.ts",
-      "source_location": "L19",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
       "source": "test_auth_mcp_test_withclient",
@@ -12933,7 +13022,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L94",
+      "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -12944,7 +13033,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L101",
+      "source_location": "L106",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -12955,7 +13044,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L28",
+      "source_location": "L33",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -12966,7 +13055,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L20",
+      "source_location": "L25",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -12977,7 +13066,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L169",
+      "source_location": "L247",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -12988,7 +13077,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L15",
+      "source_location": "L17",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -12999,7 +13088,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L6",
+      "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -13010,7 +13099,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L81",
+      "source_location": "L86",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -13021,7 +13110,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L42",
+      "source_location": "L47",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -13032,7 +13121,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L69",
+      "source_location": "L74",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
@@ -13043,11 +13132,33 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L113",
+      "source_location": "L134",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_verify_package",
+      "target": "scripts_verify_package_verifyinstalledauthmcp",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L165",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package",
       "target": "scripts_verify_package_verifypackagetarball",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L118",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_verify_package",
+      "target": "scripts_verify_package_withindeadline",
       "confidence_score": 1.0
     },
     {
@@ -13067,7 +13178,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L45",
+      "source_location": "L50",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_validatetarentries",
@@ -13079,7 +13190,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L48",
+      "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_validatetarentries",
@@ -13091,7 +13202,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L123",
+      "source_location": "L175",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_verifypackagetarball",
@@ -13115,7 +13226,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L120",
+      "source_location": "L172",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_verifypackagetarball",
@@ -13139,7 +13250,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L119",
+      "source_location": "L171",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_verifypackagetarball",
@@ -13151,7 +13262,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L133",
+      "source_location": "L185",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_verifypackagetarball",
@@ -13163,7 +13274,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L129",
+      "source_location": "L181",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_verifypackagetarball",
@@ -13175,7 +13286,31 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "scripts/verify-package.ts",
-      "source_location": "L173",
+      "source_location": "L148",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_verify_package_verifyinstalledauthmcp",
+      "target": "scripts_verify_package_withindeadline",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L236",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_verify_package_verifypackagetarball",
+      "target": "scripts_verify_package_verifyinstalledauthmcp",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/verify-package.ts",
+      "source_location": "L251",
       "weight": 1.0,
       "_origin": "ast",
       "source": "scripts_verify_package_main",
@@ -13210,7 +13345,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L28",
+      "source_location": "L29",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13221,7 +13356,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L57",
+      "source_location": "L58",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13232,7 +13367,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L62",
+      "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13243,7 +13378,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L34",
+      "source_location": "L35",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13254,7 +13389,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L13",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13265,7 +13400,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L258",
+      "source_location": "L259",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13276,7 +13411,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L42",
+      "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13287,7 +13422,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L26",
+      "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13298,7 +13433,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L18",
+      "source_location": "L19",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13394,6 +13529,30 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_auth_mcp_server",
+      "target": "src_lib_package_metadata",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/auth-mcp-server.ts",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_auth_mcp_server",
+      "target": "src_lib_package_metadata_packageversion",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/auth-mcp-server.ts",
       "source_location": "L9",
       "weight": 1.0,
       "_origin": "ast",
@@ -13418,7 +13577,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L11",
+      "source_location": "L12",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13430,7 +13589,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L11",
+      "source_location": "L12",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server",
@@ -13453,7 +13612,7 @@
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L31",
+      "source_location": "L32",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_authmcpdependencies",
@@ -13464,7 +13623,7 @@
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L30",
+      "source_location": "L31",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_authmcpdependencies",
@@ -13475,7 +13634,7 @@
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L29",
+      "source_location": "L30",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_authmcpdependencies",
@@ -13499,7 +13658,7 @@
       "context": "return_type",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L29",
+      "source_location": "L30",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_authmcpdependencies_createbroker",
@@ -13511,7 +13670,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L95",
+      "source_location": "L96",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_createauthmcpserver",
@@ -13523,59 +13682,11 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L241",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_auth_mcp_server_createauthmcpserver",
-      "target": "src_auth_mcp_server_authmcpdependencies_clearsession",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L37",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_auth_mcp_server_defaultdependencies",
-      "target": "src_auth_mcp_server_authmcpdependencies_clearsession",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/auth-mcp-server.ts",
       "source_location": "L242",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_createauthmcpserver",
-      "target": "src_auth_mcp_server_authmcpdependencies_clearbrowsersessionstate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L65",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_auth_mcp_server_createauthmcpserver",
-      "target": "src_auth_mcp_server_defaultdependencies",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L36",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_auth_mcp_server_defaultdependencies",
-      "target": "src_lib_auth_broker_createontrackauthbroker",
+      "target": "src_auth_mcp_server_authmcpdependencies_clearsession",
       "confidence_score": 1.0
     },
     {
@@ -13587,7 +13698,31 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_defaultdependencies",
-      "target": "src_lib_auto_login_clearallbrowsersessionstate",
+      "target": "src_auth_mcp_server_authmcpdependencies_clearsession",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/auth-mcp-server.ts",
+      "source_location": "L243",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_auth_mcp_server_createauthmcpserver",
+      "target": "src_auth_mcp_server_authmcpdependencies_clearbrowsersessionstate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/auth-mcp-server.ts",
+      "source_location": "L66",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_auth_mcp_server_createauthmcpserver",
+      "target": "src_auth_mcp_server_defaultdependencies",
       "confidence_score": 1.0
     },
     {
@@ -13599,6 +13734,30 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_defaultdependencies",
+      "target": "src_lib_auth_broker_createontrackauthbroker",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/auth-mcp-server.ts",
+      "source_location": "L39",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_auth_mcp_server_defaultdependencies",
+      "target": "src_lib_auto_login_clearallbrowsersessionstate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/auth-mcp-server.ts",
+      "source_location": "L38",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_auth_mcp_server_defaultdependencies",
       "target": "src_lib_session_clearsession",
       "confidence_score": 1.0
     },
@@ -13607,7 +13766,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L98",
+      "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_createauthmcpserver",
@@ -13619,7 +13778,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L58",
+      "source_location": "L59",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_configuredbaseurl",
@@ -13631,7 +13790,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L96",
+      "source_location": "L97",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_createauthmcpserver",
@@ -13643,7 +13802,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/auth-mcp-server.ts",
-      "source_location": "L259",
+      "source_location": "L260",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_auth_mcp_server_serveauthmcp",
@@ -13667,7 +13826,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "test/auth-mcp.test.ts",
-      "source_location": "L14",
+      "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
       "source": "test_auth_mcp_test_withclient",
@@ -34863,6 +35022,74 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_lib_package_metadata",
+      "target": "src_lib_package_metadata_manifest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_lib_package_metadata",
+      "target": "src_lib_package_metadata_packagemanifest",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L17",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_lib_package_metadata",
+      "target": "src_lib_package_metadata_packageversion",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/package-metadata.ts",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "src_lib_package_metadata",
+      "target": "src_lib_package_metadata_require",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "test/auth-mcp.test.ts",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "test_auth_mcp_test",
+      "target": "src_lib_package_metadata",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "test/auth-mcp.test.ts",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "test_auth_mcp_test",
+      "target": "src_lib_package_metadata_packageversion",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "src/lib/planner.ts",
       "source_location": "L174",
       "weight": 1.0,
@@ -40404,7 +40631,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "test/auth-mcp.test.ts",
-      "source_location": "L10",
+      "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
       "source": "test_auth_mcp_test",
@@ -41532,5 +41759,5 @@
       "source_file": "docs/CI_CD_DESIGN.md"
     }
   ],
-  "built_at_commit": "07184c03ac7ca3db4d20469a7acc98fad19bce08"
+  "built_at_commit": "51a62d0a721c12c69dcaaba838a4bb82efc85146"
 }
