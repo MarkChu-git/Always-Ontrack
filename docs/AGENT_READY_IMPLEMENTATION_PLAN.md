@@ -1,6 +1,6 @@
 # OnTrack CLI Agent-Ready 实施计划
 
-状态：0.5.0 发布候选验证中；Lightpanda 保持为后续实验项
+状态：0.5.0 已发布；0.5.1 加入隔离的 Lightpanda 公共兼容性实验与安全加固
 分支：`codex/agent-ready-runtime`
 协议目标：`ontrack.agent/v1`
 

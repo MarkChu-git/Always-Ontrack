@@ -8,6 +8,7 @@ import {
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from './lib/auth-runtime.js';
 import { clearSession } from './lib/session.js';
 import { clearAllBrowserSessionState } from './lib/auto-login.js';
+import { packageVersion } from './lib/package-metadata.js';
 import { normalizeBaseUrl } from './lib/utils.js';
 
 const nextActionSchema = z.object({
@@ -66,7 +67,7 @@ export function createAuthMcpServer(
   const server = new McpServer(
     {
       name: 'ontrack-auth',
-      version: '0.5.0',
+      version: packageVersion,
     },
     {
       instructions:

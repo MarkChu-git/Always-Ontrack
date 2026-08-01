@@ -6,6 +6,7 @@ import {
   createAuthMcpServer,
   type AuthMcpDependencies,
 } from '../src/auth-mcp-server.js';
+import { packageVersion } from '../src/lib/package-metadata.js';
 
 async function withClient(
   dependencies: AuthMcpDependencies,
@@ -19,6 +20,7 @@ async function withClient(
     client.connect(clientTransport),
   ]);
   try {
+    assert.equal(client.getServerVersion()?.version, packageVersion);
     await run(client);
   } finally {
     await client.close();

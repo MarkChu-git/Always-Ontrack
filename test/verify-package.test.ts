@@ -85,7 +85,22 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
   await writeFile(join(packageRoot, 'dist', 'lib', 'api.js'), 'export {};');
   await writeFile(
     join(packageRoot, 'dist', 'auth-mcp.js'),
-    '#!/usr/bin/env bun\nexport {};',
+    `#!/usr/bin/env bun
+import { createInterface } from 'node:readline';
+const input = createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method !== 'initialize') return;
+  process.stdout.write(JSON.stringify({
+    jsonrpc: '2.0',
+    id: message.id,
+    result: {
+      protocolVersion: message.params.protocolVersion,
+      capabilities: {},
+      serverInfo: { name: 'fake-auth-mcp', version: '0.3.0' },
+    },
+  }) + '\\n');
+});`,
   );
   await writeFile(
     join(packageRoot, 'dist', 'cli.js'),
@@ -102,6 +117,7 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
   const result = await verifyPackageTarball(archivePath);
 
   assert.match(result.cliOutput, /ontrack help works/);
+  assert.equal(result.authMcpVersion, '0.3.0');
   assert.deepEqual([...result.entries].sort(), [...validEntries].sort());
   await rm(root, { recursive: true, force: true });
 });
