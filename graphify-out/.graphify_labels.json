@@ -64,7 +64,7 @@
   "62": "command-input.ts",
   "63": "planner.ts",
   "64": "AgentProtocolError",
-  "65": "runWelcomeAction",
+  "65": "createNativeAgentExecutionEngine",
   "66": "OnTrackAuthBroker",
   "67": "createNativeAgentCommands",
   "68": "AgentExecutionEngine"

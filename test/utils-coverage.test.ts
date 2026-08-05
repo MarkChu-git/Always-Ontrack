@@ -37,8 +37,10 @@ import {
 } from '../src/lib/utils.js';
 
 const originalLog = console.log;
+const originalStdoutWrite = process.stdout.write;
 afterEach(() => {
   console.log = originalLog;
+  process.stdout.write = originalStdoutWrite;
 });
 
 test('normalization, SSO parsing, flags, and dates validate command-boundary inputs', () => {
@@ -169,6 +171,10 @@ test('status, role, filename, upload and feedback helpers cover fallbacks', asyn
 test('human output helpers produce structured JSON/table output including empty tables', () => {
   const output: string[] = [];
   console.log = ((value: unknown) => output.push(String(value))) as typeof console.log;
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    output.push(String(chunk).trimEnd());
+    return true;
+  }) as typeof process.stdout.write;
   printJson({ a: 1 });
   printTable([]);
   printTable([{ unit: 'FIT', task: 'T1', status: 'complete', due: 'bad-date', extra: { x: 1 } }]);

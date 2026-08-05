@@ -330,7 +330,9 @@ export function formatDate(value?: string): string {
 /** Stable pretty JSON printer for machine-consumable output modes. */
 export function printJson(value: unknown): void {
   const context = getAgentOutputContext();
-  console.log(JSON.stringify(wrapAgentOutput(value), null, context?.streaming ? undefined : 2));
+  output.write(
+    `${JSON.stringify(wrapAgentOutput(value), null, context?.streaming ? undefined : 2)}\n`,
+  );
 }
 
 /**

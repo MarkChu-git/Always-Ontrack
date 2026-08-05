@@ -1,7 +1,7 @@
 # Graph Report - projects-list  (2026-08-06)
 
 ## Corpus Check
-- 92 files · ~115,929 words
+- 92 files · ~115,953 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `8ebc82ee`
+- Built from commit: `24d3be82`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -76,7 +76,7 @@
 - command-input.ts
 - planner.ts
 - AgentProtocolError
-- runWelcomeAction
+- createNativeAgentExecutionEngine
 - OnTrackAuthBroker
 - createNativeAgentCommands
 - AgentExecutionEngine
@@ -128,7 +128,7 @@ Nodes (35): main(), readPublicOktaUrl(), requiredLightpandaPath(), cleanupFailur
 
 ### Community 3 - "utils.ts"
 Cohesion: 0.07
-Nodes (54): handleAuthMethod(), handleLogin(), buildPdfFilename(), buildTaskResourceFilename(), colorize(), COLORS_ENABLED, DEFAULT_DOWNLOAD_DIR, ExternalOpenCommand (+46 more)
+Nodes (57): handleAuthMethod(), handleLogin(), StudentTaskRow, TaskSelector, buildPdfFilename(), buildTaskResourceFilename(), colorize(), COLORS_ENABLED (+49 more)
 
 ### Community 4 - "agent-protocol.ts"
 Cohesion: 0.14
@@ -156,7 +156,7 @@ Nodes (21): ProbeResult, API_HINTS, classifyDiscoveredPaths(), discoverOnTrackSu
 
 ### Community 10 - "auto-login.test.ts"
 Cohesion: 0.14
-Nodes (16): candidateBrowserPaths(), captureCredentialsFromStoredBrowserSession(), captureCredentialsFromSystemBrowserProfile(), classifySsoFallback(), clearAllBrowserSessionState(), clearBrowserSessionState(), expandSystemBrowserProfileCandidates(), extractCredentialsFromUrl() (+8 more)
+Nodes (16): candidateBrowserPaths(), captureCredentialsFromStoredBrowserSession(), captureCredentialsFromSystemBrowserProfile(), classifySsoFallback(), clearAllBrowserSessionState(), clearBrowserSessionState(), expandSystemBrowserProfileCandidates(), extractCredentialsFromCookieJar() (+8 more)
 
 ### Community 11 - "session.ts"
 Cohesion: 0.17
@@ -276,7 +276,7 @@ Nodes (22): ArtifactOutputOptions, ArtifactPathOptions, ArtifactSafetyError, ass
 
 ### Community 46 - "captureSsoCredentialsInternal"
 Cohesion: 0.16
-Nodes (17): canUseSelectorInScopes(), captureCredentialsFromPersistedStateFile(), captureSsoCredentialsInternal(), closeBrowserAtMost(), detectOktaVerifyChallenge(), detectSsoCaptcha(), detectUnsupportedMfa(), extractCredentialsFromCookieJar() (+9 more)
+Nodes (17): canUseSelectorInScopes(), captureCredentialsFromPersistedStateFile(), captureSsoCredentialsInternal(), closeBrowserAtMost(), detectOktaVerifyChallenge(), detectSsoCaptcha(), detectUnsupportedMfa(), extractCredentialsFromLocalStorage() (+9 more)
 
 ### Community 47 - "execution-journal.ts"
 Cohesion: 0.25
@@ -307,8 +307,8 @@ Cohesion: 0.10
 Nodes (32): PlannerView, StudentTaskReference, booleanValue(), createSubmissionAttempt(), hasOwnField(), InvalidSubmissionDetailsError, isSubmissionObserved(), journalEntry() (+24 more)
 
 ### Community 55 - "cli.ts"
-Cohesion: 0.05
-Nodes (66): agentSubmissionStatusInputFromSelector(), applyLimit(), arrayLength(), buildAgentSubmissionStatusOutput(), createNativeAgentExecutionEngine(), deriveUnitsFromProjects(), DIGITAL_LOGO_LINES, DoctorCheck (+58 more)
+Cohesion: 0.06
+Nodes (69): agentSubmissionStatusInputFromSelector(), applyLimit(), arrayLength(), buildAgentSubmissionStatusOutput(), buildTaskSelectorArgs(), deriveUnitsFromProjects(), DIGITAL_LOGO_LINES, DoctorCheck (+61 more)
 
 ### Community 56 - "agent-commands.ts"
 Cohesion: 0.05
@@ -346,9 +346,9 @@ Nodes (20): buildPlannerViews(), buildResetTargetDatesMutation(), buildTargetDat
 Cohesion: 0.31
 Nodes (7): AgentCallInputDependencies, AgentCallInvocation, invalidArgument(), parseAgentCallInvocation(), parseInputObject(), readProcessStdin(), AgentProtocolError
 
-### Community 65 - "runWelcomeAction"
-Cohesion: 0.23
-Nodes (16): buildTaskSelectorArgs(), expandHomePath(), optionalFlagArgs(), panelBodyCode(), panelToneCode(), panelVisibleLength(), promptExternalArtifactAuthorization(), promptGuidedOutputDirectory() (+8 more)
+### Community 65 - "createNativeAgentExecutionEngine"
+Cohesion: 0.22
+Nodes (10): createNativeAgentExecutionEngine(), downloadTaskResourceArtifacts(), handleAuthStatus(), handleNativeAgentCommand(), normalizeAgentCliError(), readAgentProjectsList(), readAgentTaskResources(), readAuthStatus() (+2 more)
 
 ### Community 66 - "OnTrackAuthBroker"
 Cohesion: 0.33
@@ -373,6 +373,6 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `lightpanda-provider.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.06988120195667366 - nodes in this community are weakly interconnected._
 - **Should `utils.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.07422559906487435 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06980433632998413 - nodes in this community are weakly interconnected._
 - **Should `agent-protocol.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.14153846153846153 - nodes in this community are weakly interconnected._
