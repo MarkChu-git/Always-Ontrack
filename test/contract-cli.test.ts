@@ -222,6 +222,31 @@ test('plan show and task prerequisites expose production contract semantics', as
           task_status: 'complete',
         },
       ]);
+
+      const agentPrerequisites = await runCli(
+        [
+          'task',
+          'prerequisites',
+          '--project-id',
+          '101',
+          '--abbr',
+          'P1',
+          '--output',
+          'agent-json',
+        ],
+        configRoot,
+      );
+      assert.equal(agentPrerequisites.exitCode, 0, agentPrerequisites.stderr);
+      const agentEnvelope = JSON.parse(agentPrerequisites.stdout) as Record<string, unknown>;
+      assert.equal(agentEnvelope.command, 'task.prerequisites');
+      assert.deepEqual(agentEnvelope.data, [
+        {
+          id: 1,
+          task_definition_id: 501,
+          prerequisite_id: 400,
+          task_status: 'complete',
+        },
+      ]);
     },
   );
 });

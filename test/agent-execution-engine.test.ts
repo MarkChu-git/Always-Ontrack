@@ -229,6 +229,13 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   const commands = createNativeAgentCommands({
     authStatus: async () => ({ status: 'signed_out', baseUrl: 'https://example.test/api' }),
     taskShow: async () => ({ project_id: 1, count: 0, tasks: [] }),
+    taskPrerequisites: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      task_definition_id: 3,
+      count: 0,
+      prerequisites: [],
+    }),
     taskResources: async () => ({
       project_id: 1,
       selected_count: 0,
@@ -247,5 +254,42 @@ test('native definitions keep safety metadata aligned with the compatibility pro
     assert.equal(command.policy.confirmation, legacy.confirmation);
     assert.equal(command.policy.idempotency, legacy.idempotency);
     assert.equal(command.policy.streaming, legacy.streaming);
+    if (command.path === 'task.prerequisites') {
+      const nativeSchema = z.toJSONSchema(command.input) as {
+        anyOf: Array<{ properties: Record<string, Record<string, unknown>> }>;
+      };
+      const compatibilityProperties = legacy.input_schema.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      for (const variant of nativeSchema.anyOf) {
+        assert.equal(
+          variant.properties.project_id.maximum,
+          compatibilityProperties.project_id.maximum,
+        );
+        assert.equal(
+          variant.properties.project_id.exclusiveMinimum,
+          Number(compatibilityProperties.project_id.minimum) - 1,
+        );
+        assert.equal(
+          variant.properties.abbreviation?.pattern,
+          compatibilityProperties.abbreviation.pattern,
+        );
+        assert.equal(
+          variant.properties.abbreviation?.maxLength,
+          compatibilityProperties.abbreviation.maxLength,
+        );
+        if (variant.properties.task_definition_id) {
+          assert.equal(
+            variant.properties.task_definition_id.maximum,
+            compatibilityProperties.task_definition_id.maximum,
+          );
+          assert.equal(
+            variant.properties.task_definition_id.exclusiveMinimum,
+            Number(compatibilityProperties.task_definition_id.minimum) - 1,
+          );
+        }
+      }
+    }
   }
 });

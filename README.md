@@ -144,6 +144,8 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
+ontrack agent call task.prerequisites \
+  --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
@@ -152,7 +154,7 @@ ontrack agent call task.resources \
 empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
-surface covers `auth.status`, `task.show`, and `task.resources`; more commands
+surface covers `auth.status`, `task.show`, `task.prerequisites`, and `task.resources`; more commands
 are added as individually reviewed vertical slices. `task.resources` returns
 bounded artifact metadata (filename, relative path, byte count, content type,
 and SHA-256) and reports unavailable archives without writing placeholders.
@@ -507,7 +509,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `task.show`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `task.show`, `task.prerequisites`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |

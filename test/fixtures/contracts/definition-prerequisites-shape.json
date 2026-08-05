@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "id": "definition-prerequisites-shape",
+    "schemaVersion": 1,
+    "method": "GET",
+    "route": "/units/:unitId/task_definitions/:taskDefId/prerequisites",
+    "provenance": {
+      "observedAt": "2026-07-31",
+      "role": "student",
+      "risk": "read-only",
+      "trust": "http-observed"
+    }
+  },
+  "payload": [
+    {
+      "id": 1,
+      "task_definition_id": 501,
+      "prerequisite_id": 400,
+      "task_status": "complete"
+    },
+    {
+      "id": 2,
+      "taskDefinitionId": 501,
+      "prerequisiteId": 401,
+      "taskStatus": "working"
+    }
+  ]
+}

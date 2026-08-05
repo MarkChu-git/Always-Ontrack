@@ -45,5 +45,22 @@ test('command path resolution handles grouped and top-level commands', () => {
   const resources = getCommandSpec('task.resources');
   assert.ok(Array.isArray(resources.input_schema.allOf));
   assert.ok(JSON.stringify(resources.input_schema).includes('task_definition_id'));
+  const prerequisites = getCommandSpec('task.prerequisites');
+  assert.deepEqual(prerequisites.input_schema.anyOf, [
+    { required: ['task_definition_id'] },
+    { required: ['abbreviation'] },
+  ]);
+  const prerequisiteProperties = prerequisites.input_schema.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  assert.equal(prerequisiteProperties.project_id.minimum, 1);
+  assert.equal(prerequisiteProperties.project_id.maximum, Number.MAX_SAFE_INTEGER);
+  assert.equal(prerequisiteProperties.task_definition_id.minimum, 1);
+  assert.equal(
+    prerequisiteProperties.task_definition_id.maximum,
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(prerequisiteProperties.abbreviation.pattern, "\\S");
   assert.throws(() => getCommandSpec('missing.command'), /Unknown Agent command/);
 });

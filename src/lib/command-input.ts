@@ -201,6 +201,44 @@ function flagOccurrences(args: readonly string[], flag: string): number[] {
   return args.flatMap((value, index) => (value === flag ? [index] : []));
 }
 
+/** Enforce schema-level anyOf required groups before authentication or I/O. */
+function validateAnyOfRequiredFields(
+  args: readonly string[],
+  command: AgentCommandSpec,
+): void {
+  const alternatives = command.input_schema.anyOf;
+  if (!Array.isArray(alternatives)) {
+    return;
+  }
+  const providedFields = new Set(
+    Object.entries(command.input_fields)
+      .filter(([, field]) => flagOccurrences(args, field.flag).length > 0)
+      .map(([name]) => name),
+  );
+  const satisfied = alternatives.some((alternative) => {
+    if (typeof alternative !== 'object' || alternative === null) {
+      return false;
+    }
+    const required = (alternative as { required?: unknown }).required;
+    return (
+      Array.isArray(required) &&
+      required.every((name) => typeof name === 'string' && providedFields.has(name))
+    );
+  });
+  if (!satisfied) {
+    const names = alternatives
+      .flatMap((alternative) =>
+        typeof alternative === 'object' && alternative !== null
+          ? (alternative as { required?: unknown }).required ?? []
+          : [],
+      )
+      .filter((name): name is string => typeof name === 'string');
+    throw new StructuredInputError(
+      `Agent input requires at least one of: ${[...new Set(names)].join(', ')}.`,
+    );
+  }
+}
+
 /** Validate direct Agent argv against the same registry used for JSON input. */
 export function validateAgentCommandArguments(
   args: readonly string[],
@@ -288,6 +326,30 @@ export function validateAgentCommandArguments(
       if (field.type === "integer" && !/^-?\d+$/u.test(value)) {
         throw new StructuredInputError(`${field.flag} requires an integer.`);
       }
+      if (field.type === "integer" && (field.minimum !== undefined || field.maximum !== undefined)) {
+        const numericValue = Number(value);
+        if (!Number.isSafeInteger(numericValue)) {
+          throw new StructuredInputError(`${field.flag} requires a safe integer.`);
+        }
+        if (field.minimum !== undefined && numericValue < field.minimum) {
+          throw new StructuredInputError(`${field.flag} must be at least ${field.minimum}.`);
+        }
+        if (field.maximum !== undefined && numericValue > field.maximum) {
+          throw new StructuredInputError(`${field.flag} must be at most ${field.maximum}.`);
+        }
+      }
+      if (field.type === "string") {
+        const normalized = value.trim();
+        if (field.minLength !== undefined && normalized.length < field.minLength) {
+          throw new StructuredInputError(`${field.flag} must contain at least ${field.minLength} character.`);
+        }
+        if (field.maxLength !== undefined && normalized.length > field.maxLength) {
+          throw new StructuredInputError(`${field.flag} must contain at most ${field.maxLength} characters.`);
+        }
+        if (field.pattern && !field.pattern.test(value)) {
+          throw new StructuredInputError(`${field.flag} has an invalid format.`);
+        }
+      }
       if (field.enum && !field.enum.includes(value)) {
         throw new StructuredInputError(
           `${field.flag} must be one of: ${field.enum.join(", ")}.`,
@@ -295,4 +357,6 @@ export function validateAgentCommandArguments(
       }
     }
   }
+
+  validateAnyOfRequiredFields(args, command);
 }

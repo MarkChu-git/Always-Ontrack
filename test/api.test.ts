@@ -1,8 +1,10 @@
 import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import {
+  InvalidJsonResponseError,
   MAX_DOWNLOAD_BYTES,
   OnTrackApiClient,
+  OversizedJsonResponseError,
   UnavailableDownloadError,
   readBoundedResponseBody,
 } from '../src/lib/api.js';
@@ -443,6 +445,49 @@ test('list prerequisite Interfaces use their distinct production paths', async (
   await client.listTaskPrerequisites(session, 55, 501);
   assert.ok(requestedUrls[0].endsWith('/units/55/task_prerequisites'));
   assert.ok(requestedUrls[1].endsWith('/units/55/task_definitions/501/prerequisites'));
+});
+
+test('listTaskPrerequisites bounds declared and streamed JSON responses', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const oversized = JSON.stringify({ value: 'x'.repeat(512 * 1024) });
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(oversized)),
+      },
+    }),
+  );
+  await assert.rejects(
+    () => client.listTaskPrerequisites(session, 55, 501),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  await assert.rejects(
+    () => client.listTaskPrerequisites(session, 55, 501),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+});
+
+test('successful invalid JSON is classified as a typed remote response failure', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () =>
+    new Response('{"broken":', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  await assert.rejects(
+    () => client.listTaskPrerequisites(session, 55, 501),
+    (error: unknown) => error instanceof InvalidJsonResponseError,
+  );
 });
 
 test('planner mutations use verified PUT paths and exact JSON bodies without retrying', async () => {

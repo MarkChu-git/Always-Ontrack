@@ -6,6 +6,11 @@ export interface CommandInputField {
   readonly type: CommandInputType;
   readonly required?: boolean;
   readonly enum?: readonly string[];
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: RegExp;
 }
 
 export interface AgentCommandSpec {
@@ -22,15 +27,25 @@ export interface AgentCommandSpec {
   readonly output_schema: Readonly<Record<string, unknown>>;
 }
 
-const stringField = (flag: string, required = false): CommandInputField => ({
+const stringField = (
+  flag: string,
+  required = false,
+  constraints: Pick<CommandInputField, 'minLength' | 'maxLength' | 'pattern'> = {},
+): CommandInputField => ({
   flag,
   type: 'string',
   ...(required ? { required: true } : {}),
+  ...constraints,
 });
-const integerField = (flag: string, required = false): CommandInputField => ({
+const integerField = (
+  flag: string,
+  required = false,
+  constraints: Pick<CommandInputField, 'minimum' | 'maximum'> = {},
+): CommandInputField => ({
   flag,
   type: 'integer',
   ...(required ? { required: true } : {}),
+  ...constraints,
 });
 const booleanField = (flag: string): CommandInputField => ({ flag, type: 'boolean' });
 const stringArrayField = (flag: string, required = false): CommandInputField => ({
@@ -46,12 +61,21 @@ function jsonSchemaForFields(
     Object.entries(fields).map(([name, field]) => {
       const schema =
         field.type === 'integer'
-          ? { type: 'integer' }
+          ? {
+              type: 'integer',
+              ...(field.minimum !== undefined ? { minimum: field.minimum } : {}),
+              ...(field.maximum !== undefined ? { maximum: field.maximum } : {}),
+            }
           : field.type === 'boolean'
             ? { type: 'boolean' }
             : field.type === 'string_array'
               ? { type: 'array', items: { type: 'string' } }
-              : { type: 'string' };
+              : {
+                  type: 'string',
+                  ...(field.minLength !== undefined ? { minLength: field.minLength } : {}),
+                  ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
+                  ...(field.pattern ? { pattern: field.pattern.source } : {}),
+                };
       return [name, field.enum ? { ...schema, enum: [...field.enum] } : schema];
     }),
   );
@@ -107,6 +131,31 @@ const oneTaskSelector = {
   project_id: integerField('--project-id', true),
   task_definition_id: integerField('--task-definition-id'),
   abbreviation: stringField('--abbr'),
+};
+
+const taskPrerequisiteFields = {
+  project_id: integerField('--project-id', true, {
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  }),
+  task_definition_id: integerField('--task-definition-id', false, {
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  }),
+  abbreviation: stringField('--abbr', false, {
+    minLength: 1,
+    maxLength: 64,
+    pattern: /\S/u,
+  }),
+};
+
+const taskPrerequisiteInputBaseSchema = jsonSchemaForFields(taskPrerequisiteFields);
+const taskPrerequisiteInputSchema = {
+  ...taskPrerequisiteInputBaseSchema,
+  anyOf: [
+    { required: ['task_definition_id'] },
+    { required: ['abbreviation'] },
+  ],
 };
 
 const taskResourceFields = {
@@ -182,7 +231,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'doctor', description: 'Run read-only environment and API diagnostics.' }),
   spec({ path: 'inbox.list', description: 'List inbox tasks.', fields: { unit_id: integerField('--unit-id'), status: stringField('--status') } }),
   spec({ path: 'task.show', description: 'Read definition-first student task views.', fields: jsonTaskSelector }),
-  spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: oneTaskSelector }),
+  spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: taskPrerequisiteFields, inputSchema: taskPrerequisiteInputSchema }),
   spec({ path: 'task.resources', description: 'Download task resource archives with artifact metadata.', fields: taskResourceFields, inputSchema: taskResourceInputSchema }),
   spec({ path: 'plan.show', description: 'Read the student plan.', fields: { project_id: integerField('--project-id', true), include_beyond_target: booleanField('--include-beyond-target') } }),
   spec({ path: 'plan.set_dates', description: 'Prepare or apply personal task dates.', risk: 'write', idempotency: 'client_guarded', fields: { ...oneTaskSelector, start: stringField('--start', true), target: stringField('--target', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),

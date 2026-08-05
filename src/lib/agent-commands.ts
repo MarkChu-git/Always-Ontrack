@@ -5,6 +5,7 @@ import {
 } from './agent-execution-engine.js';
 
 const taskShowProjectId = z.number().int().positive();
+const taskShowUnitId = z.number().int().positive();
 const taskShowDefinitionId = z.number().int().positive();
 const taskShowAbbreviations = z
   .array(
@@ -171,6 +172,49 @@ export const agentTaskResourcesOutputSchema = z
 
 export type AgentTaskResourcesInput = z.output<typeof agentTaskResourcesInputSchema>;
 export type AgentTaskResourcesOutput = z.output<typeof agentTaskResourcesOutputSchema>;
+
+/** Typed caller contract for one task's prerequisite relationships. */
+export const agentTaskPrerequisitesInputSchema = z.union([
+  z
+    .object({
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId,
+      abbreviation: z.string().regex(/\S/u).trim().min(1).max(64).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      project_id: taskShowProjectId,
+      abbreviation: z.string().regex(/\S/u).trim().min(1).max(64),
+    })
+    .strict(),
+]);
+
+const agentTaskPrerequisiteSchema = z
+  .object({
+    id: z.number().int().positive().nullable(),
+    task_definition_id: taskShowDefinitionId,
+    prerequisite_task_definition_id: taskShowDefinitionId,
+    required_status: z.string().min(1).max(80),
+  })
+  .strict();
+
+export const agentTaskPrerequisitesOutputSchema = z
+  .object({
+    project_id: taskShowProjectId,
+    unit_id: taskShowUnitId,
+    task_definition_id: taskShowDefinitionId,
+    count: z.number().int().nonnegative(),
+    prerequisites: z.array(agentTaskPrerequisiteSchema).max(200),
+  })
+  .strict();
+
+export type AgentTaskPrerequisitesInput = z.output<
+  typeof agentTaskPrerequisitesInputSchema
+>;
+export type AgentTaskPrerequisitesOutput = z.output<
+  typeof agentTaskPrerequisitesOutputSchema
+>;
 export type AgentAuthStatus = {
   readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
   readonly source?: string;
@@ -181,6 +225,9 @@ export type AgentAuthStatus = {
 export interface NativeAgentCommandHandlers {
   authStatus(): Promise<AgentAuthStatus>;
   taskShow(input: AgentTaskShowInput): Promise<AgentTaskShowOutput>;
+  taskPrerequisites(
+    input: AgentTaskPrerequisitesInput,
+  ): Promise<AgentTaskPrerequisitesOutput>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
 }
 
@@ -225,6 +272,18 @@ export function createNativeAgentCommands(
       input: agentTaskShowInputSchema,
       output: agentTaskShowOutputSchema,
       execute: (input) => handlers.taskShow(input),
+    }),
+    defineAgentCommand({
+      path: 'task.prerequisites',
+      description: 'Read prerequisites for one task.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentTaskPrerequisitesInputSchema,
+      output: agentTaskPrerequisitesOutputSchema,
+      execute: (input) => handlers.taskPrerequisites(input),
     }),
     defineAgentCommand({
       path: 'task.resources',
