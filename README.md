@@ -142,6 +142,7 @@ emits exactly one `ontrack.agent/v1` envelope on stdout:
 ontrack agent list
 ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
+ontrack agent call projects.list --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
@@ -158,7 +159,7 @@ ontrack agent call task.resources \
 empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
-surface covers `auth.status`, `task.show`, `task.prerequisites`,
+surface covers `auth.status`, `projects.list`, `task.show`, `task.prerequisites`,
 `plan.show`, `submission.status`, and `task.resources`; more commands are added as
 individually reviewed vertical slices. `submission.status` resolves
 the task definition even when no task instance exists, reads OnTrack's observed
@@ -177,6 +178,15 @@ and unknown visibility states so an Agent can distinguish unavailable context
 from a filtered task; missing flexible-date capability fails closed. Its
 unit-wide prerequisite response and canonical output are bounded to 512 KiB;
 malformed dates or conflicting aliases fail closed.
+
+`projects.list` is the native discovery bootstrap for those project-scoped
+commands. Its strict `{}` input returns at most 200 PII-minimized project rows
+with project/unit identity plus bounded grade and capability summaries. The
+Agent `/projects` response and complete Agent envelope are each limited to 512 KiB;
+conflicting aliases, duplicate identities, control characters, invalid types,
+or excess rows fail closed as `REMOTE_UNAVAILABLE`. `projects --output
+agent-json` shares this projection, while bare `projects --json` retains its
+legacy raw shape.
 
 The existing `--output agent-json` commands remain a compatibility Adapter for
 the broader command set while it migrates to this interface. Bare `--json`
@@ -528,7 +538,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
@@ -547,7 +557,7 @@ ontrack logout
 
 | Command | Purpose | Notes |
 | --- | --- | --- |
-| `ontrack projects` | List accessible projects | One of the main starting points |
+| `ontrack projects` | List accessible projects | Agent mode uses the safe typed `projects.list` directory; bare `--json` keeps the legacy raw response |
 | `ontrack project show --project-id <id>` | Show detailed project information | Useful for unit, grading, and task overview |
 | `ontrack units` | List units | Some accounts fall back to units derived from `/projects` |
 | `ontrack unit show --unit-id <id>` | Show detailed unit information | Includes task definitions when available |

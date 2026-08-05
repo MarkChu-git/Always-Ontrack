@@ -26,6 +26,7 @@ type JsonBody = Record<string, unknown> | undefined;
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const DEFAULT_RETRY_ATTEMPTS = 2;
+const MAX_AGENT_PROJECTS_RESPONSE_BYTES = 512 * 1024;
 const MAX_TASK_PREREQUISITES_RESPONSE_BYTES = 512 * 1024;
 const MAX_SUBMISSION_DETAILS_RESPONSE_BYTES = 64 * 1024;
 
@@ -459,8 +460,10 @@ export class OnTrackApiClient {
     });
   }
 
-  /** List projects visible to the authenticated account. */
-  listProjects(session: SessionData): Promise<ProjectSummary[]> {
+  private listProjectsWithLimit(
+    session: SessionData,
+    maxResponseBytes?: number,
+  ): Promise<ProjectSummary[]> {
     return requestJson<ProjectSummary[]>(
       withApiPath(this.baseUrl, 'projects'),
       {
@@ -473,7 +476,19 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      maxResponseBytes,
     );
+  }
+
+  /** List projects visible to the authenticated account. */
+  listProjects(session: SessionData): Promise<ProjectSummary[]> {
+    return this.listProjectsWithLimit(session);
+  }
+
+  /** List projects through the bounded Agent discovery transport. */
+  listProjectsForAgent(session: SessionData): Promise<ProjectSummary[]> {
+    return this.listProjectsWithLimit(session, MAX_AGENT_PROJECTS_RESPONSE_BYTES);
   }
 
   /** Fetch one project payload, usually including task instances. */

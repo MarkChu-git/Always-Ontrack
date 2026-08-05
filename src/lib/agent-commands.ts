@@ -19,6 +19,30 @@ const taskShowAbbreviations = z
   .min(1)
   .max(32);
 
+export const agentProjectsListInputSchema = z.object({}).strict();
+const agentProjectDirectoryItemSchema = z
+  .object({
+    project_id: z.number().int().positive(),
+    unit_id: z.number().int().positive(),
+    unit_code: z.string().min(1).max(80).nullable(),
+    unit_name: z.string().min(1).max(512).nullable(),
+    target_grade: z.number().int().nonnegative().nullable(),
+    submitted_grade: z.number().int().nonnegative().nullable(),
+    enrolled: z.boolean().nullable(),
+    special_consideration_days: z.number().int().nonnegative().nullable(),
+    portfolio_available: z.boolean().nullable(),
+    escalation_attempts_remaining: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+export const agentProjectsListOutputSchema = z
+  .object({
+    count: z.number().int().nonnegative().max(200),
+    projects: z.array(agentProjectDirectoryItemSchema).max(200),
+  })
+  .strict();
+export type AgentProjectsListInput = z.output<typeof agentProjectsListInputSchema>;
+export type AgentProjectsListOutput = z.output<typeof agentProjectsListOutputSchema>;
+
 /**
  * Keep selector invariants in the schema itself so `agent describe` is
  * sufficient for a caller to construct a valid request without trial calls.
@@ -331,6 +355,7 @@ export type AgentAuthStatus = {
 
 export interface NativeAgentCommandHandlers {
   authStatus(): Promise<AgentAuthStatus>;
+  projectsList(): Promise<AgentProjectsListOutput>;
   taskShow(input: AgentTaskShowInput): Promise<AgentTaskShowOutput>;
   taskPrerequisites(
     input: AgentTaskPrerequisitesInput,
@@ -371,6 +396,18 @@ export function createNativeAgentCommands(
       input: authStatusInputSchema,
       output: authStatusOutputSchema,
       execute: () => handlers.authStatus(),
+    }),
+    defineAgentCommand({
+      path: 'projects.list',
+      description: 'List the safe project directory for Agent discovery.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentProjectsListInputSchema,
+      output: agentProjectsListOutputSchema,
+      execute: () => handlers.projectsList(),
     }),
     defineAgentCommand({
       path: 'task.show',

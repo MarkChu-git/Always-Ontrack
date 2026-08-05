@@ -1,7 +1,7 @@
 # OnTrack CLI Agent-Ready 实施计划
 
-状态：0.5.1 已发布；submission.status 已合并，plan.show stacked slice 正在实现与审查
-分支：`codex/plan-show`
+状态：0.5.1 已发布；PR #23（plan.show）已 squash merge，projects.list stacked slice 正在实现与审查
+分支：`codex/projects-list`
 协议目标：`ontrack.agent/v1`
 
 ## 1. 产品定位
@@ -327,6 +327,7 @@ Lightpanda 仍须保留为显式 opt-in，不成为服务器默认值；任何�
 ontrack agent list
 ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
+ontrack agent call projects.list --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
@@ -343,7 +344,7 @@ ontrack agent call task.resources \
 command definition，不再经过 JSON → 人类 argv → switch handler。每次调用只向
 stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
 `--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status`、
-definition-first `task.show`、`task.prerequisites`、`submission.status` 与
+PII-minimized `projects.list`、definition-first `task.show`、`task.prerequisites`、`submission.status` 与
 `task.resources`，以及 definition-first `plan.show`；其中
 prerequisites 使用真实 per-definition route、单任务 selector 与 normalized output。
 `task.resources` 已在独立 stacked slice 中完成真实 OnTrack 路由、ZIP magic 校验、
@@ -367,6 +368,13 @@ visibility，`include_beyond_target` 只控制 beyond-target；缺少 flexible-d
 snake/camel alias 冲突、重复关系状态冲突、超过 200 条关系或 512 KiB response/output
 都会 fail closed。native 与 compatibility Agent path 共用该 projection，裸 `--json`
 继续保持旧 PlannerView shape。
+
+`projects.list` 提供 native seam 自举所需的 safe project directory：strict `{}` input，
+最多 200 条 project，完整 Agent envelope 与 Agent `/projects` response 都限制为 512 KiB。投影只保留
+project/unit identity、unit code/name、target/submitted grade 与必要 capability 摘要，不返回
+`user_id`、`campus_id`、student 或未知远端字段。snake/camel alias 必须一致；null/non-null
+冲突、重复 project id、控制字符、非法类型或超限数据全部归类为 `REMOTE_UNAVAILABLE`。
+native 与 `projects --output agent-json` 共用该 projection，裸 `projects --json` 保持旧 raw shape。
 
 Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
 和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接
@@ -487,7 +495,7 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 真实 OnTrack 场景逐层迁移。
 
 - 全部 read command 接入 compatibility Agent envelope。
-- native typed seam 已覆盖 auth status、definition-first task show、
+- native typed seam 已覆盖 auth status、safe project directory、definition-first task show、
   prerequisites、plan show、submission status 与 task resources。
 - watch/feedback watch 使用 NDJSON envelope frame。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。
@@ -514,7 +522,8 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 - Unit、integration、stub E2E、MCP transport tests。
 - 全仓 line/function coverage 持续不低于 80%。
 - typecheck、build、Bun audit、package verification。
-- 只读真实环境 smoke：silent ensure + projects。
+- 只读真实环境 smoke：silent ensure + projects；当前本机 browser-sso session 已过期，
+  `interaction=never` 正确返回 `HUMAN_VERIFICATION_REQUIRED`，fresh online GET 等待用户完成验证。
 - 安全审查和最终代码审查。
 - Conventional commit、PR、CI、合并。
 - 按版本策略发布 npm 和 GitHub Release。

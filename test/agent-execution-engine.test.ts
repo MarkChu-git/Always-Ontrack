@@ -232,6 +232,7 @@ test('policy gates receive the same Zod-normalized input as execution', async ()
 test('native definitions keep safety metadata aligned with the compatibility projection', () => {
   const commands = createNativeAgentCommands({
     authStatus: async () => ({ status: 'signed_out', baseUrl: 'https://example.test/api' }),
+    projectsList: async () => ({ count: 0, projects: [] }),
     taskShow: async () => ({ project_id: 1, count: 0, tasks: [] }),
     taskPrerequisites: async () => ({
       project_id: 1,
@@ -274,6 +275,7 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   });
 
   assert.equal(commands.some((command) => command.path === 'plan.show'), true);
+  assert.equal(commands.some((command) => command.path === 'projects.list'), true);
   assert.equal(commands.some((command) => command.path === 'submission.status'), true);
 
   for (const command of commands) {

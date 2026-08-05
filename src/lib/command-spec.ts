@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  agentProjectsListInputSchema,
+  agentProjectsListOutputSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
@@ -230,7 +232,16 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   }),
   spec({ path: 'auth.logout', description: 'Clear local session and browser refresh state with best-effort remote sign-out.', risk: 'auth', auth: false, confirmation: 'required', fields: { confirm: booleanField('--confirm') } }),
   spec({ path: 'identity.get', description: 'Return the safe current-user identity projection.' }),
-  spec({ path: 'projects.list', description: 'List projects visible to the current identity.' }),
+  spec({
+    path: 'projects.list',
+    description: 'List the safe project directory for Agent discovery.',
+    inputSchema: z.toJSONSchema(agentProjectsListInputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+    outputSchema: z.toJSONSchema(agentProjectsListOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({ path: 'project.show', description: 'Read one project.', fields: { project_id: integerField('--project-id', true) } }),
   spec({ path: 'units.list', description: 'List units visible to the current identity.' }),
   spec({ path: 'unit.show', description: 'Read one unit.', fields: { unit_id: integerField('--unit-id', true) } }),
