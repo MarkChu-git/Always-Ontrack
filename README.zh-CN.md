@@ -137,6 +137,7 @@ JSON object，不会把 JSON 转译成人类 CLI flag，并且 stdout 恰好输�
 ontrack agent list
 ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
+ontrack agent call projects.list --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
@@ -152,7 +153,7 @@ ontrack agent call task.resources \
 `task.show` 使用 definition-first 的 Student Task View，因此即使项目的
 `tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化
 任务会明确标记，不会猜测 instance id。也可以使用 `--input -` 读取有大小上限的
-非交互 stdin。当前原生接口覆盖 `auth.status`、`task.show`、`task.prerequisites`、
+非交互 stdin。当前原生接口覆盖 `auth.status`、`projects.list`、`task.show`、`task.prerequisites`、
 `plan.show`、`submission.status` 与 `task.resources`，后续命令会按独立的垂直切片逐个审查后加入。
 `submission.status` 即使没有 task instance 也会按 task definition 解析，调用真实的
 per-definition submission-details 路由，并显式返回 PDF 三态与
@@ -167,6 +168,12 @@ prerequisite 同时返回 required/current status，并保留 tutorial mismatch 
 visibility，便于 Agent 区分上下文未知与任务被过滤；缺少 flexible-date capability 会
 fail closed。unit-wide prerequisite 响应与 canonical 输出均限制为 512 KiB；非法公历日期
 或冲突 alias 会 fail closed。
+
+`projects.list` 是这些 project-scoped 命令的原生发现入口。它只接受严格的 `{}`，
+最多返回 200 条经过 PII 最小化的 project directory，包含 project/unit 身份以及有边界的
+成绩和 capability 摘要。Agent `/projects` 响应与完整 Agent envelope 都限制为 512 KiB；冲突 alias、
+重复身份、控制字符、非法类型或超量条目都会 fail closed 为 `REMOTE_UNAVAILABLE`。
+`projects --output agent-json` 与原生命令共用该投影，裸 `projects --json` 继续保持旧 raw shape。
 
 更广泛的旧命令仍通过 `--output agent-json` compatibility Adapter 提供；裸
 `--json` 继续保持原有 raw shape。
@@ -498,7 +505,7 @@ ontrack logout
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show`、`task.prerequisites`、`plan.show`、`submission.status`、`task.resources` |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`task.show`、`task.prerequisites`、`plan.show`、`submission.status`、`task.resources` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |
@@ -517,7 +524,7 @@ ontrack logout
 
 | 命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `ontrack projects` | 列出当前账号可访问项目 | 最常用的总入口之一 |
+| `ontrack projects` | 列出当前账号可访问项目 | Agent 模式使用安全 typed `projects.list` directory；裸 `--json` 保持旧 raw response |
 | `ontrack project show --project-id <id>` | 查看某个项目详情 | 适合确认 unit、成绩、任务分布 |
 | `ontrack units` | 列出课程 | 某些账号会 fallback 到 `/projects` 推导结果 |
 | `ontrack unit show --unit-id <id>` | 查看课程详情 | 包括 task definitions 等 |

@@ -164,6 +164,7 @@ test('the remaining fixture catalog is synthetic, valid, and records contract-sp
     loadContractFixture(fixturesRoot, 'submission-details-shape'),
     loadContractFixture(fixturesRoot, 'planner-prerequisites-shape'),
     loadContractFixture(fixturesRoot, 'definition-prerequisites-shape'),
+    loadContractFixture(fixturesRoot, 'project-summaries-shape'),
   ]);
 
   assert.deepEqual(
@@ -173,6 +174,7 @@ test('the remaining fixture catalog is synthetic, valid, and records contract-sp
       ['submission-details-shape', 'read-only'],
       ['planner-prerequisites-shape', 'read-only'],
       ['definition-prerequisites-shape', 'read-only'],
+      ['project-summaries-shape', 'read-only'],
     ],
   );
   assert.equal(fixtures[0].shape?.type, 'object');
@@ -203,6 +205,21 @@ test('the remaining fixture catalog is synthetic, valid, and records contract-sp
     '/units/:unitId/task_definitions/:taskDefId/prerequisites',
   );
   assert.equal(validateContractFixture(fixtures[3]).valid, true);
+  assert.equal(fixtures[4].metadata.route, '/projects');
+  assert.deepEqual(fixtures[4].payload, [
+    {
+      id: 1001,
+      unit: {
+        id: 2001,
+        code: 'FIT0001',
+        name: 'Foundations of Agent Systems',
+      },
+      target_grade: 2,
+      spec_con_days: 3,
+      portfolio_available: true,
+      escalation_attempts_remaining: 2,
+    },
+  ]);
 });
 
 test('fixture validator refuses leaked PII and contract metadata without provenance', () => {

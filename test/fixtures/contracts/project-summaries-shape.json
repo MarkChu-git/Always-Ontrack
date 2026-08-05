@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "id": "project-summaries-shape",
+    "schemaVersion": 1,
+    "method": "GET",
+    "route": "/projects",
+    "provenance": {
+      "observedAt": "2026-07-31",
+      "role": "student",
+      "risk": "read-only",
+      "trust": "http-observed"
+    }
+  },
+  "payload": [
+    {
+      "id": 1001,
+      "unit": {
+        "id": 2001,
+        "code": "FIT0001",
+        "name": "Foundations of Agent Systems"
+      },
+      "target_grade": 2,
+      "spec_con_days": 3,
+      "portfolio_available": true,
+      "escalation_attempts_remaining": 2
+    }
+  ]
+}

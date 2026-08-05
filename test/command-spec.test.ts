@@ -2,6 +2,8 @@ import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import {
+  agentProjectsListInputSchema,
+  agentProjectsListOutputSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
@@ -51,6 +53,11 @@ test('command path resolution handles grouped and top-level commands', () => {
   const resources = getCommandSpec('task.resources');
   assert.ok(Array.isArray(resources.input_schema.allOf));
   assert.ok(JSON.stringify(resources.input_schema).includes('task_definition_id'));
+  const projects = getCommandSpec('projects.list');
+  assert.deepEqual(projects.input_schema, z.toJSONSchema(agentProjectsListInputSchema));
+  assert.deepEqual(projects.output_schema, z.toJSONSchema(agentProjectsListOutputSchema));
+  assert.equal(projects.output_schema.additionalProperties, false);
+  assert.equal(JSON.stringify(projects.output_schema).includes('user_id'), false);
   const prerequisites = getCommandSpec('task.prerequisites');
   assert.deepEqual(prerequisites.input_schema.anyOf, [
     { required: ['task_definition_id'] },

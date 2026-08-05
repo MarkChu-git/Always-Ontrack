@@ -403,7 +403,7 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `logout` | 已修复 | - | 使用已观察的 `DELETE /auth?remember=false`，本地清理不依赖远端成功 |
 | `whoami --json` | 已修复 | - | 只输出 security identity allowlist，不再序列化 credential |
 | `whoami` | 已加 credential lifecycle gate | P2 | expiry 已知时本地 fail-fast；legacy expiry 未知时交由 server 验证 |
-| `projects` | endpoint 存在，但模型偏旧 | P1 | summary 更轻，新增动态 grade/portfolio/escalation |
+| `projects` | Agent 发现面已修复 | - | native typed `projects.list` 输出 PII-minimized safe directory；最多 200 条，Agent HTTP response/完整 envelope 各限 512 KiB，alias/identity 冲突与畸形数据 fail-closed；compatibility Agent path 共用投影，裸 `--json` 保持旧 raw shape 与既有 response behavior |
 | `units` | 需要以 project + unit detail 聚合 | P1 | Web 主要由 project summary 选 unit，再加载 `/units/:id` |
 | `tasks` | 已修复 | - | StudentTaskView 从 unit definitions 派生，并显式连接可选 instance |
 | `task show` | 已修复 | - | selector 统一使用 taskDefinitionId，未实例化任务可读取 |
@@ -430,6 +430,12 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 ```
 
 这只能证明缓存会话已不再被当前生产接口接受；原因可能是 token 过期、撤销或认证协议变化，不能仅凭 419 区分。
+
+2026-08-05 在 `projects.list` slice 中再次以非交互策略执行
+`auth ensure --interaction never --output agent-json`。当前 `browser-sso` session 已过期，CLI
+在任何业务 GET 前稳定返回 `HUMAN_VERIFICATION_REQUIRED`。因此本层没有声称完成新的在线
+`GET /projects` smoke；实现与测试使用 2026-07-31 保存的脱敏、HTTP-observed project summary
+fixture。fresh online smoke 需要用户参与 Monash human verification 后再执行。
 
 ### 6.2 `whoami --json` 泄露 secret
 
@@ -662,6 +668,7 @@ ontrack engagements
 - `/units/:id/tasks/inbox` 在新学期、不同角色下的真实响应。
 - 带真实 comments/attachments/audio 的数据 shape。
 - 已存在 task instance 时 `/projects/:id.tasks` 的完整 shape。
+- 用户完成 human verification 后，重新执行 native `projects.list` 的 fresh online read-only smoke。
 - 特定生产测试任务上的完整提交成功响应与之后只读状态变化；本轮没有执行生产写 smoke。
 - SCORM、content link、overseer、JPlag、LTI 的实际启用方式。
 - Portfolio 编译完成后的异步状态与下载接口。

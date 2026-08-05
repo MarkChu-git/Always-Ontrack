@@ -56,6 +56,7 @@ import {
 } from './lib/planner.js';
 import type { RawTaskPrerequisite } from './lib/planner.js';
 import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
+import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
 import {
   createSubmissionAttempt,
   InvalidSubmissionDetailsError,
@@ -149,6 +150,7 @@ import {
 import {
   type AgentPlanShowInput,
   type AgentPlanShowOutput,
+  type AgentProjectsListOutput,
   type AgentSubmissionStatusInput,
   type AgentSubmissionStatusOutput,
   agentSubmissionStatusOutputSchema,
@@ -2312,10 +2314,13 @@ async function handleWhoAmI(args: string[]): Promise<void> {
 async function handleProjects(args: string[]): Promise<void> {
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
-  const projects = await api.listProjects(session);
+  const agentOutput = getAgentOutputContext();
+  const projects = agentOutput
+    ? await api.listProjectsForAgent(session)
+    : await api.listProjects(session);
 
   if (hasFlag(args, '--json')) {
-    printJson(projects);
+    printJson(agentOutput ? buildAgentProjectsListOutput(projects) : projects);
     return;
   }
 
@@ -2330,6 +2335,13 @@ async function handleProjects(args: string[]): Promise<void> {
       tasks: Array.isArray(project.tasks) ? project.tasks.length : '-',
     })),
   );
+}
+
+async function readAgentProjectsList(
+  session: SessionData,
+): Promise<AgentProjectsListOutput> {
+  const api = createAuthenticatedApi(session);
+  return buildAgentProjectsListOutput(await api.listProjectsForAgent(session));
 }
 
 /** Build compact `status:count` summary used by project detail output. */
@@ -5088,6 +5100,15 @@ function createNativeAgentExecutionEngine() {
   return createAgentExecutionEngine(
     createNativeAgentCommands({
       authStatus: () => readAuthStatus(),
+      projectsList: () => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentProjectsList(activeSession);
+      },
       taskShow: (input) => {
         if (!activeSession) {
           throw new AgentProtocolError({

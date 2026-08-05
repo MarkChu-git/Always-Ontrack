@@ -77,12 +77,21 @@ test("capabilities and schema are offline Agent protocol commands", async () => 
   }
 });
 
-test("Agent output wraps command data while legacy --json remains unchanged", async () => {
+test("native projects.list and compatibility Agent output share a safe project directory", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-output-"));
+  const fixture = JSON.parse(
+    await readFile(
+      resolve(
+        process.cwd(),
+        "test/fixtures/contracts/project-summaries-shape.json",
+      ),
+      "utf8",
+    ),
+  ) as { payload: Array<Record<string, unknown>> };
   const server = createServer((request, response) => {
     assert.equal(request.headers["auth-token"], "fixture-token");
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify([{ id: 101, unit: { code: "FIT0001" } }]));
+    response.end(JSON.stringify(fixture.payload));
   });
   try {
     server.listen(0, "127.0.0.1");
@@ -99,24 +108,209 @@ test("Agent output wraps command data while legacy --json remains unchanged", as
         authToken: "fixture-token",
         user: { id: 1, username: "fixture-user" },
         savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
       }),
       "utf8",
     );
 
     const legacy = await runCli(["projects", "--json"], configRoot);
     assert.equal(legacy.exitCode, 0, legacy.stderr);
-    assert.deepEqual(JSON.parse(legacy.stdout), [
-      { id: 101, unit: { code: "FIT0001" } },
-    ]);
+    assert.deepEqual(JSON.parse(legacy.stdout), fixture.payload);
 
-    const agent = await runCli(
+    const compatibility = await runCli(
       ["projects", "--output", "agent-json"],
       configRoot,
     );
-    assert.equal(agent.exitCode, 0, agent.stderr);
-    const envelope = JSON.parse(agent.stdout) as Record<string, unknown>;
-    assert.equal(envelope.command, "projects.list");
-    assert.deepEqual(envelope.data, [{ id: 101, unit: { code: "FIT0001" } }]);
+    assert.equal(compatibility.exitCode, 0, compatibility.stderr);
+    const compatibilityEnvelope = JSON.parse(
+      compatibility.stdout,
+    ) as Record<string, unknown>;
+    assert.equal(compatibilityEnvelope.command, "projects.list");
+    assert.deepEqual(compatibilityEnvelope.data, {
+      count: 1,
+      projects: [
+        {
+          project_id: 1001,
+          unit_id: 2001,
+          unit_code: "FIT0001",
+          unit_name: "Foundations of Agent Systems",
+          target_grade: 2,
+          submitted_grade: null,
+          enrolled: null,
+          special_consideration_days: 3,
+          portfolio_available: true,
+          escalation_attempts_remaining: 2,
+        },
+      ],
+    });
+
+    const native = await runCli(
+      ["agent", "call", "projects.list", "--input-json", "{}"],
+      configRoot,
+    );
+    assert.equal(native.exitCode, 0, `${native.stderr}\n${native.stdout}`);
+    assert.equal(native.stderr, "");
+    const nativeEnvelope = JSON.parse(native.stdout) as Record<string, unknown>;
+    assert.equal(nativeEnvelope.command, "projects.list");
+    assert.deepEqual(nativeEnvelope.data, compatibilityEnvelope.data);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native projects.list rejects invalid input before authentication or network I/O", async () => {
+  const configRoot = await mkdtemp(
+    join(tmpdir(), "ontrack-agent-projects-input-"),
+  );
+  try {
+    for (const input of [{ unknown: true }, []]) {
+      const result = await runCli(
+        [
+          "agent",
+          "call",
+          "projects.list",
+          "--input-json",
+          JSON.stringify(input),
+        ],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(envelope.command, "projects.list");
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "INVALID_ARGUMENT",
+      );
+    }
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native and compatibility projects.list fail closed on malformed remote summaries", async () => {
+  const configRoot = await mkdtemp(
+    join(tmpdir(), "ontrack-agent-projects-remote-"),
+  );
+  const sensitiveMarker = "student-private-marker@example.invalid";
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/api/projects");
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          id: 1001,
+          unit: { id: 2001, code: "FIT0001" },
+          targetGrade: 2,
+          target_grade: 3,
+          student: { email: sensitiveMarker },
+        },
+      ]),
+    );
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+      }),
+      "utf8",
+    );
+
+    for (const args of [
+      ["agent", "call", "projects.list", "--input-json", "{}"],
+      ["projects", "--output", "agent-json"],
+    ]) {
+      const result = await runCli(args, configRoot);
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(envelope.command, "projects.list");
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "REMOTE_UNAVAILABLE",
+      );
+      assert.equal(result.stdout.includes(sensitiveMarker), false);
+      assert.equal(result.stdout.includes("targetGrade"), false);
+    }
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("Agent project listing is bounded without changing large legacy projects JSON", async () => {
+  const configRoot = await mkdtemp(
+    join(tmpdir(), "ontrack-agent-projects-boundary-"),
+  );
+  const legacyMarker = "x".repeat(512 * 1024);
+  const responseBody = JSON.stringify([
+    {
+      id: 1001,
+      unit: { id: 2001, code: "FIT0001" },
+      legacy_marker: legacyMarker,
+    },
+  ]);
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/api/projects");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(responseBody);
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+      }),
+      "utf8",
+    );
+
+    const legacy = await runCli(["projects", "--json"], configRoot);
+    assert.equal(legacy.exitCode, 0, legacy.stderr);
+    const legacyPayload = JSON.parse(legacy.stdout) as Array<Record<string, unknown>>;
+    assert.equal(legacyPayload[0]?.legacy_marker, legacyMarker);
+
+    for (const args of [
+      ["agent", "call", "projects.list", "--input-json", "{}"],
+      ["projects", "--output", "agent-json"],
+    ]) {
+      const result = await runCli(args, configRoot);
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "REMOTE_UNAVAILABLE",
+      );
+      assert.equal(result.stdout.includes(legacyMarker), false);
+    }
   } finally {
     server.close();
     await rm(configRoot, { recursive: true, force: true });
@@ -1361,6 +1555,7 @@ test("agent list and describe are offline projections of the executable commands
       commands.map((command) => command.path),
       [
         "auth.status",
+        "projects.list",
         "task.show",
         "task.prerequisites",
         "task.resources",
@@ -1368,6 +1563,21 @@ test("agent list and describe are offline projections of the executable commands
         "submission.status",
       ],
     );
+
+    const projects = await runCli(
+      ["agent", "describe", "projects.list"],
+      configRoot,
+    );
+    assert.equal(projects.exitCode, 0, projects.stderr);
+    const projectData = JSON.parse(projects.stdout).data as Record<string, unknown>;
+    assert.deepEqual(projectData.input_schema, {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    });
+    assert.match(JSON.stringify(projectData.output_schema), /portfolio_available/);
+    assert.equal(JSON.stringify(projectData.output_schema).includes("user_id"), false);
 
     const described = await runCli(
       ["agent", "describe", "task.show"],

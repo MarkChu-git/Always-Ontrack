@@ -71,6 +71,43 @@ test('listTaskComments surfaces 401 errors', async () => {
   await assert.rejects(() => client.listTaskComments(session, 101, 501), /401 Unauthorized/);
 });
 
+test('Agent project listing bounds declared and streamed JSON responses', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const oversized = JSON.stringify([{ id: 1, value: 'x'.repeat(512 * 1024) }]);
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(oversized)),
+      },
+    }),
+  );
+  await assert.rejects(
+    () => client.listProjectsForAgent(session),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  await assert.rejects(
+    () => client.listProjectsForAgent(session),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  assert.deepEqual(await client.listProjects(session), JSON.parse(oversized));
+});
+
 test('read transport failures use a typed, body-free error', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   mockFetch(async () => {
