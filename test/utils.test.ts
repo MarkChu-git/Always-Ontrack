@@ -3,11 +3,41 @@ import assert from 'node:assert/strict';
 import {
   isHeadlessServerEnvironment,
   normalizeBaseUrl,
+  resolveExternalOpenCommand,
   parseSsoRedirectUrl,
   redactSensitiveText,
   resolveLoginMode,
   shouldMaskPromptInput,
 } from '../src/lib/utils.js';
+
+test('external opener accepts only safe HTTP(S) URLs and never uses a shell command', () => {
+  assert.deepEqual(
+    resolveExternalOpenCommand(
+      'https://ontrack.infotech.monash.edu/sign_in?next=%2Fhome',
+      'win32',
+    ),
+    {
+      command: 'rundll32.exe',
+      args: ['url.dll,FileProtocolHandler', 'https://ontrack.infotech.monash.edu/sign_in?next=%2Fhome'],
+    },
+  );
+  assert.deepEqual(
+    resolveExternalOpenCommand('https://example.test/path', 'darwin'),
+    { command: 'open', args: ['https://example.test/path'] },
+  );
+  assert.deepEqual(
+    resolveExternalOpenCommand('https://example.test/path', 'linux'),
+    { command: 'xdg-open', args: ['https://example.test/path'] },
+  );
+  assert.throws(
+    () => resolveExternalOpenCommand('javascript:alert(1)', 'linux'),
+    /HTTP\(S\)/,
+  );
+  assert.throws(
+    () => resolveExternalOpenCommand('https://example.test/%0aopen', 'linux'),
+    /control characters/,
+  );
+});
 
 test('normalizeBaseUrl converts site URLs to /api', () => {
   assert.equal(normalizeBaseUrl('https://ontrack.infotech.monash.edu/home'), 'https://ontrack.infotech.monash.edu/api');

@@ -321,6 +321,23 @@ Lightpanda 仍须保留为显式 opt-in，不成为服务器默认值；任何�
 
 ## 7. 命令发现与输入
 
+2026-08-05 起，CLI 增加逐层迁移中的原生 caller-first seam：
+
+```bash
+ontrack agent list
+ontrack agent describe task.show
+ontrack agent call auth.status --input-json '{}'
+ontrack agent call task.show \
+  --input-json '{"project_id":87,"abbreviation":["D4"]}'
+```
+
+该接口直接把 bounded JSON object 交给带 Zod input/output 的 executable
+command definition，不再经过 JSON → 人类 argv → switch handler。每次调用只向
+stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
+`--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status` 和
+definition-first `task.show`；`task.resources` 等后续命令必须在独立 stacked PR
+中完成真实合同、artifact 安全和代码审查后再加入。
+
 新增离线 command registry，记录：
 
 - 稳定 command path；

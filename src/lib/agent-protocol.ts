@@ -64,6 +64,33 @@ export interface AgentFailureEnvelope {
 const SECRET_STRING_PATTERN =
   /(?:\b(?:bearer|basic)\s+[a-z0-9._~+/-]{8,}|eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}|(?:gh[pousr]|github_pat)_[a-z0-9_]{20,}|sk-[a-z0-9_-]{16,})/i;
 
+const MAX_AGENT_TOKEN_LENGTH = 128;
+const MAX_AGENT_METADATA_ITEMS = 16;
+const MAX_AGENT_METADATA_DEPTH = 4;
+const AGENT_COMMAND_PATH = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
+const AGENT_REQUEST_ID = /^req_[a-zA-Z0-9_-]{1,120}$/u;
+
+function sanitizeAgentToken(value: string | undefined, fallback: string): string {
+  const normalized = (value ?? fallback)
+    .replace(/[\u0000-\u001f\u007f]/gu, '?')
+    .trim();
+  const bounded = (normalized || fallback).slice(0, MAX_AGENT_TOKEN_LENGTH);
+  return SECRET_STRING_PATTERN.test(bounded) ? '[REDACTED]' : bounded;
+}
+
+function sanitizeAgentCommand(value: string | undefined): string {
+  const candidate = value?.trim() ?? '';
+  return candidate.length <= MAX_AGENT_TOKEN_LENGTH && AGENT_COMMAND_PATH.test(candidate)
+    ? candidate
+    : 'agent.call';
+}
+
+function sanitizeAgentRequestId(value: string | undefined): string {
+  return value && AGENT_REQUEST_ID.test(value)
+    ? value
+    : `req_${randomUUID()}`;
+}
+
 function isCredentialKey(key: string): boolean {
   const normalized = key.replace(/[_-]/gu, '').toLowerCase();
   if (
@@ -114,6 +141,36 @@ export function sanitizeAgentData(value: unknown): unknown {
     );
   }
   return String(value);
+}
+
+/** Bound protocol metadata separately from business data to prevent amplification. */
+function sanitizeAgentMetadata(value: unknown, depth = 0): unknown {
+  if (depth > MAX_AGENT_METADATA_DEPTH) {
+    return '[TRUNCATED]';
+  }
+  if (typeof value === 'string') {
+    return sanitizeAgentToken(value, '');
+  }
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_AGENT_METADATA_ITEMS)
+      .map((item) => sanitizeAgentMetadata(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !isCredentialKey(key))
+        .slice(0, MAX_AGENT_METADATA_ITEMS)
+        .map(([key, child]) => [
+          sanitizeAgentToken(key, 'field'),
+          sanitizeAgentMetadata(child, depth + 1),
+        ]),
+    );
+  }
+  return sanitizeAgentToken(String(value), '');
 }
 
 interface AgentOutputContext {
@@ -186,14 +243,25 @@ export function agentSuccessEnvelope<T>(
 ): AgentSuccessEnvelope<T> {
   return {
     schema_version: AGENT_SCHEMA_VERSION,
-    request_id: options.requestId ?? `req_${randomUUID()}`,
-    command: options.command,
+    request_id: sanitizeAgentRequestId(options.requestId),
+    command: sanitizeAgentCommand(options.command),
     status: options.status ?? 'success',
-    summary: options.summary ?? 'Command completed successfully.',
+    summary: sanitizeAgentToken(
+      options.summary,
+      'Command completed successfully.',
+    ),
     data: sanitizeAgentData(structuredClone(options.data)) as T,
-    warnings: options.warnings ? [...options.warnings] : [],
-    next_actions: options.nextActions ? structuredClone(options.nextActions) : [],
-    artifacts: options.artifacts ? structuredClone(options.artifacts) : [],
+    warnings: options.warnings
+      ? options.warnings
+          .slice(0, MAX_AGENT_METADATA_ITEMS)
+          .map((warning) => sanitizeAgentToken(warning, ''))
+      : [],
+    next_actions: options.nextActions
+      ? (sanitizeAgentMetadata(structuredClone(options.nextActions)) as AgentNextAction[])
+      : [],
+    artifacts: options.artifacts
+      ? (sanitizeAgentMetadata(structuredClone(options.artifacts)) as AgentArtifact[])
+      : [],
   };
 }
 
@@ -234,10 +302,10 @@ export function agentErrorEnvelope(
   const error = normalizeProtocolError(options.error);
   return {
     schema_version: AGENT_SCHEMA_VERSION,
-    request_id: options.requestId ?? `req_${randomUUID()}`,
-    command: options.command,
+    request_id: sanitizeAgentRequestId(options.requestId),
+    command: sanitizeAgentCommand(options.command),
     status: error.status,
-    summary: error.summary,
+    summary: sanitizeAgentToken(error.summary, 'The command failed unexpectedly.'),
     error: {
       code: error.code,
       retryable: error.retryable,
@@ -245,7 +313,7 @@ export function agentErrorEnvelope(
         ? { retry_after_ms: error.retryAfterMs }
         : {}),
     },
-    next_actions: structuredClone(error.nextActions),
+    next_actions: sanitizeAgentMetadata(structuredClone(error.nextActions)) as AgentNextAction[],
     artifacts: [],
   };
 }
@@ -265,7 +333,11 @@ const EXIT_CODES: Readonly<Record<AgentErrorCode, number>> = {
   INTERNAL_ERROR: 10,
 };
 
+export function exitCodeForAgentErrorCode(code: AgentErrorCode): number {
+  return EXIT_CODES[code];
+}
+
 /** Stable process exit code for Agent orchestration. */
 export function exitCodeForAgentError(error: unknown): number {
-  return EXIT_CODES[normalizeProtocolError(error).code];
+  return exitCodeForAgentErrorCode(normalizeProtocolError(error).code);
 }

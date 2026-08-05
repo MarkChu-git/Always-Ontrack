@@ -123,6 +123,44 @@ test("Agent output wraps command data while legacy --json remains unchanged", as
   }
 });
 
+test("Agent stdout remains one JSON envelope when staff scope hints are emitted", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-hint-"));
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/api/units");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("[]");
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { role: "convenor" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(["inbox", "--output", "agent-json"], configRoot);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stderr, /^\[hint\]/);
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "inbox.list");
+    assert.deepEqual(envelope.data, []);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("Agent JSON stdin maps only registered fields and failures have stable exit codes", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-input-"));
   try {
@@ -214,6 +252,281 @@ test("Agent mode rejects stray positional arguments and boolean flag values befo
         "INVALID_ARGUMENT",
       );
     }
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("agent call executes auth.status through the native typed interface", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-auth-"));
+  try {
+    const result = await runCli(
+      ["agent", "call", "auth.status", "--input-json", "{}"],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.stderr, "");
+
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.schema_version, "ontrack.agent/v1");
+    assert.equal(envelope.command, "auth.status");
+    assert.equal(envelope.status, "success");
+    assert.equal(
+      (envelope.data as Record<string, unknown>).status,
+      "signed_out",
+    );
+
+    const invalid = await runCli(
+      [
+        "agent",
+        "call",
+        "auth.status",
+        "--input-json",
+        '{"unexpected":"secret-shaped-value"}',
+      ],
+      configRoot,
+    );
+    assert.equal(invalid.exitCode, 2);
+    assert.equal(invalid.stderr, "");
+    const failure = JSON.parse(invalid.stdout) as Record<string, unknown>;
+    assert.equal(
+      (failure.error as Record<string, unknown>).code,
+      "INVALID_ARGUMENT",
+    );
+    assert.equal(invalid.stdout.includes("secret-shaped-value"), false);
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("agent call task.show uses definition-first tasks when project instances are empty", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-"));
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(
+        JSON.stringify([
+          { id: 87, unit_id: 55 },
+        ]),
+      );
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(
+        JSON.stringify({
+          id: 87,
+          unit_id: 55,
+          tasks: [],
+        }),
+      );
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(
+        JSON.stringify({
+          id: 55,
+          code: "FIT0001",
+          task_definitions: [
+            { id: 501, abbreviation: "D4", name: "Design task" },
+          ],
+        }),
+      );
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+        refreshedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      [
+        "agent",
+        "call",
+        "task.show",
+        "--input-json",
+        '{"project_id":87,"abbreviation":["D4"]}',
+      ],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "task.show");
+    assert.equal(envelope.status, "success");
+    const data = envelope.data as Record<string, unknown>;
+    assert.equal(data.project_id, 87);
+    assert.equal(data.count, 1);
+    assert.deepEqual(data.tasks, [
+      {
+        project_id: 87,
+        unit_id: 55,
+        unit_code: "FIT0001",
+        task_definition_id: 501,
+        task_instance_id: null,
+        abbreviation: "D4",
+        name: "Design task",
+        status: "not_instantiated",
+        due_date: null,
+        completion_date: null,
+        grade: null,
+        quality_points: null,
+        instantiated: false,
+        visibility: "within_target",
+      },
+    ]);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("agent list and describe are offline projections of the executable commands", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-discovery-"));
+  try {
+    const listed = await runCli(["agent", "list"], configRoot);
+    assert.equal(listed.exitCode, 0, listed.stderr);
+    assert.equal(listed.stderr, "");
+    const listEnvelope = JSON.parse(listed.stdout) as Record<string, unknown>;
+    assert.equal(listEnvelope.command, "agent.list");
+    const commands = (listEnvelope.data as Record<string, unknown>)
+      .commands as Array<Record<string, unknown>>;
+    assert.deepEqual(
+      commands.map((command) => command.path),
+      ["auth.status", "task.show"],
+    );
+
+    const described = await runCli(
+      ["agent", "describe", "task.show"],
+      configRoot,
+    );
+    assert.equal(described.exitCode, 0, described.stderr);
+    const description = JSON.parse(described.stdout) as Record<string, unknown>;
+    assert.equal(description.command, "agent.describe");
+    const data = description.data as Record<string, unknown>;
+    assert.equal(data.path, "task.show");
+    const inputSchema = data.input_schema as Record<string, unknown>;
+    assert.ok(Array.isArray(inputSchema.anyOf));
+    assert.match(JSON.stringify(inputSchema), /\\\\S/);
+
+    const missing = await runCli(
+      ["agent", "describe", "missing.command"],
+      configRoot,
+    );
+    assert.equal(missing.exitCode, 2);
+    assert.equal(
+      (JSON.parse(missing.stdout).error as Record<string, unknown>).code,
+      "INVALID_ARGUMENT",
+    );
+
+    const malformedList = await runCli(["agent", "list", "extra"], configRoot);
+    assert.equal(malformedList.exitCode, 2);
+    assert.equal(JSON.parse(malformedList.stdout).command, "agent.list");
+
+    const malformedDescribe = await runCli(["agent", "describe"], configRoot);
+    assert.equal(malformedDescribe.exitCode, 2);
+    assert.equal(JSON.parse(malformedDescribe.stdout).command, "agent.describe");
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native task.show preserves an auth handoff when enrichment returns 401", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-auth-handoff-"));
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    response.writeHead(401);
+    response.end(JSON.stringify({ error: "expired" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["agent", "call", "task.show", "--input-json", '{"project_id":87,"all_tasks":true}'],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 3);
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal((envelope.error as Record<string, unknown>).code, "AUTH_REQUIRED");
+    assert.equal(result.stdout.includes("expired"), false);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native task.show classifies a closed transport as retryable remote unavailability", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-remote-handoff-"));
+  const server = createServer();
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["agent", "call", "task.show", "--input-json", '{"project_id":87,"all_tasks":true}'],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 7);
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal((envelope.error as Record<string, unknown>).code, "REMOTE_UNAVAILABLE");
+    assert.equal((envelope.error as Record<string, unknown>).retryable, true);
   } finally {
     await rm(configRoot, { recursive: true, force: true });
   }

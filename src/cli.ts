@@ -9,6 +9,7 @@ import { OnTrackApiClient } from './lib/api.js';
 import {
   createSessionFromAccessToken,
   OnTrackHttpError,
+  OnTrackTransportError,
   sessionUsability,
 } from './lib/auth.js';
 import { toWhoAmIView } from './lib/whoami.js';
@@ -98,6 +99,7 @@ import type { ResolvedTaskSelector, WatchTaskState } from './lib/utils.js';
 import {
   AgentProtocolError,
   agentErrorEnvelope,
+  agentSuccessEnvelope,
   configureAgentOutputContext,
   exitCodeForAgentError,
   getAgentOutputContext,
@@ -111,6 +113,16 @@ import {
   mergeStructuredCommandInput,
   validateAgentCommandArguments,
 } from './lib/command-input.js';
+import { parseAgentCallInvocation } from './lib/agent-call-input.js';
+import {
+  createAgentExecutionEngine,
+  exitCodeForAgentEnvelope,
+} from './lib/agent-execution-engine.js';
+import {
+  createNativeAgentCommands,
+  type AgentTaskShowInput,
+  type AgentTaskShowOutput,
+} from './lib/agent-commands.js';
 import { createOnTrackAuthBroker } from './lib/auth-broker.js';
 import {
   DEFAULT_AUTH_MIN_TTL_SECONDS,
@@ -134,6 +146,9 @@ import type { ExecutionClaim } from './lib/execution-journal.js';
  * Lower-level HTTP/session/parsing logic lives in `src/lib/*`.
  */
 type InboxRowTask = (InboxTask | StudentTaskRow) & { _unitId: number };
+
+const MAX_AGENT_TASK_ITEMS = 200;
+const MAX_AGENT_TASK_OUTPUT_BYTES = 512 * 1024;
 
 /** Convert a credential captured from the verified access-token response into a session. */
 function sessionFromAccessTokenCapture(
@@ -168,6 +183,9 @@ Usage:
   ontrack auth-method [--base-url URL] [--json]
   ontrack auth status [--output agent-json]
   ontrack auth ensure [--min-ttl-seconds N] [--interaction never|if_required] [--output agent-json]
+  ontrack agent list
+  ontrack agent describe COMMAND
+  ontrack agent call COMMAND [--input-json OBJECT | --input -]
   ontrack capabilities [--output agent-json]
   ontrack schema COMMAND [--output agent-json]
   ontrack login [--base-url URL] [--redirect-url URL]
@@ -1248,14 +1266,36 @@ function extractInboxProjectId(
   return undefined;
 }
 
+/** Normalize the production project-to-unit relationship across payload variants. */
+function projectUnitId(project: ProjectSummary): number | undefined {
+  const nested = project.unit?.id;
+  if (typeof nested === 'number' && Number.isInteger(nested)) {
+    return nested;
+  }
+
+  const record = project as Record<string, unknown>;
+  const candidates = [record.unitId, record.unit_id];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isInteger(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 /** Emit staff-scoping hint for expensive commands when no unit/project filter is set. */
 function roleScopeHint(session: SessionData, command: string, hasScopeFilter: boolean): void {
-  if (!isStaffLikeRole(resolveUserRole(session)) || hasScopeFilter) {
+  const role = resolveUserRole(session);
+  if (!isStaffLikeRole(role) || hasScopeFilter) {
     return;
   }
 
-  console.log(
-    `[hint] Role "${resolveUserRole(session)}" running ${command} without scope filters can be expensive. Consider --unit-id and/or --project-id.`,
+  const safeRole = (role ?? 'staff')
+    .replace(/[\u0000-\u001f\u007f]/gu, '?')
+    .slice(0, 64);
+
+  console.error(
+    `[hint] Role "${safeRole}" running ${command} without scope filters can be expensive. Consider --unit-id and/or --project-id.`,
   );
 }
 
@@ -1392,7 +1432,7 @@ function projectMatchesScope(
   if (scope.projectId !== undefined && project.id !== scope.projectId) {
     return false;
   }
-  if (scope.unitId !== undefined && project.unit?.id !== scope.unitId) {
+  if (scope.unitId !== undefined && projectUnitId(project) !== scope.unitId) {
     return false;
   }
   return true;
@@ -1407,6 +1447,7 @@ async function loadProjectsWithTaskMetadata(
   api: OnTrackApiClient,
   session: SessionData,
   scope: { projectId?: number; unitId?: number } = {},
+  options: { readonly strictMetadata?: boolean } = {},
 ): Promise<ProjectSummary[]> {
   // Step 1: fetch project overview first (fast, broad visibility).
   const overview = await api.listProjects(session);
@@ -1428,6 +1469,13 @@ async function loadProjectsWithTaskMetadata(
       continue;
     }
 
+    if (
+      options.strictMetadata ||
+      (result.reason instanceof OnTrackHttpError && result.reason.authFailure !== 'other')
+    ) {
+      throw result.reason;
+    }
+
     // fallback to overview when project detail endpoint is unavailable
     projects.push(scopedOverview[index]);
   }
@@ -1436,7 +1484,7 @@ async function loadProjectsWithTaskMetadata(
   const unitIds = [
     ...new Set(
       projects
-        .map((project) => project.unit?.id)
+        .map((project) => projectUnitId(project))
         .filter((id): id is number => typeof id === 'number'),
     ),
   ];
@@ -1450,6 +1498,12 @@ async function loadProjectsWithTaskMetadata(
   for (let index = 0; index < unitResults.length; index += 1) {
     const result = unitResults[index];
     if (result.status !== 'fulfilled') {
+      if (
+        options.strictMetadata ||
+        (result.reason instanceof OnTrackHttpError && result.reason.authFailure !== 'other')
+      ) {
+        throw result.reason;
+      }
       continue;
     }
 
@@ -1466,16 +1520,17 @@ async function loadProjectsWithTaskMetadata(
   }
 
   return projects.map((project) => {
-    const unitId = project.unit?.id;
+    const unitId = projectUnitId(project);
     const fullUnit = unitId !== undefined ? unitMap.get(unitId) : undefined;
     const taskDefinitions = unitId !== undefined ? unitDefinitionMap.get(unitId) : undefined;
 
+    const projectUnit = project.unit ?? (unitId !== undefined ? { id: unitId } : undefined);
     const mergedUnit = fullUnit
       ? {
-          ...project.unit,
+          ...projectUnit,
           ...fullUnit,
         }
-      : project.unit;
+      : projectUnit;
 
     const mergedTasks = (project.tasks || []).map((task) => {
       const taskDefId = getTaskDefinitionId(task);
@@ -1606,15 +1661,19 @@ function handleSchema(args: string[]): void {
   printJson(getCommandSpec(requested));
 }
 
-/** Return credential lifecycle metadata without exposing identity or secrets. */
-async function handleAuthStatus(args: string[]): Promise<void> {
+/** Read credential lifecycle metadata without exposing identity or secrets. */
+async function readAuthStatus(requestedBaseUrl?: string) {
   const existing = await loadSession();
-  const requestedBaseUrl = getFlagValue(args, '--base-url');
   const baseUrl = requestedBaseUrl
     ? normalizeBaseUrl(requestedBaseUrl)
     : (existing?.baseUrl ?? normalizeBaseUrl());
   const broker = createOnTrackAuthBroker({ baseUrl });
-  printJson(await broker.status());
+  return broker.status();
+}
+
+/** Return credential lifecycle metadata without exposing identity or secrets. */
+async function handleAuthStatus(args: string[]): Promise<void> {
+  printJson(await readAuthStatus(getFlagValue(args, '--base-url')));
 }
 
 /** Ensure a usable credential, allowing a visible browser only by explicit policy. */
@@ -4275,9 +4334,178 @@ async function handleSubmissionCommand(args: string[]): Promise<void> {
   throw new Error(`Unknown submission subcommand: ${subcommand || '(missing)'}`);
 }
 
+async function readAgentTaskShow(
+  input: AgentTaskShowInput,
+  session: SessionData,
+): Promise<AgentTaskShowOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const resolved = resolveTaskBatchSelector(projects, {
+    projectId: input.project_id,
+    taskDefinitionIds:
+      !('task_definition_id' in input) || input.task_definition_id === undefined
+        ? []
+        : [input.task_definition_id],
+    taskIds: [],
+    abbrs: 'abbreviation' in input ? input.abbreviation ?? [] : [],
+    allTasks: input.all_tasks,
+  });
+  if (resolved.length > MAX_AGENT_TASK_ITEMS) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: `task.show returned more than ${MAX_AGENT_TASK_ITEMS} tasks; use a narrower selector.`,
+      nextActions: [
+        {
+          action: 'agent.call',
+          arguments: {
+            command: 'task.show',
+            hint: 'Use abbreviation or task_definition_id.',
+          },
+        },
+      ],
+    });
+  }
+
+  const output: AgentTaskShowOutput = {
+    project_id: input.project_id,
+    count: resolved.length,
+    tasks: resolved.map((item) => ({
+      project_id: item.project.id,
+      unit_id: item.unitId ?? null,
+      unit_code: item.unitCode ?? null,
+      task_definition_id: item.taskDefId,
+      task_instance_id: item.taskInstanceId ?? null,
+      abbreviation: item.abbr,
+      name: getTaskName(item.task) ?? null,
+      status:
+        getTaskStatus(item.task) ??
+        (item.task.isInstantiated === false ? 'not_instantiated' : null),
+      due_date: getTaskDueDate(item.task) ?? null,
+      completion_date: getTaskCompletionDate(item.task) ?? null,
+      grade: item.task.grade ?? null,
+      quality_points: item.task.qualityPts ?? null,
+      instantiated: item.task.isInstantiated === true,
+      visibility: item.task.studentVisibility,
+    })),
+  };
+  if (
+    Buffer.byteLength(JSON.stringify(output), 'utf8') >
+    MAX_AGENT_TASK_OUTPUT_BYTES
+  ) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: `task.show response exceeds ${MAX_AGENT_TASK_OUTPUT_BYTES} bytes; use a narrower selector.`,
+    });
+  }
+  return output;
+}
+
+function createNativeAgentExecutionEngine() {
+  let activeSession: SessionData | undefined;
+  return createAgentExecutionEngine(
+    createNativeAgentCommands({
+      authStatus: () => readAuthStatus(),
+      taskShow: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentTaskShow(input, activeSession);
+      },
+    }),
+    {
+      normalizeError: normalizeAgentCliError,
+      policyRuntime: {
+        ensureAuth: async () => {
+          activeSession = await requireSession();
+        },
+      },
+    },
+  );
+}
+
+/** Execute the caller-first Agent interface without translating JSON into argv. */
+async function handleNativeAgentCommand(args: string[]): Promise<void> {
+  const requestId = `req_${randomUUID()}`;
+  const [subcommand, ...rest] = args;
+  let command =
+    subcommand === 'list'
+      ? 'agent.list'
+      : subcommand === 'describe'
+        ? 'agent.describe'
+        : subcommand === 'call'
+          ? (rest[0] ?? 'agent.call')
+          : 'agent';
+  let envelope;
+
+  try {
+    const engine = createNativeAgentExecutionEngine();
+    if (subcommand === 'list') {
+      if (rest.length > 0) {
+        throw new AgentProtocolError({
+          code: 'INVALID_ARGUMENT',
+          summary: 'agent list does not accept arguments.',
+        });
+      }
+      command = 'agent.list';
+      envelope = agentSuccessEnvelope({
+        command,
+        requestId,
+        data: { commands: engine.capabilities() },
+      });
+    } else if (subcommand === 'describe') {
+      const requested = rest[0];
+      if (!requested || rest.length > 1) {
+        throw new AgentProtocolError({
+          code: 'INVALID_ARGUMENT',
+          summary: 'agent describe requires exactly one command path.',
+        });
+      }
+      command = 'agent.describe';
+      envelope = agentSuccessEnvelope({
+        command,
+        requestId,
+        data: engine.describe(requested),
+      });
+    } else if (subcommand === 'call') {
+      const invocation = await parseAgentCallInvocation(rest);
+      command = invocation.command;
+      envelope = await engine.call({
+        command: invocation.command,
+        input: invocation.input,
+      });
+    } else {
+      throw new AgentProtocolError({
+        code: 'INVALID_ARGUMENT',
+        summary: `Unknown agent subcommand: ${subcommand || '(missing)'}.`,
+      });
+    }
+  } catch (error) {
+    envelope = agentErrorEnvelope({
+      command,
+      requestId,
+      error: normalizeAgentCliError(error),
+    });
+  }
+
+  console.log(JSON.stringify(envelope));
+  process.exitCode = exitCodeForAgentEnvelope(envelope);
+}
+
 /** Top-level command dispatcher. */
 async function main(): Promise<void> {
   let args = process.argv.slice(2);
+  if (args[0] === 'agent') {
+    await handleNativeAgentCommand(args.slice(1));
+    return;
+  }
   const requestedOutput = getFlagValue(args, '--output');
   const agentOutput = requestedOutput === 'agent-json' || hasFlag(args, '--agent');
   if (requestedOutput && requestedOutput !== 'agent-json') {
@@ -4488,6 +4716,14 @@ function normalizeAgentCliError(error: unknown): AgentProtocolError {
       code: 'REMOTE_UNAVAILABLE',
       summary: 'The OnTrack service could not complete the request.',
       retryable: error.status >= 500,
+      cause: error,
+    });
+  }
+  if (error instanceof OnTrackTransportError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The OnTrack service could not be reached.',
+      retryable: true,
       cause: error,
     });
   }

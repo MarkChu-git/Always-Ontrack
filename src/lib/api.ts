@@ -8,7 +8,7 @@ import type {
   SignInResponse,
   UnitSummary,
 } from './types.js';
-import { OnTrackHttpError } from './auth.js';
+import { OnTrackHttpError, OnTrackTransportError } from './auth.js';
 
 /**
  * HTTP protocol layer for OnTrack API calls.
@@ -75,6 +75,15 @@ function buildErrorMessage(response: Response): string {
   return `${response.status} ${response.statusText}`.trim();
 }
 
+/** Convert runtime-specific fetch failures into one stable transport error. */
+async function fetchOnTrack(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    throw new OnTrackTransportError(error);
+  }
+}
+
 /** Perform JSON request/response handling with retry support. */
 async function requestJson<T>(
   url: string,
@@ -84,7 +93,7 @@ async function requestJson<T>(
   refreshAuth?: AuthSessionRefresh,
   authRetried: boolean = false,
 ): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await fetchOnTrack(url, init);
 
   if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
     await wait(retryDelayMs(attempt));
@@ -165,7 +174,7 @@ async function requestBinary(
   refreshAuth?: AuthSessionRefresh,
   authRetried: boolean = false,
 ): Promise<DownloadResult> {
-  const response = await fetch(url, init);
+  const response = await fetchOnTrack(url, init);
 
   if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
     await wait(retryDelayMs(attempt));
@@ -629,7 +638,7 @@ export class OnTrackApiClient {
   /** Lightweight GET probe used by discovery tooling to validate endpoint access. */
   async probeGet(session: SessionData, endpointPath: string): Promise<ProbeResult> {
     const endpoint = normalizeProbePath(endpointPath);
-    const response = await fetch(withFlexibleApiPath(this.baseUrl, endpoint), {
+    const response = await fetchOnTrack(withFlexibleApiPath(this.baseUrl, endpoint), {
       method: 'GET',
       headers: {
         Accept: 'application/json, */*',

@@ -1,7 +1,7 @@
 import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { OnTrackApiClient } from '../src/lib/api.js';
-import { OnTrackHttpError } from '../src/lib/auth.js';
+import { OnTrackHttpError, OnTrackTransportError } from '../src/lib/auth.js';
 import type { SessionData } from '../src/lib/types.js';
 
 const originalFetch = globalThis.fetch;
@@ -62,6 +62,22 @@ test('listTaskComments surfaces 401 errors', async () => {
   });
 
   await assert.rejects(() => client.listTaskComments(session, 101, 501), /401 Unauthorized/);
+});
+
+test('read transport failures use a typed, body-free error', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => {
+    throw new Error('socket details must stay out of the protocol');
+  });
+
+  await assert.rejects(
+    () => client.listProjects(session),
+    (error: unknown) => {
+      assert.ok(error instanceof OnTrackTransportError);
+      assert.equal(error.message, 'The OnTrack transport request failed.');
+      return true;
+    },
+  );
 });
 
 test('listInboxTasks surfaces 419 errors', async () => {
