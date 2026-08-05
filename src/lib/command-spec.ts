@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { agentSubmissionStatusOutputSchema } from './agent-commands.js';
+
 export type AgentCommandRisk = 'read' | 'write' | 'auth' | 'local';
 export type CommandInputType = 'string' | 'integer' | 'boolean' | 'string_array';
 
@@ -101,6 +104,7 @@ function spec(options: {
   streaming?: boolean;
   fields?: Readonly<Record<string, CommandInputField>>;
   inputSchema?: Readonly<Record<string, unknown>>;
+  outputSchema?: Readonly<Record<string, unknown>>;
 }): AgentCommandSpec {
   const fields = options.fields ?? {};
   const risk = options.risk ?? 'read';
@@ -117,7 +121,7 @@ function spec(options: {
     streaming: options.streaming ?? false,
     input_fields: fields,
     input_schema: options.inputSchema ?? jsonSchemaForFields(fields),
-    output_schema: { type: ['object', 'array', 'null'] },
+    output_schema: options.outputSchema ?? { type: ['object', 'array', 'null'] },
   };
 }
 
@@ -133,7 +137,7 @@ const oneTaskSelector = {
   abbreviation: stringField('--abbr'),
 };
 
-const taskPrerequisiteFields = {
+const singleTaskReadFields = {
   project_id: integerField('--project-id', true, {
     minimum: 1,
     maximum: Number.MAX_SAFE_INTEGER,
@@ -149,9 +153,9 @@ const taskPrerequisiteFields = {
   }),
 };
 
-const taskPrerequisiteInputBaseSchema = jsonSchemaForFields(taskPrerequisiteFields);
-const taskPrerequisiteInputSchema = {
-  ...taskPrerequisiteInputBaseSchema,
+const singleTaskReadInputBaseSchema = jsonSchemaForFields(singleTaskReadFields);
+const singleTaskReadInputSchema = {
+  ...singleTaskReadInputBaseSchema,
   anyOf: [
     { required: ['task_definition_id'] },
     { required: ['abbreviation'] },
@@ -231,7 +235,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'doctor', description: 'Run read-only environment and API diagnostics.' }),
   spec({ path: 'inbox.list', description: 'List inbox tasks.', fields: { unit_id: integerField('--unit-id'), status: stringField('--status') } }),
   spec({ path: 'task.show', description: 'Read definition-first student task views.', fields: jsonTaskSelector }),
-  spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: taskPrerequisiteFields, inputSchema: taskPrerequisiteInputSchema }),
+  spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: singleTaskReadFields, inputSchema: singleTaskReadInputSchema }),
   spec({ path: 'task.resources', description: 'Download task resource archives with artifact metadata.', fields: taskResourceFields, inputSchema: taskResourceInputSchema }),
   spec({ path: 'plan.show', description: 'Read the student plan.', fields: { project_id: integerField('--project-id', true), include_beyond_target: booleanField('--include-beyond-target') } }),
   spec({ path: 'plan.set_dates', description: 'Prepare or apply personal task dates.', risk: 'write', idempotency: 'client_guarded', fields: { ...oneTaskSelector, start: stringField('--start', true), target: stringField('--target', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
@@ -240,7 +244,15 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'feedback.watch', description: 'Stream task feedback changes.', streaming: true, fields: { ...oneTaskSelector, interval_seconds: integerField('--interval'), history: integerField('--history') } }),
   spec({ path: 'pdf.task', description: 'Download task PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
   spec({ path: 'pdf.submission', description: 'Download submission PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
-  spec({ path: 'submission.status', description: 'Read submission lifecycle status.', fields: oneTaskSelector }),
+  spec({
+    path: 'submission.status',
+    description: 'Read submission lifecycle status.',
+    fields: singleTaskReadFields,
+    inputSchema: singleTaskReadInputSchema,
+    outputSchema: z.toJSONSchema(agentSubmissionStatusOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({ path: 'submission.upload', description: 'Prepare or dispatch one submission.', risk: 'write', fields: { ...oneTaskSelector, files: stringArrayField('--file', true), allow_external_file: booleanField('--allow-external-file'), trigger: stringField('--trigger'), comment: stringField('--comment'), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'submission.upload_new_files', description: 'Prepare or attach evidence to an existing submission.', risk: 'write', fields: { ...oneTaskSelector, files: stringArrayField('--file', true), allow_external_file: booleanField('--allow-external-file'), trigger: stringField('--trigger'), comment: stringField('--comment'), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'watch', description: 'Stream cross-project task changes.', streaming: true, fields: { unit_id: integerField('--unit-id'), project_id: integerField('--project-id'), interval_seconds: integerField('--interval') } }),

@@ -244,7 +244,24 @@ test('native definitions keep safety metadata aligned with the compatibility pro
       downloads: [],
       unavailable: [],
     }),
+    submissionStatus: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      unit_code: 'FIT0001',
+      task_definition_id: 3,
+      task_instance_id: null,
+      abbreviation: 'P1',
+      instantiated: false,
+      has_pdf: true,
+      processing_pdf: false,
+      pdf_state: 'ready',
+      submission_date: '2030-01-01T00:00:00.000Z',
+      task_status: 'working',
+      submission_observed: true,
+    }),
   });
+
+  assert.equal(commands.some((command) => command.path === 'submission.status'), true);
 
   for (const command of commands) {
     const legacy = getCommandSpec(command.path);
@@ -254,7 +271,10 @@ test('native definitions keep safety metadata aligned with the compatibility pro
     assert.equal(command.policy.confirmation, legacy.confirmation);
     assert.equal(command.policy.idempotency, legacy.idempotency);
     assert.equal(command.policy.streaming, legacy.streaming);
-    if (command.path === 'task.prerequisites') {
+    if (
+      command.path === 'task.prerequisites' ||
+      command.path === 'submission.status'
+    ) {
       const nativeSchema = z.toJSONSchema(command.input) as {
         anyOf: Array<{ properties: Record<string, Record<string, unknown>> }>;
       };

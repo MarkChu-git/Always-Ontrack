@@ -173,8 +173,8 @@ export const agentTaskResourcesOutputSchema = z
 export type AgentTaskResourcesInput = z.output<typeof agentTaskResourcesInputSchema>;
 export type AgentTaskResourcesOutput = z.output<typeof agentTaskResourcesOutputSchema>;
 
-/** Typed caller contract for one task's prerequisite relationships. */
-export const agentTaskPrerequisitesInputSchema = z.union([
+/** Shared typed caller contract for a single definition-first task read. */
+const agentSingleTaskInputSchema = z.union([
   z
     .object({
       project_id: taskShowProjectId,
@@ -189,6 +189,9 @@ export const agentTaskPrerequisitesInputSchema = z.union([
     })
     .strict(),
 ]);
+
+/** Typed caller contract for one task's prerequisite relationships. */
+export const agentTaskPrerequisitesInputSchema = agentSingleTaskInputSchema;
 
 const agentTaskPrerequisiteSchema = z
   .object({
@@ -215,6 +218,33 @@ export type AgentTaskPrerequisitesInput = z.output<
 export type AgentTaskPrerequisitesOutput = z.output<
   typeof agentTaskPrerequisitesOutputSchema
 >;
+
+/** Typed caller contract for one task's normalized submission lifecycle status. */
+export const agentSubmissionStatusInputSchema = agentSingleTaskInputSchema;
+export const agentSubmissionStatusOutputSchema = z
+  .object({
+    project_id: taskShowProjectId,
+    unit_id: taskShowUnitId.nullable(),
+    unit_code: z.string().max(80).nullable(),
+    task_definition_id: taskShowDefinitionId,
+    task_instance_id: z.number().int().positive().nullable(),
+    abbreviation: z.string().min(1).max(80),
+    instantiated: z.boolean(),
+    has_pdf: z.boolean(),
+    processing_pdf: z.boolean(),
+    pdf_state: z.enum(['unavailable', 'processing', 'ready']),
+    submission_date: z.string().min(1).max(128).nullable(),
+    task_status: z.string().min(1).max(80).nullable(),
+    submission_observed: z.boolean(),
+  })
+  .strict();
+
+export type AgentSubmissionStatusInput = z.output<
+  typeof agentSubmissionStatusInputSchema
+>;
+export type AgentSubmissionStatusOutput = z.output<
+  typeof agentSubmissionStatusOutputSchema
+>;
 export type AgentAuthStatus = {
   readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
   readonly source?: string;
@@ -229,6 +259,9 @@ export interface NativeAgentCommandHandlers {
     input: AgentTaskPrerequisitesInput,
   ): Promise<AgentTaskPrerequisitesOutput>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
+  submissionStatus(
+    input: AgentSubmissionStatusInput,
+  ): Promise<AgentSubmissionStatusOutput>;
 }
 
 const authStatusInputSchema = z.object({}).strict();
@@ -296,6 +329,18 @@ export function createNativeAgentCommands(
       input: agentTaskResourcesInputSchema,
       output: agentTaskResourcesOutputSchema,
       execute: (input) => handlers.taskResources(input),
+    }),
+    defineAgentCommand({
+      path: 'submission.status',
+      description: 'Read submission lifecycle status.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentSubmissionStatusInputSchema,
+      output: agentSubmissionStatusOutputSchema,
+      execute: (input) => handlers.submissionStatus(input),
     }),
   ];
 }

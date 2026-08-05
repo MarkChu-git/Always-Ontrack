@@ -9,6 +9,7 @@ import { getCommandSpec } from "../src/lib/command-spec.js";
 
 const taskShow = getCommandSpec("task.show");
 const taskPrerequisites = getCommandSpec("task.prerequisites");
+const submissionStatus = getCommandSpec("submission.status");
 
 test("structured input maps schema fields to stable CLI flags", async () => {
   const args = await mergeStructuredCommandInput(
@@ -234,5 +235,47 @@ test("direct Agent argv is schema-strict before authentication or business I/O",
       ],
       taskPrerequisites,
     ),
+  );
+  assert.throws(
+    () =>
+      validateAgentCommandArguments(
+        ["submission", "status", "--project-id", "101", "--output", "agent-json"],
+        submissionStatus,
+      ),
+    /requires at least one of: task_definition_id, abbreviation/,
+  );
+  assert.throws(
+    () =>
+      validateAgentCommandArguments(
+        [
+          "submission",
+          "status",
+          "--project-id",
+          "101",
+          "--task-definition-id",
+          "0",
+          "--output",
+          "agent-json",
+        ],
+        submissionStatus,
+      ),
+    /--task-definition-id must be at least 1/,
+  );
+  assert.throws(
+    () =>
+      validateAgentCommandArguments(
+        [
+          "submission",
+          "status",
+          "--project-id",
+          "101",
+          "--abbr",
+          "   ",
+          "--output",
+          "agent-json",
+        ],
+        submissionStatus,
+      ),
+    /--abbr must contain at least 1 character/,
   );
 });

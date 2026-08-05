@@ -11,6 +11,14 @@ export interface SubmissionDetails {
   taskStatus?: string;
 }
 
+/** Raised when the observed submission-details response drifts from its contract. */
+export class InvalidSubmissionDetailsError extends Error {
+  constructor() {
+    super('OnTrack returned malformed submission details.');
+    this.name = 'InvalidSubmissionDetailsError';
+  }
+}
+
 export interface SubmissionFileInput {
   key?: string;
   localPath: string;
@@ -82,6 +90,71 @@ function booleanValue(value: unknown): boolean {
   return value === true;
 }
 
+function hasOwnField(record: Record<string, unknown>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, field);
+}
+
+function strictRecordValue(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InvalidSubmissionDetailsError();
+  }
+  return value as Record<string, unknown>;
+}
+
+function strictAliasedBoolean(
+  record: Record<string, unknown>,
+  snakeCase: string,
+  camelCase: string,
+): boolean {
+  const fields = [snakeCase, camelCase].filter((field) => hasOwnField(record, field));
+  if (fields.length === 0) {
+    throw new InvalidSubmissionDetailsError();
+  }
+  const values = fields.map((field) => record[field]);
+  if (values.some((value) => typeof value !== 'boolean')) {
+    throw new InvalidSubmissionDetailsError();
+  }
+  const [first, ...rest] = values as boolean[];
+  if (rest.some((value) => value !== first)) {
+    throw new InvalidSubmissionDetailsError();
+  }
+  return first;
+}
+
+function strictAliasedOptionalString(
+  record: Record<string, unknown>,
+  snakeCase: string,
+  camelCase: string,
+  maxLength: number,
+): string | undefined {
+  const fields = [snakeCase, camelCase].filter((field) => hasOwnField(record, field));
+  if (fields.length === 0) {
+    return undefined;
+  }
+  const values = fields.map((field) => {
+    const value = record[field];
+    if (value === null || value === undefined) {
+      return undefined;
+    }
+    if (typeof value !== 'string') {
+      throw new InvalidSubmissionDetailsError();
+    }
+    if (/[\u0000-\u001f\u007f]/u.test(value)) {
+      throw new InvalidSubmissionDetailsError();
+    }
+    const normalized = value.trim();
+    if (!normalized || normalized.length > maxLength) {
+      throw new InvalidSubmissionDetailsError();
+    }
+    return normalized;
+  });
+  const [first, ...rest] = values;
+  if (rest.some((value) => value !== first)) {
+    throw new InvalidSubmissionDetailsError();
+  }
+  return first;
+}
+
 function uploadRequirements(view: StudentTaskView): TaskUploadRequirement[] {
   const requirements =
     view.definition.uploadRequirements ?? view.definition.upload_requirements;
@@ -122,13 +195,48 @@ export function parseSubmissionDetails(payload: unknown): SubmissionDetails {
   };
 }
 
+/** Strict contract parser for machine callers; malformed remote data never becomes a false status. */
+export function parseStrictSubmissionDetails(payload: unknown): SubmissionDetails {
+  const record = strictRecordValue(payload);
+  const hasPdf = strictAliasedBoolean(record, 'has_pdf', 'hasPdf');
+  const processingPdf = strictAliasedBoolean(
+    record,
+    'processing_pdf',
+    'processingPdf',
+  );
+  return {
+    hasPdf,
+    processingPdf,
+    pdfState: processingPdf ? 'processing' : hasPdf ? 'ready' : 'unavailable',
+    submissionDate: strictAliasedOptionalString(
+      record,
+      'submission_date',
+      'submissionDate',
+      128,
+    ),
+    taskStatus: strictAliasedOptionalString(
+      record,
+      'task_status',
+      'taskStatus',
+      80,
+    ),
+  };
+}
+
 /** True only when a read-only status response proves that a submission exists. */
 export function isSubmissionObserved(details: SubmissionDetails): boolean {
   return (
     details.hasPdf ||
     details.processingPdf ||
     details.submissionDate !== undefined ||
-    ['ready_for_feedback', 'need_help', 'complete', 'discuss'].includes(
+    [
+      'submitted',
+      'processing',
+      'ready_for_feedback',
+      'need_help',
+      'complete',
+      'discuss',
+    ].includes(
       details.taskStatus?.trim().toLowerCase() ?? '',
     )
   );

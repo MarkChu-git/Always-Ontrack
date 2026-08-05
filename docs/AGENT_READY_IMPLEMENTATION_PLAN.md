@@ -1,7 +1,7 @@
 # OnTrack CLI Agent-Ready 实施计划
 
-状态：0.5.1 已发布；task.resources stacked slice 已实现，待完成审查与合并
-分支：`codex/agent-ready-runtime`
+状态：0.5.1 已发布；submission.status stacked slice 已实现，待完成审查与合并
+分支：`codex/submission-status`
 协议目标：`ontrack.agent/v1`
 
 ## 1. 产品定位
@@ -331,6 +331,8 @@ ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent call submission.status \
+  --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
@@ -339,11 +341,20 @@ ontrack agent call task.resources \
 command definition，不再经过 JSON → 人类 argv → switch handler。每次调用只向
 stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
 `--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status`、
-definition-first `task.show`、`task.prerequisites` 与 `task.resources`；其中
+definition-first `task.show`、`task.prerequisites`、`submission.status` 与
+`task.resources`；其中
 prerequisites 使用真实 per-definition route、单任务 selector 与 normalized output。
 `task.resources` 已在独立 stacked slice 中完成真实 OnTrack 路由、ZIP magic 校验、
 definition-first 未实例化任务、artifact safety、native typed schema/handler、human JSON
-兼容路径和批量 unavailable contract；本层合并前仍需完成完整验证和三轴代码审查。
+兼容路径和批量 unavailable contract。`submission.status` 本层复用相同的
+definition-first 单任务 selector，调用 http-observed
+`/projects/:projectId/task_def_id/:taskDefId/submission_details`，输出稳定的
+task definition / optional instance identity、PDF 三态、submission date/status 与
+`submission_observed`；`submitted`、`processing`、`ready_for_feedback`、
+`need_help`、`discuss` 和 `complete` 都是可观察的生命周期证据。远端 JSON 限制为
+64 KiB；必需 boolean、optional string、
+snake/camel alias 冲突和 terminal control character 均严格 fail closed；native 与
+`--output agent-json` 共用 canonical snake_case contract，裸 `--json` 保持旧 shape。
 
 Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
 和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接
@@ -460,14 +471,18 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 
 ### Phase D：业务命令 Agent 化
 
-状态：完成。
+状态：持续推进；compatibility Agent envelope 已覆盖全部命令，native typed seam 按
+真实 OnTrack 场景逐层迁移。
 
-- 全部 read command 接入 Agent envelope。
+- 全部 read command 接入 compatibility Agent envelope。
+- native typed seam 已覆盖 auth status、definition-first task show、
+  prerequisites、submission status 与 task resources。
 - watch/feedback watch 使用 NDJSON envelope frame。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。
 - 人类模式继续使用表格和面板。
 
-退出条件：Agent 不需要解析人类文本或读取 stderr 才能完成读取任务。
+退出条件：全部高价值真实场景迁移到 native typed seam，Agent 不需要解析人类文本或
+读取 stderr 才能完成读取任务。
 
 ### Phase E：写操作安全
 

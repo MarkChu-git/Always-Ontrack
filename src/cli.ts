@@ -57,12 +57,15 @@ import {
 import type { RawTaskPrerequisite } from './lib/planner.js';
 import {
   createSubmissionAttempt,
+  InvalidSubmissionDetailsError,
   isSubmissionObserved,
   parseSubmissionDetails,
+  parseStrictSubmissionDetails,
   prepareSubmission,
   transitionSubmissionAttempt,
   validateSubmissionMode,
 } from './lib/submission-lifecycle.js';
+import type { SubmissionDetails } from './lib/submission-lifecycle.js';
 import {
   buildPdfFilename,
   buildTaskResourceFilename,
@@ -114,6 +117,7 @@ import type {
   SessionData,
   SubmissionTrigger,
   TaskDefinitionSummary,
+  TaskSelector,
   TaskSummary,
   UnitSummary,
 } from './lib/types.js';
@@ -142,6 +146,9 @@ import {
   exitCodeForAgentEnvelope,
 } from './lib/agent-execution-engine.js';
 import {
+  type AgentSubmissionStatusInput,
+  type AgentSubmissionStatusOutput,
+  agentSubmissionStatusOutputSchema,
   createNativeAgentCommands,
   type AgentTaskPrerequisitesInput,
   type AgentTaskPrerequisitesOutput,
@@ -176,6 +183,7 @@ type InboxRowTask = (InboxTask | StudentTaskRow) & { _unitId: number };
 
 const MAX_AGENT_TASK_ITEMS = 200;
 const MAX_AGENT_TASK_OUTPUT_BYTES = 512 * 1024;
+const MAX_AGENT_SUBMISSION_STATUS_OUTPUT_BYTES = 16 * 1024;
 const MAX_TASK_RESOURCE_BATCH_BYTES = MAX_DOWNLOAD_BYTES * 4;
 
 /** Convert a credential captured from the verified access-token response into a session. */
@@ -4329,8 +4337,18 @@ async function handleSubmissionUpload(
 /** Read and normalize server submission status before lifecycle actions. */
 async function handleSubmissionStatus(args: string[]): Promise<void> {
   const session = await requireSession();
-  const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
+  if (getAgentOutputContext()) {
+    printJson(
+      await readAgentSubmissionStatus(
+        agentSubmissionStatusInputFromSelector(selector),
+        session,
+      ),
+    );
+    return;
+  }
+
+  const api = createAuthenticatedApi(session);
   const projects = await loadProjectsWithTaskMetadata(api, session, {
     projectId: selector.projectId,
   });
@@ -4354,6 +4372,28 @@ async function handleSubmissionStatus(args: string[]): Promise<void> {
     return;
   }
   printTable([output]);
+}
+
+function agentSubmissionStatusInputFromSelector(
+  selector: TaskSelector,
+): AgentSubmissionStatusInput {
+  if (selector.taskDefinitionId !== undefined) {
+    return {
+      project_id: selector.projectId,
+      task_definition_id: selector.taskDefinitionId,
+      ...(selector.abbr ? { abbreviation: selector.abbr } : {}),
+    };
+  }
+  if (selector.abbr) {
+    return {
+      project_id: selector.projectId,
+      abbreviation: selector.abbr,
+    };
+  }
+  throw new AgentProtocolError({
+    code: 'INVALID_ARGUMENT',
+    summary: 'Agent submission.status requires --task-definition-id or --abbr.',
+  });
 }
 
 /** Apply optional project/unit filters to watch snapshot candidate projects. */
@@ -4932,6 +4972,71 @@ async function readAgentTaskResources(
   };
 }
 
+async function readAgentSubmissionStatus(
+  input: AgentSubmissionStatusInput,
+  session: SessionData,
+): Promise<AgentSubmissionStatusOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const resolved = resolveTaskSelector(projects, {
+    projectId: input.project_id,
+    taskDefinitionId:
+      'task_definition_id' in input ? input.task_definition_id : undefined,
+    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
+  });
+  const details = parseStrictSubmissionDetails(
+    await api.getSubmissionDetails(
+      session,
+      resolved.project.id,
+      resolved.taskDefId,
+    ),
+  );
+  return buildAgentSubmissionStatusOutput(resolved, details);
+}
+
+function buildAgentSubmissionStatusOutput(
+  resolved: ResolvedTaskSelector,
+  details: SubmissionDetails,
+): AgentSubmissionStatusOutput {
+  const output = {
+    project_id: resolved.project.id,
+    unit_id: resolved.unitId ?? null,
+    unit_code: resolved.unitCode ?? null,
+    task_definition_id: resolved.taskDefId,
+    task_instance_id: resolved.taskInstanceId ?? null,
+    abbreviation: resolved.abbr,
+    instantiated: resolved.task.isInstantiated === true,
+    has_pdf: details.hasPdf,
+    processing_pdf: details.processingPdf,
+    pdf_state: details.pdfState,
+    submission_date: details.submissionDate ?? null,
+    task_status: details.taskStatus ?? null,
+    submission_observed: isSubmissionObserved(details),
+  };
+  const parsedOutput = agentSubmissionStatusOutputSchema.safeParse(output);
+  if (!parsedOutput.success) {
+    throw new AgentProtocolError({
+      code: 'INTERNAL_ERROR',
+      summary: 'The submission.status output failed contract validation.',
+    });
+  }
+  if (
+    Buffer.byteLength(JSON.stringify(parsedOutput.data), 'utf8') >
+    MAX_AGENT_SUBMISSION_STATUS_OUTPUT_BYTES
+  ) {
+    throw new AgentProtocolError({
+      code: 'INTERNAL_ERROR',
+      summary: 'The submission.status output exceeded its safety limit.',
+    });
+  }
+  return parsedOutput.data;
+}
+
 function createNativeAgentExecutionEngine() {
   let activeSession: SessionData | undefined;
   return createAgentExecutionEngine(
@@ -4963,6 +5068,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskResources(input, activeSession);
+      },
+      submissionStatus: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentSubmissionStatus(input, activeSession);
       },
     }),
     {
@@ -5240,6 +5354,13 @@ function normalizeAgentCliError(error: unknown): AgentProtocolError {
       cause: error,
     });
   }
+  if (error instanceof InvalidSubmissionDetailsError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned malformed submission details.',
+      cause: error,
+    });
+  }
   if (error instanceof OnTrackHttpError) {
     if (error.authFailure !== 'other') {
       return new AgentProtocolError({
@@ -5303,7 +5424,7 @@ function normalizeAgentCliError(error: unknown): AgentProtocolError {
 
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   if (
-    /\bnot found\b|\bno matching\b|\bnot available\b|\bdoes not exist\b/u.test(
+    /\bnot found\b|\bno matching\b|\bnot available\b|\bdoes not exist\b|\bhas no tasks\b/u.test(
       message,
     )
   ) {

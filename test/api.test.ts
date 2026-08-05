@@ -429,6 +429,25 @@ test('getSubmissionDetails reads the production submission details endpoint', as
   assert.deepEqual(details, { has_pdf: true, processing_pdf: false, task_status: 'submitted' });
 });
 
+test('getSubmissionDetails rejects an oversized remote JSON response', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const oversized = JSON.stringify({ value: 'x'.repeat(64 * 1024) });
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(oversized)),
+      },
+    }),
+  );
+
+  await assert.rejects(
+    () => client.getSubmissionDetails(session, 101, 501),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+});
+
 test('list prerequisite Interfaces use their distinct production paths', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   const requestedUrls: string[] = [];
