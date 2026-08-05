@@ -247,6 +247,9 @@ ontrack plan set-dates \
 ontrack auth-method
 ```
 
+人类可读输出只展示通过校验的 SSO origin 与 path，不在终端元数据中显示 query 或
+fragment。服务端返回的认证方式标签会限制长度，并拒绝终端控制字符。
+
 ### 2. 登录
 
 推荐默认方式:
@@ -433,6 +436,8 @@ https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...
 ```
 
 该方式是备用路径，不建议作为日常登录主流程。
+当 CLI 必须打印 SSO 入口供手动打开时，只有通过 HTTP(S)、嵌入凭据、控制字符和
+长度校验的 URL 才会保留完整 query；不安全的服务端 URL 不会原样回显到终端。
 
 ### 直接传入 token
 

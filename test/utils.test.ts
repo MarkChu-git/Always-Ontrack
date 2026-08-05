@@ -7,6 +7,9 @@ import {
   parseSsoRedirectUrl,
   redactSensitiveText,
   resolveLoginMode,
+  safeTextForHumanDisplay,
+  safeUrlForHumanDisplay,
+  safeUrlForManualDisplay,
   shouldMaskPromptInput,
 } from '../src/lib/utils.js';
 
@@ -36,6 +39,81 @@ test('external opener accepts only safe HTTP(S) URLs and never uses a shell comm
   assert.throws(
     () => resolveExternalOpenCommand('https://example.test/%0aopen', 'linux'),
     /control characters/,
+  );
+});
+
+test('human URL display removes query and fragment data', () => {
+  assert.equal(
+    safeUrlForHumanDisplay(
+      'https://identity.example/sso/start?token=secret&state=opaque#callback',
+    ),
+    'https://identity.example/sso/start',
+  );
+});
+
+test('human URL display validates and bounds terminal text', () => {
+  const longUrl = `https://identity.example/${'a'.repeat(400)}`;
+  const displayed = safeUrlForHumanDisplay(longUrl);
+  assert.equal(displayed.length, 256);
+  assert.equal(displayed.endsWith('...'), true);
+  assert.throws(
+    () => safeUrlForHumanDisplay('https://identity.example/%0aescape'),
+    /control characters/,
+  );
+  assert.throws(
+    () => safeUrlForHumanDisplay('https://user:secret@identity.example/sso'),
+    /embedded credentials/,
+  );
+});
+
+test('manual URL display preserves the full validated SSO query', () => {
+  assert.equal(
+    safeUrlForManualDisplay(
+      'https://identity.example/sso/start?token=secret&state=opaque#callback',
+    ),
+    'https://identity.example/sso/start?token=secret&state=opaque#callback',
+  );
+});
+
+test('manual URL display rejects unsafe or unbounded URLs', () => {
+  assert.equal(safeUrlForManualDisplay('javascript:alert(1)'), null);
+  assert.equal(
+    safeUrlForManualDisplay('https://user:secret@identity.example/sso'),
+    null,
+  );
+  assert.equal(
+    safeUrlForManualDisplay('https://identity.example/%0aescape'),
+    null,
+  );
+  assert.equal(
+    safeUrlForManualDisplay(`https://identity.example/${'a'.repeat(4096)}`),
+    null,
+  );
+});
+
+test('human text display rejects terminal controls and bounds labels', () => {
+  assert.equal(safeTextForHumanDisplay('  SAML SSO  ', 'unknown'), 'SAML SSO');
+  assert.equal(safeTextForHumanDisplay('SAML\u001b[31m', 'unknown'), 'unknown');
+  assert.equal(safeTextForHumanDisplay('SSO\u200bmethod', 'unknown'), 'unknown');
+  assert.equal(safeTextForHumanDisplay(undefined, 'unknown'), 'unknown');
+
+  const displayed = safeTextForHumanDisplay('a'.repeat(100), 'unknown');
+  assert.equal(displayed.length, 80);
+  assert.equal(displayed, `${'a'.repeat(77)}...`);
+});
+
+test('human display helpers fail closed for malformed runtime payload types', () => {
+  assert.equal(
+    safeTextForHumanDisplay({} as unknown as string, 'unknown'),
+    'unknown',
+  );
+  assert.equal(
+    safeUrlForManualDisplay(123 as unknown as string),
+    null,
+  );
+  assert.equal(
+    safeUrlForHumanDisplay(123 as unknown as string),
+    '(unavailable)',
   );
 });
 
