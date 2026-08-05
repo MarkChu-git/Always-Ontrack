@@ -53,7 +53,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "gitnexus": "1.6.9",
-    "typescript": "^5.9.0"
+    "typescript": "7.0.2"
   },
   "keywords": [
     "ontrack",
