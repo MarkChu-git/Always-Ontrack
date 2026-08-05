@@ -534,10 +534,10 @@ ontrack logout
 
 | Command | Purpose | Notes |
 | --- | --- | --- |
-| `ontrack pdf task --project-id <id> --abbr <abbr>` | Download task PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
-| `ontrack pdf submission --project-id <id> --abbr <abbr>` | Download submission PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
-| `ontrack submission upload ...` | Preview or upload a submission | Dry-run by default; `--confirm` dispatches once; supports `--trigger` and `--comment` |
-| `ontrack submission upload-new-files ...` | Preview or upload extra evidence files | Requires an observed existing submission; dry-run by default; `--confirm` dispatches once |
+| `ontrack pdf task --project-id <id> --abbr <abbr>` | Download task PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default; use `--allow-external-dir` for an external output directory |
+| `ontrack pdf submission --project-id <id> --abbr <abbr>` | Download submission PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default; use `--allow-external-dir` for an external output directory |
+| `ontrack submission upload ...` | Preview or upload a submission | Dry-run by default; `--confirm` dispatches once; local files must be inside the workspace unless `--allow-external-file` is explicit |
+| `ontrack submission upload-new-files ...` | Preview or upload extra evidence files | Requires an observed existing submission; dry-run by default; `--confirm` dispatches once; local files must be inside the workspace unless `--allow-external-file` is explicit |
 
 ### Diagnostics and discovery
 
@@ -618,6 +618,12 @@ Custom output directory:
 ```bash
 ontrack pdf submission --project-id 87 --abbr D4 --out-dir ./exports
 ```
+
+PDF output directories are workspace-scoped by default. The CLI rejects symlink
+components and hard-linked destinations, and refuses binary responses larger than 100 MiB. Use
+`--allow-external-dir` only when an automation explicitly needs a directory outside
+the current workspace. In the interactive launcher, an external directory is accepted
+only after the user types the exact approval word `ALLOW`.
 
 Default filename format:
 
@@ -706,6 +712,9 @@ Rules:
 - if `--task-definition-id` and `--abbr` are both provided, they must resolve to the same task
 - deprecated `--task-id` is accepted only when its legacy definition/instance meaning is unique
 - if `--all-tasks` is provided, do not combine it with any id selector or `--abbr`
+- upload files must be regular, non-symlink, non-hard-link files no larger than 50 MiB each
+- upload paths are workspace-scoped by default; use `--allow-external-file` only for an explicitly approved external path
+- the interactive launcher adds that external-file authorization only after the user types the exact approval word `ALLOW`
 
 ## Output, highlighting, and JSON
 

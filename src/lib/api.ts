@@ -9,6 +9,9 @@ import type {
   UnitSummary,
 } from './types.js';
 import { OnTrackHttpError, OnTrackTransportError } from './auth.js';
+import { MAX_DOWNLOAD_BYTES } from './artifact-safety.js';
+
+export { MAX_DOWNLOAD_BYTES } from './artifact-safety.js';
 
 /**
  * HTTP protocol layer for OnTrack API calls.
@@ -212,12 +215,53 @@ async function requestBinary(
     throw new OnTrackHttpError(response.status, buildErrorMessage(response));
   }
 
-  const arrayBuffer = await response.arrayBuffer();
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(
+      `Binary response exceeds maximum allowed size of ${MAX_DOWNLOAD_BYTES} bytes.`,
+    );
+  }
+  const buffer = await readBoundedResponseBody(response.body, MAX_DOWNLOAD_BYTES);
   return {
-    buffer: Buffer.from(arrayBuffer),
+    buffer,
     contentType: response.headers.get('content-type') || 'application/octet-stream',
     contentDisposition: response.headers.get('content-disposition') || undefined,
   };
+}
+
+/** Read a binary response incrementally and stop before an oversized body is buffered. */
+export async function readBoundedResponseBody(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<Buffer> {
+  if (!body) {
+    return Buffer.alloc(0);
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) {
+        break;
+      }
+      total += result.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(
+          `Binary response exceeds maximum allowed size of ${maxBytes} bytes.`,
+        );
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
 }
 
 /** Join path with API base URL while avoiding duplicate slashes. */

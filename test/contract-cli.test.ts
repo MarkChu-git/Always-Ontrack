@@ -413,6 +413,24 @@ test('submission is dry-run by default and a 5xx write outcome stays blocked as 
 
       const filePath = join(configRoot, 'evidence.txt');
       await writeFile(filePath, 'evidence', 'utf8');
+      const blockedExternal = await runCli(
+        [
+          'submission',
+          'upload',
+          '--project-id',
+          '101',
+          '--task-id',
+          '501',
+          '--file',
+          filePath,
+          '--json',
+        ],
+        configRoot,
+      );
+      assert.equal(blockedExternal.exitCode, 1);
+      assert.match(blockedExternal.stderr, /workspace boundary/i);
+      assert.equal(blockedExternal.stderr.includes(filePath), false);
+
       const upload = await runCli(
         [
           'submission',
@@ -423,6 +441,7 @@ test('submission is dry-run by default and a 5xx write outcome stays blocked as 
           '501',
           '--file',
           filePath,
+          '--allow-external-file',
           '--json',
         ],
         configRoot,
@@ -444,6 +463,7 @@ test('submission is dry-run by default and a 5xx write outcome stays blocked as 
           '501',
           '--file',
           filePath,
+          '--allow-external-file',
           '--confirm',
           '--json',
         ],
@@ -463,6 +483,7 @@ test('submission is dry-run by default and a 5xx write outcome stays blocked as 
         '501',
         '--file',
         filePath,
+        '--allow-external-file',
         '--confirm',
         '--idempotency-key',
         'submission-101-P1-503',
@@ -522,6 +543,7 @@ test('submission transport failure is unknown and is dispatched only once', asyn
           '501',
           '--file',
           filePath,
+          '--allow-external-file',
           '--confirm',
           '--json',
         ],
@@ -595,6 +617,7 @@ test('a comment failure never turns a confirmed upload into a retryable upload e
           '501',
           '--file',
           filePath,
+          '--allow-external-file',
           '--comment',
           'Please review',
           '--confirm',
@@ -673,6 +696,7 @@ test('upload-new-files checks existing submission state before its single confir
         '501',
         '--file',
         filePath,
+        '--allow-external-file',
         '--json',
       ];
 

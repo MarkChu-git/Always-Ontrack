@@ -1,6 +1,10 @@
 import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { OnTrackApiClient } from '../src/lib/api.js';
+import {
+  MAX_DOWNLOAD_BYTES,
+  OnTrackApiClient,
+  readBoundedResponseBody,
+} from '../src/lib/api.js';
 import { OnTrackHttpError, OnTrackTransportError } from '../src/lib/auth.js';
 import type { SessionData } from '../src/lib/types.js';
 
@@ -237,6 +241,45 @@ test('downloadSubmissionPdf surfaces non-200 responses', async () => {
   await assert.rejects(
     () => client.downloadSubmissionPdf(session, 101, 501),
     /404 Not Found/,
+  );
+});
+
+test('binary downloads reject an oversized declared response before buffering it', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let cancelled = false;
+  mockFetch(async () =>
+    new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    }), {
+      status: 200,
+      headers: {
+        'content-length': String(MAX_DOWNLOAD_BYTES + 1),
+        'content-type': 'application/pdf',
+      },
+    }),
+  );
+
+  await assert.rejects(
+    () => client.downloadTaskPdf(session, 55, 501),
+    /maximum allowed size/,
+  );
+  assert.equal(cancelled, true);
+});
+
+test('binary response streams stop at the byte cap without buffering the full body', async () => {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(Uint8Array.from([1, 2]));
+      controller.enqueue(Uint8Array.from([3, 4]));
+      controller.close();
+    },
+  });
+
+  await assert.rejects(
+    () => readBoundedResponseBody(body, 3),
+    /maximum allowed size/,
   );
 });
 

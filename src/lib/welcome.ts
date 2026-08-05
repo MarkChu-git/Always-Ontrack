@@ -7,6 +7,25 @@ export interface WelcomeMenuItem {
   recommended?: boolean;
 }
 
+export type ExternalArtifactAuthorizationFlag =
+  | '--allow-external-file'
+  | '--allow-external-dir';
+
+/** Convert an exact human approval into the CLI's explicit external-path flag. */
+export function buildExternalArtifactAuthorizationArgs(
+  externalPaths: readonly string[],
+  approval: string,
+  flag: ExternalArtifactAuthorizationFlag,
+): string[] {
+  if (externalPaths.length === 0) {
+    return [];
+  }
+  if (approval.trim() !== 'ALLOW') {
+    throw new Error('External artifact access was not authorized.');
+  }
+  return [flag];
+}
+
 /**
  * Stable launcher menu ordering.
  * IDs are intentionally fixed because users refer to them by number.

@@ -510,10 +510,10 @@ ontrack logout
 
 | 命令 | 作用 | 说明 |
 | --- | --- | --- |
-| `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
-| `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
-| `ontrack submission upload ...` | 预检或上传 submission | 默认 dry-run；`--confirm` 才单次 dispatch；可选 `--trigger`、`--comment` |
-| `ontrack submission upload-new-files ...` | 预检或追加 evidence 文件 | 必须先观察到 existing submission；默认 dry-run；`--confirm` 才单次 dispatch |
+| `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads`；外部目录必须显式使用 `--allow-external-dir` |
+| `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads`；外部目录必须显式使用 `--allow-external-dir` |
+| `ontrack submission upload ...` | 预检或上传 submission | 默认 dry-run；`--confirm` 才单次 dispatch；工作区外文件必须显式使用 `--allow-external-file` |
+| `ontrack submission upload-new-files ...` | 预检或追加 evidence 文件 | 必须先观察到 existing submission；默认 dry-run；`--confirm` 才单次 dispatch；工作区外文件必须显式使用 `--allow-external-file` |
 
 ### 诊断与接口发现
 
@@ -594,6 +594,10 @@ ontrack pdf submission --project-id 87 --abbr D4
 ```bash
 ontrack pdf submission --project-id 87 --abbr D4 --out-dir ./exports
 ```
+
+PDF 输出目录默认限制在当前工作区内；CLI 会拒绝路径中的符号链接组件和硬链接
+目标文件，并拒绝超过 100 MiB 的二进制响应。只有自动化明确批准时才使用
+`--allow-external-dir`；交互式启动器只有在用户精确输入 `ALLOW` 后才接受外部目录。
 
 默认命名规则:
 
@@ -682,6 +686,9 @@ ontrack submission upload \
 - 如果 `--task-definition-id` 和 `--abbr` 同时存在，必须指向同一个任务
 - 弃用的 `--task-id` 只有在 legacy definition/instance 含义唯一时才接受
 - 如果使用 `--all-tasks`，不要再同时传任何 id selector 或 `--abbr`
+- 上传文件必须是普通文件、不能是符号链接或硬链接，且单个文件不超过 50 MiB
+- 上传路径默认限制在当前工作区；明确批准工作区外路径时才使用 `--allow-external-file`
+- 交互式启动器只有在用户精确输入 `ALLOW` 后才会加入外部文件授权
 
 ## 输出、高亮与 JSON
 

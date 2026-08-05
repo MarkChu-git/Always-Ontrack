@@ -338,6 +338,12 @@ stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与�
 definition-first `task.show`；`task.resources` 等后续命令必须在独立 stacked PR
 中完成真实合同、artifact 安全和代码审查后再加入。
 
+Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
+和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接
+组件和硬链接目标，并限制单个二进制响应 100 MiB。外部文件/目录必须由调用方分别显式声明
+`--allow-external-file` / `--allow-external-dir`，以便 Agent 能在输入中表达授权边界。
+交互式启动器检测到外部路径时，只有用户精确输入 `ALLOW` 才会加入对应授权 flag。
+
 新增离线 command registry，记录：
 
 - 稳定 command path；
