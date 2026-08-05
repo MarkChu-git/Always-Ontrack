@@ -558,6 +558,8 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      MAX_TASK_PREREQUISITES_RESPONSE_BYTES,
     );
   }
 

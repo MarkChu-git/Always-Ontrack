@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { agentSubmissionStatusOutputSchema } from './agent-commands.js';
+import {
+  agentPlanShowInputSchema,
+  agentPlanShowOutputSchema,
+  agentSubmissionStatusOutputSchema,
+} from './agent-commands.js';
 
 export type AgentCommandRisk = 'read' | 'write' | 'auth' | 'local';
 export type CommandInputType = 'string' | 'integer' | 'boolean' | 'string_array';
@@ -237,7 +241,23 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'task.show', description: 'Read definition-first student task views.', fields: jsonTaskSelector }),
   spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: singleTaskReadFields, inputSchema: singleTaskReadInputSchema }),
   spec({ path: 'task.resources', description: 'Download task resource archives with artifact metadata.', fields: taskResourceFields, inputSchema: taskResourceInputSchema }),
-  spec({ path: 'plan.show', description: 'Read the student plan.', fields: { project_id: integerField('--project-id', true), include_beyond_target: booleanField('--include-beyond-target') } }),
+  spec({
+    path: 'plan.show',
+    description: 'Read the definition-first student plan.',
+    fields: {
+      project_id: integerField('--project-id', true, {
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      }),
+      include_beyond_target: booleanField('--include-beyond-target'),
+    },
+    inputSchema: z.toJSONSchema(agentPlanShowInputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+    outputSchema: z.toJSONSchema(agentPlanShowOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({ path: 'plan.set_dates', description: 'Prepare or apply personal task dates.', risk: 'write', idempotency: 'client_guarded', fields: { ...oneTaskSelector, start: stringField('--start', true), target: stringField('--target', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'plan.reset', description: 'Prepare or reset personal project dates.', risk: 'write', idempotency: 'client_guarded', fields: { project_id: integerField('--project-id', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'feedback.list', description: 'Read task feedback.', fields: jsonTaskSelector }),

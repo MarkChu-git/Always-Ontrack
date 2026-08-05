@@ -6,7 +6,11 @@ import {
   defineAgentCommand,
   exitCodeForAgentEnvelope,
 } from '../src/lib/agent-execution-engine.js';
-import { createNativeAgentCommands } from '../src/lib/agent-commands.js';
+import {
+  agentPlanShowInputSchema,
+  agentPlanShowOutputSchema,
+  createNativeAgentCommands,
+} from '../src/lib/agent-commands.js';
 import { getCommandSpec } from '../src/lib/command-spec.js';
 
 const readPolicy = {
@@ -244,6 +248,14 @@ test('native definitions keep safety metadata aligned with the compatibility pro
       downloads: [],
       unavailable: [],
     }),
+    planShow: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      unit_code: 'FIT0001',
+      include_beyond_target: false,
+      count: 0,
+      tasks: [],
+    }),
     submissionStatus: async () => ({
       project_id: 1,
       unit_id: 2,
@@ -261,6 +273,7 @@ test('native definitions keep safety metadata aligned with the compatibility pro
     }),
   });
 
+  assert.equal(commands.some((command) => command.path === 'plan.show'), true);
   assert.equal(commands.some((command) => command.path === 'submission.status'), true);
 
   for (const command of commands) {
@@ -312,4 +325,17 @@ test('native definitions keep safety metadata aligned with the compatibility pro
       }
     }
   }
+
+  const plan = commands.find((command) => command.path === 'plan.show');
+  assert.ok(plan);
+  assert.deepEqual(z.toJSONSchema(plan.input), z.toJSONSchema(agentPlanShowInputSchema));
+  assert.deepEqual(z.toJSONSchema(plan.output), z.toJSONSchema(agentPlanShowOutputSchema));
+  assert.deepEqual(plan.policy, {
+    risk: 'read',
+    auth: 'ensure',
+    interaction: 'never',
+    confirmation: 'none',
+    idempotency: 'not_applicable',
+    streaming: false,
+  });
 });

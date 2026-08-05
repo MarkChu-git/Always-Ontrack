@@ -1,7 +1,11 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { agentSubmissionStatusOutputSchema } from '../src/lib/agent-commands.js';
+import {
+  agentPlanShowInputSchema,
+  agentPlanShowOutputSchema,
+  agentSubmissionStatusOutputSchema,
+} from '../src/lib/agent-commands.js';
 import {
   AGENT_COMMAND_SPECS,
   buildCapabilities,
@@ -99,6 +103,14 @@ test('command path resolution handles grouped and top-level commands', () => {
   assert.deepEqual(
     submissionStatus.output_schema,
     z.toJSONSchema(agentSubmissionStatusOutputSchema),
+  );
+  const planShow = getCommandSpec('plan.show');
+  assert.deepEqual(planShow.input_schema, z.toJSONSchema(agentPlanShowInputSchema));
+  assert.deepEqual(planShow.output_schema, z.toJSONSchema(agentPlanShowOutputSchema));
+  assert.equal(
+    (planShow.input_schema.properties as Record<string, Record<string, unknown>>)
+      .project_id.maximum,
+    Number.MAX_SAFE_INTEGER,
   );
   assert.throws(() => getCommandSpec('missing.command'), /Unknown Agent command/);
 });

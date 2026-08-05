@@ -468,6 +468,268 @@ test("agent call task.show uses definition-first tasks when project instances ar
   }
 });
 
+test("agent call plan.show replays definition-first planner fixtures and matches compatibility output", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-plan-show-"));
+  const projectFixture = JSON.parse(
+    await readFile(
+      resolve(
+        process.cwd(),
+        "test/fixtures/contracts/project-empty-tasks-with-unit-definitions.json",
+      ),
+      "utf8",
+    ),
+  ) as {
+    payload: {
+      project: Record<string, unknown>;
+      unit: Record<string, unknown> & {
+        task_definitions: Array<Record<string, unknown>>;
+      };
+    };
+  };
+  const prerequisiteFixture = JSON.parse(
+    await readFile(
+      resolve(
+        process.cwd(),
+        "test/fixtures/contracts/planner-prerequisites-shape.json",
+      ),
+      "utf8",
+    ),
+  ) as { payload: Array<Record<string, unknown>> };
+  const requests: Array<{ method: string | undefined; url: string | undefined }> = [];
+  const project = {
+    ...projectFixture.payload.project,
+    target_grade: 1,
+    auth_token: "must-not-be-projected",
+  };
+  const unit = {
+    ...projectFixture.payload.unit,
+    code: "FIT0001",
+    allow_flexible_dates: true,
+    task_definitions: projectFixture.payload.unit.task_definitions.map(
+      (definition, index) =>
+        index === 0
+          ? {
+              ...definition,
+              target_grade: 0,
+              start_date: "2026-03-01",
+              target_date: "2026-03-08",
+              due_date: "2026-03-12",
+              grade_due_dates: [
+                {
+                  target_grade: 1,
+                  start_date: "2026-03-02",
+                  target_due_date: "2026-03-10",
+                },
+              ],
+            }
+          : {
+              ...definition,
+              target_grade: 2,
+              start_date: "2026-04-01",
+              target_date: "2026-04-08",
+              due_date: "2026-04-12",
+            },
+    ),
+  };
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url });
+    assert.equal(request.method, "GET");
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 1001, unit_id: 2001, target_grade: 1 }]));
+      return;
+    }
+    if (request.url === "/api/projects/1001") {
+      response.end(JSON.stringify(project));
+      return;
+    }
+    if (request.url === "/api/units/2001") {
+      response.end(JSON.stringify(unit));
+      return;
+    }
+    if (request.url === "/api/units/2001/task_prerequisites") {
+      response.end(JSON.stringify(prerequisiteFixture.payload));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const native = await runCli(
+      [
+        "agent",
+        "call",
+        "plan.show",
+        "--input-json",
+        JSON.stringify({ project_id: 1001, include_beyond_target: false }),
+      ],
+      configRoot,
+    );
+    assert.equal(native.exitCode, 0, `${native.stderr}\n${native.stdout}`);
+    assert.equal(native.stderr, "");
+    const nativeEnvelope = JSON.parse(native.stdout) as Record<string, unknown>;
+    assert.equal(nativeEnvelope.command, "plan.show");
+    assert.deepEqual(nativeEnvelope.data, {
+      project_id: 1001,
+      unit_id: 2001,
+      unit_code: "FIT0001",
+      include_beyond_target: false,
+      count: 1,
+      tasks: [
+        {
+          task_definition_id: 3001,
+          task_instance_id: null,
+          abbreviation: "T1",
+          name: "Task 1",
+          status: "not_instantiated",
+          instantiated: false,
+          visibility: "within_target",
+          flexible_dates: true,
+          start: {
+            kind: "start",
+            value: "2026-03-02",
+            source: "grade_default",
+            editable: true,
+            interpretation: "unit_local_calendar_date",
+          },
+          target: {
+            kind: "target",
+            value: "2026-03-10",
+            source: "grade_default",
+            editable: true,
+            interpretation: "unit_local_calendar_date",
+          },
+          feedback_deadline: {
+            kind: "feedback_deadline",
+            value: "2026-03-12",
+            source: "unit_default",
+            editable: false,
+            interpretation: "unit_local_calendar_date",
+          },
+          prerequisites: [
+            {
+              task_definition_id: 3000,
+              required_status: "complete",
+              current_status: null,
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(native.stdout.includes("fixture-token"), false);
+    assert.equal(native.stdout.includes("must-not-be-projected"), false);
+
+    const compatibility = await runCli(
+      [
+        "plan",
+        "show",
+        "--input-json",
+        JSON.stringify({ project_id: 1001, include_beyond_target: false }),
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(compatibility.exitCode, 0, compatibility.stderr);
+    const compatibilityEnvelope = JSON.parse(compatibility.stdout) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(compatibilityEnvelope.command, "plan.show");
+    assert.deepEqual(compatibilityEnvelope.data, nativeEnvelope.data);
+
+    const beyond = await runCli(
+      [
+        "agent",
+        "call",
+        "plan.show",
+        "--input-json",
+        JSON.stringify({ project_id: 1001, include_beyond_target: true }),
+      ],
+      configRoot,
+    );
+    assert.equal(beyond.exitCode, 0, beyond.stderr);
+    const beyondData = JSON.parse(beyond.stdout).data as Record<string, unknown>;
+    assert.equal(beyondData.count, 2);
+    assert.equal(
+      ((beyondData.tasks as Array<Record<string, unknown>>)[1] ?? {}).visibility,
+      "beyond_target",
+    );
+
+    const legacy = await runCli(
+      ["plan", "show", "--project-id", "1001", "--json"],
+      configRoot,
+    );
+    assert.equal(legacy.exitCode, 0, legacy.stderr);
+    const legacyPlans = JSON.parse(legacy.stdout) as Array<Record<string, unknown>>;
+    assert.equal(legacyPlans.length, 1);
+    assert.equal(
+      (legacyPlans[0]?.reference as Record<string, unknown>).taskDefinitionId,
+      3001,
+    );
+    assert.equal("task_definition_id" in (legacyPlans[0] ?? {}), false);
+    assert.equal(requests.every((request) => request.method === "GET"), true);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native plan.show rejects invalid input before authentication or network I/O", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-plan-input-"));
+  const invalidInputs: unknown[] = [
+    { project_id: 0 },
+    { project_id: -1 },
+    { project_id: 1.5 },
+    { project_id: "1001" },
+    { project_id: 1001, include_beyond_target: 1 },
+    { project_id: 1001, unknown: true },
+  ];
+  try {
+    for (const input of invalidInputs) {
+      const result = await runCli(
+        [
+          "agent",
+          "call",
+          "plan.show",
+          "--input-json",
+          JSON.stringify(input),
+        ],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "INVALID_ARGUMENT",
+      );
+    }
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("agent call task.prerequisites uses the per-definition OnTrack route and normalizes aliases", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-prerequisites-"));
   const fixture = JSON.parse(
@@ -1102,6 +1364,7 @@ test("agent list and describe are offline projections of the executable commands
         "task.show",
         "task.prerequisites",
         "task.resources",
+        "plan.show",
         "submission.status",
       ],
     );
@@ -1166,6 +1429,24 @@ test("agent list and describe are offline projections of the executable commands
     assert.equal((submissionInput.anyOf as Array<unknown>).length, 2);
     assert.match(JSON.stringify(submissionInput), /\\S/);
     assert.match(JSON.stringify(submissionOutput), /submission_observed/);
+
+    const plan = await runCli(
+      ["agent", "describe", "plan.show"],
+      configRoot,
+    );
+    assert.equal(plan.exitCode, 0, plan.stderr);
+    const planData = JSON.parse(plan.stdout).data as Record<string, unknown>;
+    assert.equal(planData.path, "plan.show");
+    assert.deepEqual(planData.policy, {
+      risk: "read",
+      auth: "ensure",
+      interaction: "never",
+      confirmation: "none",
+      idempotency: "not_applicable",
+      streaming: false,
+    });
+    assert.match(JSON.stringify(planData.input_schema), /include_beyond_target/);
+    assert.match(JSON.stringify(planData.output_schema), /feedback_deadline/);
 
     const missing = await runCli(
       ["agent", "describe", "missing.command"],
