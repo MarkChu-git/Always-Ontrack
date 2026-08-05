@@ -189,6 +189,50 @@ function validateExternalUrl(rawUrl: string): string {
   return parsed.toString();
 }
 
+const UNSAFE_TERMINAL_TEXT = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+
+/** Render bounded server-provided labels without terminal control characters. */
+export function safeTextForHumanDisplay(
+  rawText: unknown,
+  fallback: string,
+): string {
+  const candidate = typeof rawText === 'string' ? rawText.trim() : '';
+  if (!candidate || UNSAFE_TERMINAL_TEXT.test(candidate)) {
+    return fallback;
+  }
+  return candidate.length <= 80
+    ? candidate
+    : `${candidate.slice(0, 77)}...`;
+}
+
+/** Render a validated URL without query or fragment data in human-facing output. */
+export function safeUrlForHumanDisplay(rawUrl: unknown): string {
+  if (typeof rawUrl !== 'string') {
+    return '(unavailable)';
+  }
+  const parsed = new URL(validateExternalUrl(rawUrl));
+  const displayUrl = `${parsed.origin}${parsed.pathname}`;
+  return displayUrl.length <= 256
+    ? displayUrl
+    : `${displayUrl.slice(0, 253)}...`;
+}
+
+/** Preserve a functional SSO URL only after it passes external-URL validation. */
+export function safeUrlForManualDisplay(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== 'string') {
+    return null;
+  }
+  if (rawUrl.trim().length > 4096) {
+    return null;
+  }
+  try {
+    const safeUrl = validateExternalUrl(rawUrl);
+    return safeUrl.length <= 4096 ? safeUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve a safe, shell-free platform opener command for a URL. */
 export function resolveExternalOpenCommand(
   url: string,

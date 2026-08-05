@@ -88,6 +88,9 @@ import {
   resolveTaskSelector,
   resolveTaskBatchSelector,
   resolveLoginMode,
+  safeTextForHumanDisplay,
+  safeUrlForHumanDisplay,
+  safeUrlForManualDisplay,
   sortFeedbackItems,
   toWatchStateMap,
   toRedactedError,
@@ -1703,9 +1706,9 @@ async function handleAuthMethod(args: string[]): Promise<void> {
   }
 
   console.log(`Base URL: ${api.base}`);
-  console.log(`Method: ${method.method || 'unknown'}`);
+  console.log(`Method: ${safeTextForHumanDisplay(method.method, 'unknown')}`);
   if (method.redirect_to) {
-    console.log(`SSO redirect: ${method.redirect_to}`);
+    console.log(`SSO redirect: ${safeUrlForHumanDisplay(method.redirect_to)}`);
   }
 }
 
@@ -1858,9 +1861,12 @@ async function handleLogin(args: string[]): Promise<void> {
   if (!authToken || !username) {
     const method = await api.getAuthMethod();
 
-    if (method.redirect_to) {
+    if (typeof method.redirect_to === 'string' && method.redirect_to.trim()) {
       const redirectTo = method.redirect_to;
-      console.log(`OnTrack uses ${method.method || 'SSO'} for authentication.`);
+      const manualRedirectTo = safeUrlForManualDisplay(redirectTo);
+      console.log(
+        `OnTrack uses ${safeTextForHumanDisplay(method.method, 'SSO')} for authentication.`,
+      );
       console.log('Expected final redirect format: https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...');
       const loginMode = resolveLoginMode({
         auto,
@@ -1931,13 +1937,22 @@ async function handleLogin(args: string[]): Promise<void> {
       // Last-resort fallback retained for edge MFA/captcha/selector issues.
       const manualRedirectCapture = async (): Promise<void> => {
         console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
+        const printManualTarget = (): void => {
+          if (manualRedirectTo) {
+            console.log(`Open this URL manually:\n${manualRedirectTo}`);
+            return;
+          }
+          console.log(
+            'Open the OnTrack sign-in page in a trusted browser. The server-provided SSO URL could not be displayed safely.',
+          );
+        };
         if (!hasFlag(args, '--no-open')) {
           const opened = openExternal(redirectTo);
           if (!opened) {
-            console.log(`Open this URL manually:\n${redirectTo}`);
+            printManualTarget();
           }
         } else {
-          console.log(`Open this URL manually:\n${redirectTo}`);
+          printManualTarget();
         }
         const pasted = await prompt('Paste final redirect URL: ');
         ({ authToken, username } = parseSsoRedirectUrl(pasted));

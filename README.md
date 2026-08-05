@@ -267,6 +267,10 @@ Launcher actions now include guided task selection:
 ontrack auth-method
 ```
 
+Human-readable output shows only the validated SSO origin and path; query and
+fragment data are omitted from terminal metadata. Server-provided method labels
+are bounded and rejected when they contain terminal control characters.
+
 ### 2. Sign in
 
 Recommended:
@@ -457,6 +461,9 @@ https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...
 
 Guided SSO automatically falls back to this manual redirect mode when it detects unsupported MFA, captcha, selector mismatch, or timeout.
 Treat this as a backup path rather than a daily login path.
+When the CLI must print the SSO entry URL for manual use, it preserves the full
+query only after HTTP(S), credential, control-character, and length validation.
+Unsafe server-provided URLs are not echoed to the terminal.
 
 ### Direct token login
 

@@ -113,6 +113,54 @@ function unitPayload(): Record<string, unknown> {
   };
 }
 
+test('auth-method human output sanitizes labels and redacts redirect query data', async () => {
+  await withFixtureServer(
+    (request, response) => {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.url, '/api/auth/method');
+      sendJson(response, {
+        method: 'SAML\u001b[31m',
+        redirect_to:
+          'https://identity.example/sso/start?token=terminal-secret&state=opaque#callback',
+      });
+    },
+    async (configRoot, baseUrl) => {
+      const result = await runCli(
+        ['auth-method', '--base-url', baseUrl],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /Method: unknown/);
+      assert.match(
+        result.stdout,
+        /SSO redirect: https:\/\/identity\.example\/sso\/start/,
+      );
+      assert.equal(result.stdout.includes('terminal-secret'), false);
+      assert.equal(result.stdout.includes('state=opaque'), false);
+      assert.equal(result.stdout.includes('\u001b'), false);
+    },
+  );
+});
+
+test('auth-method human output fails closed for malformed runtime fields', async () => {
+  await withFixtureServer(
+    (request, response) => {
+      assert.equal(request.url, '/api/auth/method');
+      sendJson(response, { method: {}, redirect_to: 123 });
+    },
+    async (configRoot, baseUrl) => {
+      const result = await runCli(
+        ['auth-method', '--base-url', baseUrl],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /Method: unknown/);
+      assert.match(result.stdout, /SSO redirect: \(unavailable\)/);
+      assert.equal(result.stderr.includes('TypeError'), false);
+    },
+  );
+});
+
 test('plan show and task prerequisites expose production contract semantics', async () => {
   await withFixtureServer(
     (request, response) => {

@@ -344,6 +344,12 @@ Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工�
 `--allow-external-file` / `--allow-external-dir`，以便 Agent 能在输入中表达授权边界。
 交互式启动器检测到外部路径时，只有用户精确输入 `ALLOW` 才会加入对应授权 flag。
 
+Auth terminal safety 作为独立 stacked PR 接入：服务端 method label 经过控制字符检查和
+80 字符上限；`auth-method` 的 human output 只展示通过 HTTP(S)/credential 校验后的
+origin + pathname，并移除 query/fragment；最后手动 SSO handoff 仅在同一 URL 校验通过且
+长度不超过 4096 字符时保留完整 query，否则输出不含原值的通用操作提示。验证 seam 为
+公开 display helper 与真实 CLI 子进程 stdout，不依赖内部实现细节。
+
 新增离线 command registry，记录：
 
 - 稳定 command path；
@@ -513,6 +519,8 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 - 写 journal：succeeded replay、unknown refusal、semantic hash conflict。
 - 包内容：包含 CLI 和 Auth MCP 两个 bin，不包含源码外敏感文件。
 - 浏览器 provider：普通命令不加载，实验仅调用认证与 GET `/projects`。
+- Auth terminal：method label 控制字符/长度、human URL query redaction、manual SSO
+  完整 query 保留、unsafe/超长 URL 拒绝、`auth-method` 子进程 stdout secret regression。
 
 ## 11. 发布判断
 
