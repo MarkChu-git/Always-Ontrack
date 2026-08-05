@@ -86,6 +86,39 @@ test('unknown failures become non-retryable internal errors with no exception te
   assert.equal(exitCodeForAgentError(new Error('boom')), 10);
 });
 
+test('envelope metadata is bounded, control-character safe, and credential-redacted', () => {
+  const envelope = agentSuccessEnvelope({
+    command: `tasks.list\n${'x'.repeat(200)}`,
+    requestId: 'Bearer example-secret-token-value',
+    warnings: ['Basic another-secret-value'],
+    nextActions: [
+      {
+        action: 'auth.ensure',
+        arguments: { auth_token: 'must-not-leak', interaction: 'if_required' },
+      },
+    ],
+    data: {},
+  });
+
+  assert.match(envelope.request_id, /^req_[a-z0-9_-]+$/u);
+  assert.notEqual(envelope.request_id, 'Bearer example-secret-token-value');
+  assert.equal(envelope.command, 'agent.call');
+  assert.deepEqual(envelope.warnings, ['[REDACTED]']);
+  assert.equal(JSON.stringify(envelope).includes('must-not-leak'), false);
+
+  const bounded = agentSuccessEnvelope({
+    command: 'agent.list',
+    requestId: 'req_metadata',
+    nextActions: Array.from({ length: 40 }, (_, index) => ({
+      action: `action.${index}\nunsafe`,
+      arguments: { nested: { value: 'x'.repeat(500) } },
+    })),
+    data: {},
+  });
+  assert.equal(bounded.next_actions.length, 16);
+  assert.equal(JSON.stringify(bounded).includes('\nunsafe'), false);
+});
+
 test('configured output context wraps existing JSON command payloads without changing legacy mode', () => {
   assert.deepEqual(wrapAgentOutput({ id: 1 }), { id: 1 });
 

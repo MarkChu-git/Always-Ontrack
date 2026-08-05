@@ -125,6 +125,29 @@ bun run dev -- auth-method
 
 ## Agent-first 使用方式
 
+### 原生 caller-first 接口
+
+新的 Agent 集成应使用显式的 caller-first 接口。它接收一个有大小上限的
+JSON object，不会把 JSON 转译成人类 CLI flag，并且 stdout 恰好输出一个
+`ontrack.agent/v1` envelope：
+
+```bash
+ontrack agent list
+ontrack agent describe task.show
+ontrack agent call auth.status --input-json '{}'
+ontrack agent call task.show \
+  --input-json '{"project_id":87,"abbreviation":["D4"]}'
+```
+
+`task.show` 使用 definition-first 的 Student Task View，因此即使项目的
+`tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化
+任务会明确标记，不会猜测 instance id。也可以使用 `--input -` 读取有大小上限的
+非交互 stdin。当前原生接口覆盖 `auth.status` 与 `task.show`，后续命令会按独立的
+垂直切片逐个审查后加入。
+
+更广泛的旧命令仍通过 `--output agent-json` compatibility Adapter 提供；裸
+`--json` 继续保持原有 raw shape。
+
 ### 发现协议
 
 Agent 应查询 capability 与 schema，不需要解析帮助文本：
@@ -445,6 +468,9 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack` | 打开交互式命令启动器 | 用序号快速执行常用流程 |
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
+| `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
+| `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |

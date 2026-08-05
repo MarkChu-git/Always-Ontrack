@@ -130,6 +130,31 @@ bun run dev -- auth-method
 
 ## Agent-first usage
 
+### Native caller-first interface
+
+New Agent integrations should use the explicit caller-first surface. It accepts
+one bounded JSON object, never translates that object into human CLI flags, and
+emits exactly one `ontrack.agent/v1` envelope on stdout:
+
+```bash
+ontrack agent list
+ontrack agent describe task.show
+ontrack agent call auth.status --input-json '{}'
+ontrack agent call task.show \
+  --input-json '{"project_id":87,"abbreviation":["D4"]}'
+```
+
+`task.show` uses the definition-first Student Task View, so a project with an
+empty `tasks` array can still expose tasks from its unit task-definition
+catalogue. It explicitly reports uninstantiated tasks instead of guessing an
+instance id. Use `--input -` for bounded non-interactive stdin. The native
+surface currently covers `auth.status` and `task.show`; more commands are added
+as individually reviewed vertical slices.
+
+The existing `--output agent-json` commands remain a compatibility Adapter for
+the broader command set while it migrates to this interface. Bare `--json`
+continues to keep its legacy raw shape.
+
 ### Discover the protocol
 
 Agents should discover capabilities and schemas instead of scraping help text:
@@ -467,6 +492,9 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack` | Open the interactive command launcher | Fastest way to run common workflows by number |
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
+| `ontrack agent list` | List native caller-first commands | Offline; no credential required |
+| `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status` and `task.show` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |

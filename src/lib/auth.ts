@@ -19,6 +19,14 @@ export class OnTrackHttpError extends Error {
   }
 }
 
+/** Typed, body-free failure for requests that never received an HTTP response. */
+export class OnTrackTransportError extends Error {
+  constructor(cause?: unknown) {
+    super('The OnTrack transport request failed.', { cause });
+    this.name = 'OnTrackTransportError';
+  }
+}
+
 /** Central classification for credential-related HTTP statuses. */
 export function classifyAuthFailure(status: number): AuthFailureKind {
   if (status === 401) return 'unauthorized';

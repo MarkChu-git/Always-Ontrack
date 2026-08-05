@@ -138,7 +138,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'tasks.list', description: 'List student task views.', fields: { project_id: integerField('--project-id'), status: stringField('--status') } }),
   spec({ path: 'doctor', description: 'Run read-only environment and API diagnostics.' }),
   spec({ path: 'inbox.list', description: 'List inbox tasks.', fields: { unit_id: integerField('--unit-id'), status: stringField('--status') } }),
-  spec({ path: 'task.show', description: 'Read one or more task views.', fields: jsonTaskSelector }),
+  spec({ path: 'task.show', description: 'Read definition-first student task views.', fields: jsonTaskSelector }),
   spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: oneTaskSelector }),
   spec({ path: 'plan.show', description: 'Read the student plan.', fields: { project_id: integerField('--project-id', true), include_beyond_target: booleanField('--include-beyond-target') } }),
   spec({ path: 'plan.set_dates', description: 'Prepare or apply personal task dates.', risk: 'write', idempotency: 'client_guarded', fields: { ...oneTaskSelector, start: stringField('--start', true), target: stringField('--target', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
