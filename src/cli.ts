@@ -7,8 +7,10 @@ import { join, relative, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import {
   InvalidDownloadFormatError,
+  InvalidJsonResponseError,
   MAX_DOWNLOAD_BYTES,
   OnTrackApiClient,
+  OversizedJsonResponseError,
   UnavailableDownloadError,
 } from './lib/api.js';
 import {
@@ -141,6 +143,8 @@ import {
 } from './lib/agent-execution-engine.js';
 import {
   createNativeAgentCommands,
+  type AgentTaskPrerequisitesInput,
+  type AgentTaskPrerequisitesOutput,
   type AgentTaskShowInput,
   type AgentTaskShowOutput,
   type AgentTaskResourcesInput,
@@ -4707,6 +4711,182 @@ async function readAgentTaskShow(
   return output;
 }
 
+function positiveIntegerValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function nonEmptyStringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function hasOwnField(row: Record<string, unknown>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(row, field);
+}
+
+/** Read paired prerequisite IDs without treating malformed aliases as absent. */
+function prerequisiteIdField(
+  row: Record<string, unknown>,
+  snakeCase: string,
+  camelCase: string,
+): number | undefined {
+  const fields = [snakeCase, camelCase].filter((field) => hasOwnField(row, field));
+  if (fields.length === 0) {
+    return undefined;
+  }
+  const values = fields.map((field) => positiveIntegerValue(row[field]));
+  if (values.some((value) => value === undefined)) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The task prerequisite endpoint returned an invalid relationship id.',
+    });
+  }
+  const [first, ...rest] = values as number[];
+  if (rest.some((value) => value !== first)) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The task prerequisite endpoint returned conflicting relationship ids.',
+    });
+  }
+  return first;
+}
+
+function prerequisiteStatusValue(row: Record<string, unknown>): string {
+  const fields = ['task_status', 'taskStatus'].filter((field) => hasOwnField(row, field));
+  if (fields.length === 0) {
+    return 'unknown';
+  }
+  const values = fields.map((field) => nonEmptyStringValue(row[field]));
+  if (values.some((value) => value === undefined) || values.some((value) => value!.length > 80)) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The task prerequisite endpoint returned an invalid task status.',
+    });
+  }
+  const [first, ...rest] = values as string[];
+  if (rest.some((value) => value !== first)) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The task prerequisite endpoint returned conflicting task statuses.',
+    });
+  }
+  return first;
+}
+
+function prerequisiteRelationshipId(row: Record<string, unknown>): number | null {
+  if (!hasOwnField(row, 'id')) {
+    return null;
+  }
+  const id = positiveIntegerValue(row.id);
+  if (id === undefined) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The task prerequisite endpoint returned an invalid relationship record id.',
+    });
+  }
+  return id;
+}
+
+/** Read and normalize the direct per-definition prerequisite contract. */
+async function readAgentTaskPrerequisites(
+  input: AgentTaskPrerequisitesInput,
+  session: SessionData,
+): Promise<AgentTaskPrerequisitesOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const resolved = resolveTaskSelector(projects, {
+    projectId: input.project_id,
+    taskDefinitionId:
+      'task_definition_id' in input ? input.task_definition_id : undefined,
+    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
+  });
+  if (resolved.unitId === undefined) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'The selected task has no unit identity for prerequisite lookup.',
+    });
+  }
+
+  const rawRows = await api.listTaskPrerequisites(
+    session,
+    resolved.unitId,
+    resolved.taskDefId,
+  );
+  if (!Array.isArray(rawRows)) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'The task prerequisite endpoint returned an unexpected response shape.',
+    });
+  }
+  if (rawRows.length > MAX_AGENT_TASK_ITEMS) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: `OnTrack returned more than ${MAX_AGENT_TASK_ITEMS} prerequisite relationships for one task.`,
+    });
+  }
+
+  const prerequisites = rawRows.flatMap((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new AgentProtocolError({
+        code: 'REMOTE_UNAVAILABLE',
+        summary: 'The task prerequisite endpoint returned a malformed relationship row.',
+      });
+    }
+    const row = raw as Record<string, unknown>;
+    const dependentId = prerequisiteIdField(
+      row,
+      'task_definition_id',
+      'taskDefinitionId',
+    );
+    const prerequisiteId = prerequisiteIdField(
+      row,
+      'prerequisite_id',
+      'prerequisiteId',
+    );
+    if (dependentId !== undefined && dependentId !== resolved.taskDefId) {
+      return [];
+    }
+    if (prerequisiteId === undefined) {
+      throw new AgentProtocolError({
+        code: 'REMOTE_UNAVAILABLE',
+        summary: 'The task prerequisite endpoint returned a malformed relationship.',
+      });
+    }
+    return [
+      {
+        id: prerequisiteRelationshipId(row),
+        task_definition_id: resolved.taskDefId,
+        prerequisite_task_definition_id: prerequisiteId,
+        required_status: prerequisiteStatusValue(row),
+      },
+    ];
+  });
+
+  const output: AgentTaskPrerequisitesOutput = {
+    project_id: input.project_id,
+    unit_id: resolved.unitId,
+    task_definition_id: resolved.taskDefId,
+    count: prerequisites.length,
+    prerequisites,
+  };
+  if (
+    Buffer.byteLength(JSON.stringify(output), 'utf8') >
+    MAX_AGENT_TASK_OUTPUT_BYTES
+  ) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: `OnTrack returned prerequisite data exceeding ${MAX_AGENT_TASK_OUTPUT_BYTES} bytes.`,
+    });
+  }
+  return output;
+}
+
 async function readAgentTaskResources(
   input: AgentTaskResourcesInput,
   session: SessionData,
@@ -4765,6 +4945,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskShow(input, activeSession);
+      },
+      taskPrerequisites: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentTaskPrerequisites(input, activeSession);
       },
       taskResources: (input) => {
         if (!activeSession) {
@@ -5034,6 +5223,20 @@ function normalizeAgentCliError(error: unknown): AgentProtocolError {
     return new AgentProtocolError({
       code: 'NOT_FOUND',
       summary: 'The requested download is not available.',
+      cause: error,
+    });
+  }
+  if (error instanceof OversizedJsonResponseError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned a response that exceeded the safety limit.',
+      cause: error,
+    });
+  }
+  if (error instanceof InvalidJsonResponseError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned an invalid JSON response.',
       cause: error,
     });
   }

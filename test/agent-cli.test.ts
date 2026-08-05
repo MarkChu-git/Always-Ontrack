@@ -177,6 +177,48 @@ test("Agent JSON stdin maps only registered fields and failures have stable exit
       "INVALID_ARGUMENT",
     );
     assert.equal(invalid.stdout.includes("value"), false);
+
+    const missingSelector = await runCli(
+      [
+        "task",
+        "prerequisites",
+        "--input-json",
+        '{"project_id":87}',
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(missingSelector.exitCode, 2);
+    assert.equal(missingSelector.stderr, "");
+    assert.equal(
+      (JSON.parse(missingSelector.stdout).error as Record<string, unknown>).code,
+      "INVALID_ARGUMENT",
+    );
+
+    for (const input of [
+      { project_id: -1, abbreviation: "D4" },
+      { project_id: 87, abbreviation: "   " },
+      { project_id: 87, task_definition_id: -1 },
+    ]) {
+      const invalidSelector = await runCli(
+        [
+          "task",
+          "prerequisites",
+          "--input-json",
+          JSON.stringify(input),
+          "--output",
+          "agent-json",
+        ],
+        configRoot,
+      );
+      assert.equal(invalidSelector.exitCode, 2);
+      assert.equal(invalidSelector.stderr, "");
+      assert.equal(
+        (JSON.parse(invalidSelector.stdout).error as Record<string, unknown>).code,
+        "INVALID_ARGUMENT",
+      );
+    }
   } finally {
     await rm(configRoot, { recursive: true, force: true });
   }
@@ -401,6 +443,287 @@ test("agent call task.show uses definition-first tasks when project instances ar
   }
 });
 
+test("agent call task.prerequisites uses the per-definition OnTrack route and normalizes aliases", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-prerequisites-"));
+  const fixture = JSON.parse(
+    await readFile(
+      resolve(process.cwd(), "test/fixtures/contracts/definition-prerequisites-shape.json"),
+      "utf8",
+    ),
+  ) as { payload: Array<Record<string, unknown>> };
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        code: "FIT0001",
+        task_definitions: [{ id: 501, abbreviation: "D4", name: "Design task" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/55/task_definitions/501/prerequisites") {
+      response.end(JSON.stringify([
+        ...fixture.payload,
+        { id: 3, task_definition_id: 999, prerequisite_id: 402, task_status: "complete" },
+      ]));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+        refreshedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      [
+        "agent",
+        "call",
+        "task.prerequisites",
+        "--input-json",
+        JSON.stringify({ project_id: 87, abbreviation: "D4" }),
+      ],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, `${result.stderr}\n${result.stdout}`);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "task.prerequisites");
+    assert.equal(envelope.status, "success");
+    assert.deepEqual(envelope.data, {
+      project_id: 87,
+      unit_id: 55,
+      task_definition_id: 501,
+      count: 2,
+      prerequisites: [
+        {
+          id: 1,
+          task_definition_id: 501,
+          prerequisite_task_definition_id: 400,
+          required_status: "complete",
+        },
+        {
+          id: 2,
+          task_definition_id: 501,
+          prerequisite_task_definition_id: 401,
+          required_status: "working",
+        },
+      ],
+    });
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native task.prerequisites rejects batch selectors before authentication or network I/O", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-prerequisites-input-"));
+  try {
+    const result = await runCli(
+      [
+        "agent",
+        "call",
+        "task.prerequisites",
+        "--input-json",
+        '{"project_id":87,"all_tasks":true}',
+      ],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal((envelope.error as Record<string, unknown>).code, "INVALID_ARGUMENT");
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native task.prerequisites fails closed on malformed relationship aliases", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-prerequisites-malformed-"));
+  const malformedPayloads: unknown[] = [
+    [{ task_definition_id: "501", prerequisite_id: 400, task_status: "complete" }],
+    [42],
+    [{}],
+    [{ id: "1", task_definition_id: 501, prerequisite_id: 400, task_status: "complete" }],
+  ];
+  let prerequisiteRequestCount = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        task_definitions: [{ id: 501, abbreviation: "D4", name: "Design task" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/55/task_definitions/501/prerequisites") {
+      response.end(JSON.stringify(malformedPayloads[prerequisiteRequestCount]));
+      prerequisiteRequestCount += 1;
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    for (const _payload of malformedPayloads) {
+      const result = await runCli(
+        [
+          "agent",
+          "call",
+          "task.prerequisites",
+          "--input-json",
+          JSON.stringify({ project_id: 87, abbreviation: "D4" }),
+        ],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal((envelope.error as Record<string, unknown>).code, "REMOTE_UNAVAILABLE");
+    }
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native task.prerequisites classifies malformed and oversized remote payloads", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-prerequisites-remote-"));
+  let prerequisiteRequestCount = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        task_definitions: [{ id: 501, abbreviation: "D4", name: "Design task" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/55/task_definitions/501/prerequisites") {
+      prerequisiteRequestCount += 1;
+      if (prerequisiteRequestCount === 1) {
+        response.end('{"broken":');
+        return;
+      }
+      if (prerequisiteRequestCount === 2) {
+        response.end(JSON.stringify({ value: "x".repeat(512 * 1024) }));
+        return;
+      }
+      response.end(JSON.stringify(Array.from({ length: 201 }, (_, index) => ({
+        id: index + 1,
+        task_definition_id: 501,
+        prerequisite_id: index + 1000,
+        task_status: "complete",
+      }))));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await runCli(
+        [
+          "agent",
+          "call",
+          "task.prerequisites",
+          "--input-json",
+          JSON.stringify({ project_id: 87, abbreviation: "D4" }),
+        ],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal((envelope.error as Record<string, unknown>).code, "REMOTE_UNAVAILABLE");
+    }
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("agent call task.resources downloads definition resources for an uninstantiated task", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-resources-"));
   const outputRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-resources-output-"));
@@ -513,7 +836,7 @@ test("agent list and describe are offline projections of the executable commands
       .commands as Array<Record<string, unknown>>;
     assert.deepEqual(
       commands.map((command) => command.path),
-      ["auth.status", "task.show", "task.resources"],
+      ["auth.status", "task.show", "task.prerequisites", "task.resources"],
     );
 
     const described = await runCli(
@@ -554,6 +877,16 @@ test("agent list and describe are offline projections of the executable commands
       true,
     );
     assert.equal(JSON.stringify(resourceInput).includes("all_tasks"), true);
+
+    const prerequisites = await runCli(
+      ["agent", "describe", "task.prerequisites"],
+      configRoot,
+    );
+    assert.equal(prerequisites.exitCode, 0, prerequisites.stderr);
+    const prerequisiteInput = (JSON.parse(prerequisites.stdout).data as Record<string, unknown>)
+      .input_schema as Record<string, unknown>;
+    assert.equal((prerequisiteInput.anyOf as Array<unknown>).length, 2);
+    assert.match(JSON.stringify(prerequisiteInput), /task_definition_id/);
 
     const missing = await runCli(
       ["agent", "describe", "missing.command"],

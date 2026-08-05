@@ -139,6 +139,8 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
+ontrack agent call task.prerequisites \
+  --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
@@ -146,7 +148,7 @@ ontrack agent call task.resources \
 `task.show` 使用 definition-first 的 Student Task View，因此即使项目的
 `tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化
 任务会明确标记，不会猜测 instance id。也可以使用 `--input -` 读取有大小上限的
-非交互 stdin。当前原生接口覆盖 `auth.status`、`task.show` 与 `task.resources`，
+非交互 stdin。当前原生接口覆盖 `auth.status`、`task.show`、`task.prerequisites` 与 `task.resources`，
 后续命令会按独立的垂直切片逐个审查后加入。`task.resources` 返回有边界的
 artifact 元数据（文件名、相对路径、字节数、content type、SHA-256），资源不可用时
 会稳定报告且不会写入占位文件。
@@ -481,7 +483,7 @@ ontrack logout
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show`、`task.resources` |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show`、`task.prerequisites`、`task.resources` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |

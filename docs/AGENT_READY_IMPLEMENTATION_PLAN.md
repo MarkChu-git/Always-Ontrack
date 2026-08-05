@@ -329,6 +329,8 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
+ontrack agent call task.prerequisites \
+  --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
@@ -336,11 +338,12 @@ ontrack agent call task.resources \
 该接口直接把 bounded JSON object 交给带 Zod input/output 的 executable
 command definition，不再经过 JSON → 人类 argv → switch handler。每次调用只向
 stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
-`--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status` 和
-definition-first `task.show` 与 `task.resources` 已在独立 stacked slice 中完成真实
-OnTrack 路由、ZIP magic 校验、definition-first 未实例化任务、artifact safety、
-native typed schema/handler、human JSON 兼容路径和批量 unavailable contract；合并前仍需
-完成完整验证和三轴代码审查。
+`--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status`、
+definition-first `task.show`、`task.prerequisites` 与 `task.resources`；其中
+prerequisites 使用真实 per-definition route、单任务 selector 与 normalized output。
+`task.resources` 已在独立 stacked slice 中完成真实 OnTrack 路由、ZIP magic 校验、
+definition-first 未实例化任务、artifact safety、native typed schema/handler、human JSON
+兼容路径和批量 unavailable contract；本层合并前仍需完成完整验证和三轴代码审查。
 
 Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
 和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接

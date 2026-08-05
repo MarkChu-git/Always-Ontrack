@@ -26,8 +26,25 @@ type JsonBody = Record<string, unknown> | undefined;
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const DEFAULT_RETRY_ATTEMPTS = 2;
+const MAX_TASK_PREREQUISITES_RESPONSE_BYTES = 512 * 1024;
 
 type AuthSessionRefresh = () => Promise<SessionData | null>;
+
+/** Raised when a remote JSON response exceeds a caller-defined safety bound. */
+export class OversizedJsonResponseError extends Error {
+  constructor(maxBytes: number) {
+    super(`JSON response exceeds maximum allowed size of ${maxBytes} bytes.`);
+    this.name = 'OversizedJsonResponseError';
+  }
+}
+
+/** Raised when a successful remote response is not valid JSON. */
+export class InvalidJsonResponseError extends Error {
+  constructor(cause?: unknown) {
+    super('OnTrack returned invalid JSON.', { cause });
+    this.name = 'InvalidJsonResponseError';
+  }
+}
 
 function isReplaySafe(init: RequestInit): boolean {
   const method = methodOf(init);
@@ -95,6 +112,7 @@ async function requestJson<T>(
   maxRetries: number = DEFAULT_RETRY_ATTEMPTS,
   refreshAuth?: AuthSessionRefresh,
   authRetried: boolean = false,
+  maxResponseBytes?: number,
 ): Promise<T> {
   const response = await fetchOnTrack(url, init);
 
@@ -107,6 +125,7 @@ async function requestJson<T>(
       maxRetries,
       refreshAuth,
       authRetried,
+      maxResponseBytes,
     );
   }
 
@@ -126,6 +145,7 @@ async function requestJson<T>(
         maxRetries,
         refreshAuth,
         true,
+        maxResponseBytes,
       );
     }
   }
@@ -135,10 +155,46 @@ async function requestJson<T>(
   }
 
   const contentType = response.headers.get('content-type') || '';
-  const body = contentType.includes('application/json')
-    ? await response.json()
-    : await response.text();
+  const body = maxResponseBytes !== undefined
+    ? await readBoundedJsonResponse(response, maxResponseBytes)
+    : contentType.includes('application/json')
+      ? await readJsonResponse(response)
+      : await response.text();
   return body as T;
+}
+
+async function readJsonResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json() as unknown;
+  } catch (error) {
+    throw new InvalidJsonResponseError(error);
+  }
+}
+
+/** Read a JSON response without buffering beyond the caller's explicit limit. */
+async function readBoundedJsonResponse(
+  response: Response,
+  maxBytes: number,
+): Promise<unknown> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new OversizedJsonResponseError(maxBytes);
+  }
+  let buffer: Buffer;
+  try {
+    buffer = await readBoundedResponseBody(response.body, maxBytes);
+  } catch (error) {
+    if (error instanceof Error && /Binary response exceeds maximum allowed size/u.test(error.message)) {
+      throw new OversizedJsonResponseError(maxBytes);
+    }
+    throw error;
+  }
+  try {
+    return JSON.parse(buffer.toString('utf8')) as unknown;
+  } catch (error) {
+    throw new InvalidJsonResponseError(error);
+  }
 }
 
 /** Binary download shape returned by PDF endpoints. */
@@ -518,6 +574,8 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      MAX_TASK_PREREQUISITES_RESPONSE_BYTES,
     );
   }
 

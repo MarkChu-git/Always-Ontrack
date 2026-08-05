@@ -163,6 +163,7 @@ test('the remaining fixture catalog is synthetic, valid, and records contract-sp
     loadContractFixture(fixturesRoot, 'access-token-shape'),
     loadContractFixture(fixturesRoot, 'submission-details-shape'),
     loadContractFixture(fixturesRoot, 'planner-prerequisites-shape'),
+    loadContractFixture(fixturesRoot, 'definition-prerequisites-shape'),
   ]);
 
   assert.deepEqual(
@@ -171,6 +172,7 @@ test('the remaining fixture catalog is synthetic, valid, and records contract-sp
       ['access-token-shape', 'identity-sensitive'],
       ['submission-details-shape', 'read-only'],
       ['planner-prerequisites-shape', 'read-only'],
+      ['definition-prerequisites-shape', 'read-only'],
     ],
   );
   assert.equal(fixtures[0].shape?.type, 'object');
@@ -196,6 +198,11 @@ test('the remaining fixture catalog is synthetic, valid, and records contract-sp
       task_status: 'complete',
     },
   ]);
+  assert.equal(
+    fixtures[3].metadata.route,
+    '/units/:unitId/task_definitions/:taskDefId/prerequisites',
+  );
+  assert.equal(validateContractFixture(fixtures[3]).valid, true);
 });
 
 test('fixture validator refuses leaked PII and contract metadata without provenance', () => {

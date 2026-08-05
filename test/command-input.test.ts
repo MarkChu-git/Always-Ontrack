@@ -8,6 +8,7 @@ import {
 import { getCommandSpec } from "../src/lib/command-spec.js";
 
 const taskShow = getCommandSpec("task.show");
+const taskPrerequisites = getCommandSpec("task.prerequisites");
 
 test("structured input maps schema fields to stable CLI flags", async () => {
   const args = await mergeStructuredCommandInput(
@@ -175,5 +176,63 @@ test("direct Agent argv is schema-strict before authentication or business I/O",
         planReset,
       ),
     /--confirm does not accept a value/,
+  );
+
+  assert.throws(
+    () =>
+      validateAgentCommandArguments(
+        ["task", "prerequisites", "--project-id", "101", "--output", "agent-json"],
+        taskPrerequisites,
+      ),
+    /requires at least one of: task_definition_id, abbreviation/,
+  );
+  assert.throws(
+    () =>
+      validateAgentCommandArguments(
+        [
+          "task",
+          "prerequisites",
+          "--project-id",
+          "-1",
+          "--abbr",
+          "P1",
+          "--output",
+          "agent-json",
+        ],
+        taskPrerequisites,
+      ),
+    /--project-id must be at least 1/,
+  );
+  assert.throws(
+    () =>
+      validateAgentCommandArguments(
+        [
+          "task",
+          "prerequisites",
+          "--project-id",
+          "101",
+          "--abbr",
+          "   ",
+          "--output",
+          "agent-json",
+        ],
+        taskPrerequisites,
+      ),
+    /--abbr must contain at least 1 character/,
+  );
+  assert.doesNotThrow(() =>
+    validateAgentCommandArguments(
+      [
+        "task",
+        "prerequisites",
+        "--project-id",
+        "101",
+        "--abbr",
+        "P1",
+        "--output",
+        "agent-json",
+      ],
+      taskPrerequisites,
+    ),
   );
 });
