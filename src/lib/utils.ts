@@ -1099,6 +1099,15 @@ export function isStaffLikeRole(role?: string): boolean {
 
 export const DEFAULT_DOWNLOAD_DIR = './downloads';
 
+/** Check a cumulative byte budget without overflowing an intermediate sum. */
+export function exceedsByteBudget(
+  usedBytes: number,
+  nextBytes: number,
+  maxBytes: number,
+): boolean {
+  return nextBytes > maxBytes - usedBytes;
+}
+
 /** Clean path fragments into filesystem-safe filename segments. */
 export function sanitizeFilenamePart(value: string | undefined, fallback: string): string {
   const cleaned = (value || '')
@@ -1117,6 +1126,16 @@ export function buildPdfFilename(
   const safeUnit = sanitizeFilenamePart(unitCode, 'unit');
   const safeTask = sanitizeFilenamePart(abbr, 'task');
   return `${safeUnit}_${safeTask}_${type}.pdf`;
+}
+
+/** Build the stable task-resource archive name used by the OnTrack student UI. */
+export function buildTaskResourceFilename(
+  unitCode: string | undefined,
+  abbr: string | undefined,
+): string {
+  const safeUnit = sanitizeFilenamePart(unitCode, 'unit').slice(0, 80);
+  const safeTask = sanitizeFilenamePart(abbr, 'task').slice(0, 80);
+  return `${safeUnit}-${safeTask}-TaskResources.zip`;
 }
 
 /** Resolve download directory from user override or default location. */

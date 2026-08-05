@@ -229,6 +229,14 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   const commands = createNativeAgentCommands({
     authStatus: async () => ({ status: 'signed_out', baseUrl: 'https://example.test/api' }),
     taskShow: async () => ({ project_id: 1, count: 0, tasks: [] }),
+    taskResources: async () => ({
+      project_id: 1,
+      selected_count: 0,
+      downloaded_count: 0,
+      unavailable_count: 0,
+      downloads: [],
+      unavailable: [],
+    }),
   });
 
   for (const command of commands) {

@@ -60,11 +60,13 @@ engine.
   - `tasks`
   - `inbox`
   - `task show`
+  - `task resources`
 - Feedback and live tracking
   - `feedback list`
   - `feedback watch`
   - `watch`
 - File operations
+  - `task resources`
   - `pdf task`
   - `pdf submission`
   - `submission upload`
@@ -142,14 +144,18 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
+ontrack agent call task.resources \
+  --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
 
 `task.show` uses the definition-first Student Task View, so a project with an
 empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
-surface currently covers `auth.status` and `task.show`; more commands are added
-as individually reviewed vertical slices.
+surface covers `auth.status`, `task.show`, and `task.resources`; more commands
+are added as individually reviewed vertical slices. `task.resources` returns
+bounded artifact metadata (filename, relative path, byte count, content type,
+and SHA-256) and reports unavailable archives without writing placeholders.
 
 The existing `--output agent-json` commands remain a compatibility Adapter for
 the broader command set while it migrates to this interface. Bare `--json`
@@ -173,7 +179,7 @@ keeps its pre-0.5 raw shape.
 
 ```bash
 ontrack task show \
-  --input-json '{"project_id":87,"abbreviation":"D4"}' \
+  --input-json '{"project_id":87,"abbreviation":["D4"]}' \
   --output agent-json
 ```
 
@@ -501,7 +507,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status` and `task.show` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `task.show`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
@@ -528,6 +534,7 @@ ontrack logout
 | `ontrack unit tasks --unit-id <id>` | List tasks for one unit | Unit-scoped view |
 | `ontrack inbox` | Load inbox tasks or fallback task list | Prefers `/units/:id/tasks/inbox` and falls back when needed |
 | `ontrack task show --project-id <id> --abbr <abbr>` | Show one or many tasks | Supports repeated/comma selectors and `--all-tasks` |
+| `ontrack task resources --project-id <id> --abbr <abbr>` | Download task resource archive(s) | Uses the real `/units/:unitId/task_definitions/:taskDefId/task_resources.json?as_attachment=true` route; definition-first and batch-capable; saves `FIT0001-P1-TaskResources.zip`-style files; external output requires `--allow-external-dir` |
 
 ### Feedback and live tracking
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   MAX_DOWNLOAD_BYTES,
   OnTrackApiClient,
+  UnavailableDownloadError,
   readBoundedResponseBody,
 } from '../src/lib/api.js';
 import { OnTrackHttpError, OnTrackTransportError } from '../src/lib/auth.js';
@@ -226,6 +227,66 @@ test('downloadTaskPdf returns binary payload', async () => {
   assert.ok(requestedUrl.endsWith('/units/55/task_definitions/501/task_pdf.json?as_attachment=true'));
   assert.equal(result.contentType, 'application/pdf');
   assert.deepEqual([...result.buffer], [0x25, 0x50, 0x44, 0x46]);
+});
+
+test('downloadTaskResources uses the production task-resource endpoint and returns ZIP bytes', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let requestedUrl = '';
+  mockFetch(async (input) => {
+    requestedUrl = String(input);
+    return new Response(Uint8Array.from([0x50, 0x4b, 0x03, 0x04]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/zip',
+        'content-disposition': 'attachment; filename=FIT0001-P1-TaskResources.zip',
+      },
+    });
+  });
+
+  const result = await client.downloadTaskResources(session, 55, 501);
+  assert.ok(
+    requestedUrl.endsWith(
+      '/units/55/task_definitions/501/task_resources.json?as_attachment=true',
+    ),
+  );
+  assert.equal(result.contentType, 'application/zip');
+  assert.deepEqual([...result.buffer], [0x50, 0x4b, 0x03, 0x04]);
+});
+
+test('downloadTaskResources rejects a successful non-ZIP response', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () =>
+    new Response('<html>not a ZIP</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  );
+
+  await assert.rejects(
+    () => client.downloadTaskResources(session, 55, 501),
+    /non-ZIP task resource payload/,
+  );
+});
+
+test('downloadTaskResources classifies OnTrack FileNotFound.zip placeholders as unavailable', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () =>
+    new Response(Uint8Array.from([0x50, 0x4b, 0x03, 0x04]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/zip',
+        'content-disposition': "attachment; filename*=UTF-8''FileNotFound.zip",
+      },
+    }),
+  );
+
+  await assert.rejects(
+    () => client.downloadTaskResources(session, 55, 501),
+    (error: unknown) => {
+      assert.ok(error instanceof UnavailableDownloadError);
+      return true;
+    },
+  );
 });
 
 test('downloadSubmissionPdf surfaces non-200 responses', async () => {

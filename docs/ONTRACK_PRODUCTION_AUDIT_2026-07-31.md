@@ -376,6 +376,7 @@ GET  /api/units/:unitId/task_definitions/:taskDefId/prerequisites/
 GET  /api/units/:unitId/task_prerequisites
 GET  /api/projects/:projectId/task_def_id/:taskDefId/submission_details
 GET  /api/units/:unitId/task_definitions/:taskDefId/task_pdf.json
+GET  /api/units/:unitId/task_definitions/:taskDefId/task_resources.json?as_attachment=true
 GET  /api/webcal
 ```
 
@@ -410,6 +411,7 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `feedback list/watch` | endpoint 基础仍在，模型不足 | P1 | comments 保留，但缺附件、语音、discussion thread/review |
 | `watch` | 日期与状态语义不足 | P1 | 需要区分个人计划、unit 默认、feedback deadline 和派生状态 |
 | `pdf task` | 基本合同仍在 | P2 | task PDF endpoint 已确认，Web 现在支持内嵌 viewer |
+| `task resources` | 已接入真实下载合同 | - | definition-first；验证 ZIP magic；`FileNotFound.zip` 占位响应稳定归类为 unavailable；默认使用 `FIT0001-P1-TaskResources.zip` 风格 artifact 名称 |
 | `pdf submission` | 已修复 | - | 下载前检查 `submission_details` 的 unavailable/processing/ready |
 | `submission upload` | 已修复核心状态机 | - | 默认 dry-run、`--confirm` 单次 POST、明确 rejection/transport unknown/observed success、redacted output、comment failure 隔离 |
 | `upload-new-files` | 已修复核心状态机 | - | 独立读取 `submission_details`，只有已观察到 existing submission 才允许 confirmed dispatch |

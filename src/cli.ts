@@ -3,9 +3,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
-import { OnTrackApiClient } from './lib/api.js';
+import {
+  InvalidDownloadFormatError,
+  MAX_DOWNLOAD_BYTES,
+  OnTrackApiClient,
+  UnavailableDownloadError,
+} from './lib/api.js';
 import {
   createSessionFromAccessToken,
   OnTrackHttpError,
@@ -29,6 +34,7 @@ import {
   findExternalArtifactPaths,
   inspectUploadFile,
   readUploadArtifact,
+  writeArtifactFile,
 } from './lib/artifact-safety.js';
 import {
   buildExternalArtifactAuthorizationArgs,
@@ -57,7 +63,9 @@ import {
 } from './lib/submission-lifecycle.js';
 import {
   buildPdfFilename,
+  buildTaskResourceFilename,
   diffWatchStates,
+  exceedsByteBudget,
   filterTasksByStatus,
   feedbackIdentity,
   formatDate,
@@ -135,6 +143,8 @@ import {
   createNativeAgentCommands,
   type AgentTaskShowInput,
   type AgentTaskShowOutput,
+  type AgentTaskResourcesInput,
+  type AgentTaskResourcesOutput,
 } from './lib/agent-commands.js';
 import { createOnTrackAuthBroker } from './lib/auth-broker.js';
 import {
@@ -162,6 +172,7 @@ type InboxRowTask = (InboxTask | StudentTaskRow) & { _unitId: number };
 
 const MAX_AGENT_TASK_ITEMS = 200;
 const MAX_AGENT_TASK_OUTPUT_BYTES = 512 * 1024;
+const MAX_TASK_RESOURCE_BATCH_BYTES = MAX_DOWNLOAD_BYTES * 4;
 
 /** Convert a credential captured from the verified access-token response into a session. */
 function sessionFromAccessTokenCapture(
@@ -218,6 +229,7 @@ Usage:
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
+  ontrack task resources --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--allow-external-dir] [--json]
   ontrack plan show --project-id ID [--include-beyond-target] [--json]
   ontrack plan set-dates --project-id ID (--task-definition-id ID | --abbr ABBR) --start YYYY-MM-DD --target YYYY-MM-DD [--confirm] [--idempotency-key KEY] [--json]
   ontrack plan reset --project-id ID [--confirm] [--idempotency-key KEY] [--json]
@@ -241,8 +253,8 @@ Notes:
   - Use --show-browser to force visible browser mode for debugging; --hide-browser keeps explicit headless mode.
   - If Chromium runtime is missing, install it manually through a reviewed dependency-management workflow.
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
-  - PDF commands save files into ./downloads by default.
-  - PDF output directories are workspace-scoped and symlink-safe by default; use --allow-external-dir only for explicit external output.
+  - PDF and task-resource commands save files into ./downloads by default.
+  - Download output directories are workspace-scoped and symlink-safe by default; use --allow-external-dir only for explicit external output.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
   - Upload files are regular, non-symlink, non-hard-link files capped at 50 MiB each; use --allow-external-file only for explicit external input.
@@ -3861,6 +3873,190 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
   );
 }
 
+interface TaskResourceDownloadRecord {
+  readonly project_id: number;
+  readonly unit_id: number | null;
+  readonly unit_code: string | null;
+  readonly task_definition_id: number;
+  readonly task_instance_id: number | null;
+  readonly task_id: number;
+  readonly task_def_id: number;
+  readonly abbreviation: string;
+  readonly instantiated: boolean;
+  readonly artifact: {
+    readonly filename: string;
+    readonly path: string;
+    readonly bytes: number;
+    readonly content_type: string;
+    readonly sha256: string;
+  };
+}
+
+interface TaskResourceUnavailableRecord {
+  readonly project_id: number;
+  readonly unit_id: number | null;
+  readonly unit_code: string | null;
+  readonly task_definition_id: number;
+  readonly task_instance_id: number | null;
+  readonly task_id: number;
+  readonly task_def_id: number;
+  readonly abbreviation: string;
+  readonly instantiated: boolean;
+  readonly reason: 'not_available';
+}
+
+interface TaskResourceDownloadResult {
+  readonly project_id: number;
+  readonly selected_count: number;
+  readonly downloaded_count: number;
+  readonly unavailable_count: number;
+  readonly downloads: readonly TaskResourceDownloadRecord[];
+  readonly unavailable: readonly TaskResourceUnavailableRecord[];
+}
+
+function taskResourceIdentity(
+  resolved: ResolvedTaskSelector,
+): Omit<TaskResourceDownloadRecord, 'artifact'> {
+  const identity = taskIdentityJson(resolved);
+  const unitCode = resolved.unitCode
+    ? safeTextForHumanDisplay(resolved.unitCode, 'unit')
+    : null;
+  return {
+    project_id: resolved.project.id,
+    unit_id: resolved.unitId ?? null,
+    unit_code: unitCode,
+    task_definition_id: identity.taskDefinitionId,
+    task_instance_id: identity.taskInstanceId ?? null,
+    task_id: identity.taskId,
+    task_def_id: identity.taskDefId,
+    abbreviation: safeTextForHumanDisplay(
+      resolved.abbr,
+      String(resolved.taskDefId),
+    ),
+    instantiated: resolved.task.isInstantiated === true,
+  };
+}
+
+/** Download task resources through the shared artifact-safety writer. */
+async function downloadTaskResourceArtifacts(
+  session: SessionData,
+  api: OnTrackApiClient,
+  resolvedItems: readonly ResolvedTaskSelector[],
+  options: { readonly outDir?: string; readonly allowExternalDir?: boolean },
+): Promise<TaskResourceDownloadResult> {
+  const downloads: TaskResourceDownloadRecord[] = [];
+  const unavailable: TaskResourceUnavailableRecord[] = [];
+  let totalBytes = 0;
+
+  for (const resolved of resolvedItems) {
+    const identity = taskResourceIdentity(resolved);
+    try {
+      if (resolved.unitId === undefined) {
+        throw new Error('Unit id not found for task resource download.');
+      }
+      const download = await api.downloadTaskResources(
+        session,
+        resolved.unitId,
+        resolved.taskDefId,
+      );
+      if (
+        exceedsByteBudget(
+          totalBytes,
+          download.buffer.byteLength,
+          MAX_TASK_RESOURCE_BATCH_BYTES,
+        )
+      ) {
+        throw new AgentProtocolError({
+          code: 'INVALID_ARGUMENT',
+          summary: `Task resource batch exceeds ${MAX_TASK_RESOURCE_BATCH_BYTES} bytes; use a narrower selector.`,
+        });
+      }
+      const filename = buildTaskResourceFilename(resolved.unitCode, resolved.abbr);
+      const filePath = await writeArtifactFile(download.buffer, filename, {
+        root: process.cwd(),
+        outDir: options.outDir,
+        allowExternal: options.allowExternalDir,
+      });
+      totalBytes += download.buffer.byteLength;
+      downloads.push({
+        ...identity,
+        artifact: {
+          filename,
+          path: relative(process.cwd(), filePath) || filename,
+          bytes: download.buffer.byteLength,
+          content_type: safeTextForHumanDisplay(
+            download.contentType,
+            'application/zip',
+          ),
+          sha256: createHash('sha256').update(download.buffer).digest('hex'),
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof UnavailableDownloadError)) {
+        throw error;
+      }
+      unavailable.push({ ...identity, reason: 'not_available' });
+    }
+  }
+
+  return {
+    project_id: resolvedItems[0]?.project.id ?? 0,
+    selected_count: resolvedItems.length,
+    downloaded_count: downloads.length,
+    unavailable_count: unavailable.length,
+    downloads,
+    unavailable,
+  };
+}
+
+/** Human-facing task resource archive workflow. */
+async function handleTaskResourceDownload(args: string[]): Promise<void> {
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
+  const selector = parseTaskBatchSelectorArgs(args);
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
+  const resolvedItems = resolveTaskBatchSelector(projects, selector);
+  const result = await downloadTaskResourceArtifacts(session, api, resolvedItems, {
+    outDir: getFlagValue(args, '--out-dir'),
+    allowExternalDir: hasFlag(args, '--allow-external-dir'),
+  });
+
+  if (hasFlag(args, '--json')) {
+    printJson(result);
+    return;
+  }
+
+  if (result.downloaded_count > 0) {
+    console.log(`Saved ${result.downloaded_count} task resource archive(s).`);
+    printTable(
+      result.downloads.map((item) => ({
+        unit: item.unit_code ?? '-',
+        task: item.abbreviation,
+        projectId: item.project_id,
+        taskDefinitionId: item.task_definition_id,
+        taskInstanceId: item.task_instance_id ?? '-',
+        file: item.artifact.path,
+      })),
+    );
+  }
+  if (result.unavailable_count > 0) {
+    console.log(
+      `Skipped ${result.unavailable_count} task resource archive(s) that are not available.`,
+    );
+    printTable(
+      result.unavailable.map((item) => ({
+        unit: item.unit_code ?? '-',
+        task: item.abbreviation,
+        projectId: item.project_id,
+        taskDefinitionId: item.task_definition_id,
+        taskInstanceId: item.task_instance_id ?? '-',
+      })),
+    );
+  }
+}
+
 /** Preview or dispatch a submission with requirement-aware file key mapping. */
 async function handleSubmissionUpload(
   args: string[],
@@ -4384,6 +4580,10 @@ async function handleTaskCommand(args: string[]): Promise<void> {
     await handleTaskPrerequisites(rest);
     return;
   }
+  if (subcommand === 'resources') {
+    await handleTaskResourceDownload(rest);
+    return;
+  }
   throw new Error(`Unknown task subcommand: ${subcommand || '(missing)'}`);
 }
 
@@ -4507,6 +4707,51 @@ async function readAgentTaskShow(
   return output;
 }
 
+async function readAgentTaskResources(
+  input: AgentTaskResourcesInput,
+  session: SessionData,
+): Promise<AgentTaskResourcesOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const resolved = resolveTaskBatchSelector(projects, {
+    projectId: input.project_id,
+    taskDefinitionIds:
+      !('task_definition_id' in input) || input.task_definition_id === undefined
+        ? []
+        : [input.task_definition_id],
+    taskIds: [],
+    abbrs: 'abbreviation' in input ? input.abbreviation ?? [] : [],
+    allTasks: input.all_tasks,
+  });
+  if (resolved.length > MAX_AGENT_TASK_ITEMS) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: `task.resources selected more than ${MAX_AGENT_TASK_ITEMS} tasks; use a narrower selector.`,
+    });
+  }
+
+  const result = await downloadTaskResourceArtifacts(session, api, resolved, {
+    outDir: input.out_dir,
+    allowExternalDir: input.allow_external_dir,
+  });
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_AGENT_TASK_OUTPUT_BYTES) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: `task.resources response exceeds ${MAX_AGENT_TASK_OUTPUT_BYTES} bytes; use a narrower selector.`,
+    });
+  }
+  return {
+    ...result,
+    downloads: [...result.downloads],
+    unavailable: [...result.unavailable],
+  };
+}
+
 function createNativeAgentExecutionEngine() {
   let activeSession: SessionData | undefined;
   return createAgentExecutionEngine(
@@ -4520,6 +4765,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskShow(input, activeSession);
+      },
+      taskResources: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentTaskResources(input, activeSession);
       },
     }),
     {
@@ -4768,6 +5022,20 @@ async function main(): Promise<void> {
 function normalizeAgentCliError(error: unknown): AgentProtocolError {
   if (error instanceof AgentProtocolError) {
     return error;
+  }
+  if (error instanceof InvalidDownloadFormatError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned an invalid task resource archive.',
+      cause: error,
+    });
+  }
+  if (error instanceof UnavailableDownloadError) {
+    return new AgentProtocolError({
+      code: 'NOT_FOUND',
+      summary: 'The requested download is not available.',
+      cause: error,
+    });
   }
   if (error instanceof OnTrackHttpError) {
     if (error.authFailure !== 'other') {

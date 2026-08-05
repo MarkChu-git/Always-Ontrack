@@ -51,10 +51,10 @@ const agentTaskShowItemSchema = z
   .object({
     project_id: z.number().int().positive(),
     unit_id: z.number().int().positive().nullable(),
-    unit_code: z.string().nullable(),
+    unit_code: z.string().max(80).nullable(),
     task_definition_id: z.number().int().positive(),
     task_instance_id: z.number().int().positive().nullable(),
-    abbreviation: z.string().min(1),
+    abbreviation: z.string().min(1).max(80),
     name: z.string().nullable(),
     status: z.string().nullable(),
     due_date: z.string().nullable(),
@@ -81,6 +81,96 @@ export const agentTaskShowOutputSchema = z
 
 export type AgentTaskShowInput = z.output<typeof agentTaskShowInputSchema>;
 export type AgentTaskShowOutput = z.output<typeof agentTaskShowOutputSchema>;
+
+const taskResourceOptionsSchema = z
+  .object({
+    out_dir: z.string().trim().min(1).max(4096).optional(),
+    allow_external_dir: z.boolean().optional(),
+  })
+  .strict();
+
+/** Typed caller contract for task-resource downloads. */
+export const agentTaskResourcesInputSchema = z.union([
+  z
+    .object({
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId,
+      abbreviation: taskShowAbbreviations.optional(),
+      all_tasks: z.literal(false).optional(),
+      ...taskResourceOptionsSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId.optional(),
+      abbreviation: taskShowAbbreviations,
+      all_tasks: z.literal(false).optional(),
+      ...taskResourceOptionsSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      project_id: taskShowProjectId,
+      all_tasks: z.literal(true),
+      ...taskResourceOptionsSchema.shape,
+    })
+    .strict(),
+]);
+
+const agentTaskResourceArtifactSchema = z
+  .object({
+    filename: z.string().min(1).max(255),
+    path: z.string().min(1).max(4096),
+    bytes: z.number().int().nonnegative(),
+    content_type: z.string().min(1).max(128),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+
+const agentTaskResourceDownloadSchema = z
+  .object({
+    project_id: z.number().int().positive(),
+    unit_id: z.number().int().positive().nullable(),
+    unit_code: z.string().max(80).nullable(),
+    task_definition_id: z.number().int().positive(),
+    task_instance_id: z.number().int().positive().nullable(),
+    task_id: z.number().int().positive(),
+    task_def_id: z.number().int().positive(),
+    abbreviation: z.string().min(1).max(80),
+    instantiated: z.boolean(),
+    artifact: agentTaskResourceArtifactSchema,
+  })
+  .strict();
+
+const agentTaskResourceUnavailableSchema = z
+  .object({
+    project_id: z.number().int().positive(),
+    unit_id: z.number().int().positive().nullable(),
+    unit_code: z.string().max(80).nullable(),
+    task_definition_id: z.number().int().positive(),
+    task_instance_id: z.number().int().positive().nullable(),
+    task_id: z.number().int().positive(),
+    task_def_id: z.number().int().positive(),
+    abbreviation: z.string().min(1).max(80),
+    instantiated: z.boolean(),
+    reason: z.literal('not_available'),
+  })
+  .strict();
+
+export const agentTaskResourcesOutputSchema = z
+  .object({
+    project_id: z.number().int().positive(),
+    selected_count: z.number().int().nonnegative(),
+    downloaded_count: z.number().int().nonnegative(),
+    unavailable_count: z.number().int().nonnegative(),
+    downloads: z.array(agentTaskResourceDownloadSchema).max(200),
+    unavailable: z.array(agentTaskResourceUnavailableSchema).max(200),
+  })
+  .strict();
+
+export type AgentTaskResourcesInput = z.output<typeof agentTaskResourcesInputSchema>;
+export type AgentTaskResourcesOutput = z.output<typeof agentTaskResourcesOutputSchema>;
 export type AgentAuthStatus = {
   readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
   readonly source?: string;
@@ -91,6 +181,7 @@ export type AgentAuthStatus = {
 export interface NativeAgentCommandHandlers {
   authStatus(): Promise<AgentAuthStatus>;
   taskShow(input: AgentTaskShowInput): Promise<AgentTaskShowOutput>;
+  taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
 }
 
 const authStatusInputSchema = z.object({}).strict();
@@ -134,6 +225,18 @@ export function createNativeAgentCommands(
       input: agentTaskShowInputSchema,
       output: agentTaskShowOutputSchema,
       execute: (input) => handlers.taskShow(input),
+    }),
+    defineAgentCommand({
+      path: 'task.resources',
+      description: 'Download task resource archives with artifact metadata.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentTaskResourcesInputSchema,
+      output: agentTaskResourcesOutputSchema,
+      execute: (input) => handlers.taskResources(input),
     }),
   ];
 }

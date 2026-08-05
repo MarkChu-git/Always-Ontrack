@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'bun:test';
@@ -405,6 +405,95 @@ test('plan writes are dry-run by default and exact PUTs only with --confirm', as
           targetSource: 'unit_default',
         },
       ]);
+    },
+  );
+});
+
+test('task resources follow the production endpoint and write a safe JSON-described artifact', async () => {
+  await withFixtureServer(
+    (request, response) => {
+      const payload =
+        request.url === '/api/projects'
+          ? [{ id: 101, unit_id: 55 }]
+          : request.url === '/api/projects/101'
+            ? { id: 101, unit_id: 55, tasks: [] }
+            : request.url === '/api/units/55'
+              ? unitPayload()
+              : null;
+      if (request.url === '/api/units/55/task_definitions/501/task_resources.json?as_attachment=true') {
+        response.writeHead(200, {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename=FIT0001-P1-TaskResources.zip',
+        });
+        response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+        return;
+      }
+      if (payload === null) {
+        response.writeHead(404).end();
+        return;
+      }
+      sendJson(response, payload);
+    },
+    async (configRoot) => {
+      const outputRoot = join(configRoot, 'resources');
+      const result = await runCli(
+        [
+          'task',
+          'resources',
+          '--project-id',
+          '101',
+          '--abbr',
+          'P1',
+          '--out-dir',
+          outputRoot,
+          '--allow-external-dir',
+          '--json',
+        ],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 0, result.stderr);
+      const output = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(output.project_id, 101);
+      assert.equal(output.selected_count, 1);
+      assert.equal(output.downloaded_count, 1);
+      const download = (output.downloads as Array<Record<string, unknown>>)[0];
+      assert.equal(download.abbreviation, 'P1');
+      const artifact = download.artifact as Record<string, unknown>;
+      assert.equal(artifact.filename, 'FIT0001-P1-TaskResources.zip');
+      assert.deepEqual(
+        [...await readFile(join(outputRoot, 'FIT0001-P1-TaskResources.zip'))],
+        [0x50, 0x4b, 0x03, 0x04],
+      );
+      assert.equal(result.stdout.includes('fixture-session-marker'), false);
+
+      const agentOutputRoot = join(configRoot, 'resources-agent');
+      const agentResult = await runCli(
+        [
+          'task',
+          'resources',
+          '--input-json',
+          JSON.stringify({
+            project_id: 101,
+            abbreviation: ['P1'],
+            out_dir: agentOutputRoot,
+            allow_external_dir: true,
+          }),
+          '--output',
+          'agent-json',
+        ],
+        configRoot,
+      );
+      assert.equal(agentResult.exitCode, 0, agentResult.stderr);
+      const agentEnvelope = JSON.parse(agentResult.stdout) as Record<string, unknown>;
+      assert.equal(agentEnvelope.command, 'task.resources');
+      assert.equal(
+        (agentEnvelope.data as Record<string, unknown>).downloaded_count,
+        1,
+      );
+      assert.deepEqual(
+        [...await readFile(join(agentOutputRoot, 'FIT0001-P1-TaskResources.zip'))],
+        [0x50, 0x4b, 0x03, 0x04],
+      );
     },
   );
 });
