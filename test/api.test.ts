@@ -466,6 +466,35 @@ test('list prerequisite Interfaces use their distinct production paths', async (
   assert.ok(requestedUrls[1].endsWith('/units/55/task_definitions/501/prerequisites'));
 });
 
+test('listUnitTaskPrerequisites bounds declared and streamed JSON responses', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const oversized = JSON.stringify({ value: 'x'.repeat(512 * 1024) });
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(oversized)),
+      },
+    }),
+  );
+  await assert.rejects(
+    () => client.listUnitTaskPrerequisites(session, 55),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  await assert.rejects(
+    () => client.listUnitTaskPrerequisites(session, 55),
+    (error: unknown) => error instanceof OversizedJsonResponseError,
+  );
+});
+
 test('listTaskPrerequisites bounds declared and streamed JSON responses', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   const oversized = JSON.stringify({ value: 'x'.repeat(512 * 1024) });

@@ -55,6 +55,7 @@ import {
   buildTargetDateMutation,
 } from './lib/planner.js';
 import type { RawTaskPrerequisite } from './lib/planner.js';
+import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import {
   createSubmissionAttempt,
   InvalidSubmissionDetailsError,
@@ -146,6 +147,8 @@ import {
   exitCodeForAgentEnvelope,
 } from './lib/agent-execution-engine.js';
 import {
+  type AgentPlanShowInput,
+  type AgentPlanShowOutput,
   type AgentSubmissionStatusInput,
   type AgentSubmissionStatusOutput,
   agentSubmissionStatusOutputSchema,
@@ -3051,11 +3054,24 @@ async function loadPlannerContext(
 /** Show effective personal/default plan dates and prerequisites. */
 async function handlePlanShow(args: string[]): Promise<void> {
   const session = await requireSession();
-  const api = createAuthenticatedApi(session);
   const projectId = parseIntegerFlagValue(
     getFlagValue(args, '--project-id'),
     '--project-id',
   );
+  if (getAgentOutputContext()) {
+    printJson(
+      await readAgentPlanShow(
+        {
+          project_id: projectId,
+          include_beyond_target: hasFlag(args, '--include-beyond-target'),
+        },
+        session,
+      ),
+    );
+    return;
+  }
+
+  const api = createAuthenticatedApi(session);
   const { plans } = await loadPlannerContext(
     api,
     session,
@@ -3080,6 +3096,36 @@ async function handlePlanShow(args: string[]): Promise<void> {
       editable: plan.target.editable,
     })),
   );
+}
+
+/** Strict native plan reader shared by direct Agent calls and compatibility mode. */
+async function readAgentPlanShow(
+  input: AgentPlanShowInput,
+  session: SessionData,
+): Promise<AgentPlanShowOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const project = projects[0];
+  if (!project) {
+    throw new AgentProtocolError({
+      code: 'NOT_FOUND',
+      summary: `Project ${input.project_id} was not found.`,
+    });
+  }
+  const unitId = projectUnitId(project);
+  if (unitId === undefined || !Number.isSafeInteger(unitId) || unitId <= 0) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned a project without a valid unit identity.',
+    });
+  }
+  const prerequisites = await api.listUnitTaskPrerequisites(session, unitId);
+  return buildAgentPlanShowOutput(projects, prerequisites, input);
 }
 
 /** Safe planner read-back projection; excludes raw server mutation responses. */
@@ -5068,6 +5114,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskResources(input, activeSession);
+      },
+      planShow: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentPlanShow(input, activeSession);
       },
       submissionStatus: (input) => {
         if (!activeSession) {

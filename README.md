@@ -146,6 +146,8 @@ ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent call plan.show \
+  --input-json '{"project_id":87,"include_beyond_target":false}'
 ontrack agent call submission.status \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
@@ -157,7 +159,7 @@ empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
 surface covers `auth.status`, `task.show`, `task.prerequisites`,
-`submission.status`, and `task.resources`; more commands are added as
+`plan.show`, `submission.status`, and `task.resources`; more commands are added as
 individually reviewed vertical slices. `submission.status` resolves
 the task definition even when no task instance exists, reads OnTrack's observed
 per-definition submission-details route, and returns explicit PDF state plus
@@ -167,6 +169,14 @@ conflicting snake/camel aliases fail closed as `REMOTE_UNAVAILABLE`.
 `task.resources` returns
 bounded artifact metadata (filename, relative path, byte count, content type,
 and SHA-256) and reports unavailable archives without writing placeholders.
+`plan.show` uses the same definition-first catalogue, reports optional task
+instance identity and status, keeps personal/grade/unit/missing date sources
+explicit, treats the feedback deadline independently, and exposes normalized
+prerequisites with both required and current status. It retains tutorial-mismatch
+and unknown visibility states so an Agent can distinguish unavailable context
+from a filtered task; missing flexible-date capability fails closed. Its
+unit-wide prerequisite response and canonical output are bounded to 512 KiB;
+malformed dates or conflicting aliases fail closed.
 
 The existing `--output agent-json` commands remain a compatibility Adapter for
 the broader command set while it migrates to this interface. Bare `--json`
@@ -518,7 +528,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `task.show`, `task.prerequisites`, `submission.status`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |

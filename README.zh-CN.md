@@ -141,6 +141,8 @@ ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent call plan.show \
+  --input-json '{"project_id":87,"include_beyond_target":false}'
 ontrack agent call submission.status \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
@@ -151,7 +153,7 @@ ontrack agent call task.resources \
 `tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化
 任务会明确标记，不会猜测 instance id。也可以使用 `--input -` 读取有大小上限的
 非交互 stdin。当前原生接口覆盖 `auth.status`、`task.show`、`task.prerequisites`、
-`submission.status` 与 `task.resources`，后续命令会按独立的垂直切片逐个审查后加入。
+`plan.show`、`submission.status` 与 `task.resources`，后续命令会按独立的垂直切片逐个审查后加入。
 `submission.status` 即使没有 task instance 也会按 task definition 解析，调用真实的
 per-definition submission-details 路由，并显式返回 PDF 三态与
 `submission_observed`（包括 submitted/processing 生命周期状态）。响应限制为 64 KiB；
@@ -159,6 +161,12 @@ per-definition submission-details 路由，并显式返回 PDF 三态与
 alias 会 fail closed 为 `REMOTE_UNAVAILABLE`。`task.resources` 返回有边界的
 artifact 元数据（文件名、相对路径、字节数、content type、SHA-256），资源不可用时
 会稳定报告且不会写入占位文件。
+`plan.show` 复用 definition-first catalogue，显式返回可选 task instance 身份与状态、
+personal/grade/unit/missing 日期来源、独立 feedback deadline 和归一化 prerequisites。
+prerequisite 同时返回 required/current status，并保留 tutorial mismatch 与 unknown
+visibility，便于 Agent 区分上下文未知与任务被过滤；缺少 flexible-date capability 会
+fail closed。unit-wide prerequisite 响应与 canonical 输出均限制为 512 KiB；非法公历日期
+或冲突 alias 会 fail closed。
 
 更广泛的旧命令仍通过 `--output agent-json` compatibility Adapter 提供；裸
 `--json` 继续保持原有 raw shape。
@@ -490,7 +498,7 @@ ontrack logout
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show`、`task.prerequisites`、`submission.status`、`task.resources` |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show`、`task.prerequisites`、`plan.show`、`submission.status`、`task.resources` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |

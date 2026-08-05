@@ -245,6 +245,83 @@ export type AgentSubmissionStatusInput = z.output<
 export type AgentSubmissionStatusOutput = z.output<
   typeof agentSubmissionStatusOutputSchema
 >;
+
+const agentPlanProjectId = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER);
+const agentPlanSafeShortText = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[^\u0000-\u001f\u007f]*$/u);
+const agentPlanDateSchema = (
+  kind: 'start' | 'target' | 'feedback_deadline',
+) => z
+  .object({
+    kind: z.literal(kind),
+    value: z.string().length(10).regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
+    source: z.enum(['personal', 'grade_default', 'unit_default', 'missing']),
+    editable: z.boolean(),
+    interpretation: z.literal('unit_local_calendar_date'),
+  })
+  .strict();
+const agentPlanPrerequisiteSchema = z
+  .object({
+    task_definition_id: taskShowDefinitionId,
+    required_status: agentPlanSafeShortText,
+    current_status: agentPlanSafeShortText.nullable(),
+  })
+  .strict();
+const agentPlanTaskSchema = z
+  .object({
+    task_definition_id: taskShowDefinitionId,
+    task_instance_id: z.number().int().positive().nullable(),
+    abbreviation: agentPlanSafeShortText,
+    name: z
+      .string()
+      .min(1)
+      .max(512)
+      .regex(/^[^\u0000-\u001f\u007f]*$/u)
+      .nullable(),
+    status: agentPlanSafeShortText,
+    instantiated: z.boolean(),
+    visibility: z.enum([
+      'within_target',
+      'beyond_target',
+      'tutorial_mismatch',
+      'unknown',
+    ]),
+    flexible_dates: z.boolean(),
+    start: agentPlanDateSchema('start'),
+    target: agentPlanDateSchema('target'),
+    feedback_deadline: agentPlanDateSchema('feedback_deadline'),
+    prerequisites: z.array(agentPlanPrerequisiteSchema).max(200),
+  })
+  .strict();
+
+/** Typed caller contract for the definition-first project plan read. */
+export const agentPlanShowInputSchema = z
+  .object({
+    project_id: agentPlanProjectId,
+    include_beyond_target: z.boolean().optional(),
+  })
+  .strict();
+
+export const agentPlanShowOutputSchema = z
+  .object({
+    project_id: agentPlanProjectId,
+    unit_id: taskShowUnitId,
+    unit_code: agentPlanSafeShortText.nullable(),
+    include_beyond_target: z.boolean(),
+    count: z.number().int().nonnegative().max(200),
+    tasks: z.array(agentPlanTaskSchema).max(200),
+  })
+  .strict();
+
+export type AgentPlanShowInput = z.output<typeof agentPlanShowInputSchema>;
+export type AgentPlanShowOutput = z.output<typeof agentPlanShowOutputSchema>;
 export type AgentAuthStatus = {
   readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
   readonly source?: string;
@@ -259,6 +336,7 @@ export interface NativeAgentCommandHandlers {
     input: AgentTaskPrerequisitesInput,
   ): Promise<AgentTaskPrerequisitesOutput>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
+  planShow(input: AgentPlanShowInput): Promise<AgentPlanShowOutput>;
   submissionStatus(
     input: AgentSubmissionStatusInput,
   ): Promise<AgentSubmissionStatusOutput>;
@@ -329,6 +407,18 @@ export function createNativeAgentCommands(
       input: agentTaskResourcesInputSchema,
       output: agentTaskResourcesOutputSchema,
       execute: (input) => handlers.taskResources(input),
+    }),
+    defineAgentCommand({
+      path: 'plan.show',
+      description: 'Read the definition-first student plan.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentPlanShowInputSchema,
+      output: agentPlanShowOutputSchema,
+      execute: (input) => handlers.planShow(input),
     }),
     defineAgentCommand({
       path: 'submission.status',

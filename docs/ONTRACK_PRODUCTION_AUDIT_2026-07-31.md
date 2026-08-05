@@ -407,6 +407,7 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `units` | 需要以 project + unit detail 聚合 | P1 | Web 主要由 project summary 选 unit，再加载 `/units/:id` |
 | `tasks` | 已修复 | - | StudentTaskView 从 unit definitions 派生，并显式连接可选 instance |
 | `task show` | 已修复 | - | selector 统一使用 taskDefinitionId，未实例化任务可读取 |
+| `plan show` | 已修复 | - | native typed definition-first contract；显式 date source、task/prerequisite required+current status、四态 visibility、独立 feedback deadline 和 normalized prerequisites；缺失 flexible-date capability fail-closed；body/output 均有边界 |
 | `inbox` | 路由仍在，需重新实测 | P1 | bundle 保留 endpoint，但未在本次学生主流程中触发 |
 | `feedback list/watch` | endpoint 基础仍在，模型不足 | P1 | comments 保留，但缺附件、语音、discussion thread/review |
 | `watch` | 日期与状态语义不足 | P1 | 需要区分个人计划、unit 默认、feedback deadline 和派生状态 |

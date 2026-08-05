@@ -1,7 +1,7 @@
 # OnTrack CLI Agent-Ready 实施计划
 
-状态：0.5.1 已发布；submission.status stacked slice 已实现，待完成审查与合并
-分支：`codex/submission-status`
+状态：0.5.1 已发布；submission.status 已合并，plan.show stacked slice 正在实现与审查
+分支：`codex/plan-show`
 协议目标：`ontrack.agent/v1`
 
 ## 1. 产品定位
@@ -331,6 +331,8 @@ ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent call plan.show \
+  --input-json '{"project_id":87,"include_beyond_target":false}'
 ontrack agent call submission.status \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
@@ -342,7 +344,7 @@ command definition，不再经过 JSON → 人类 argv → switch handler。每�
 stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
 `--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status`、
 definition-first `task.show`、`task.prerequisites`、`submission.status` 与
-`task.resources`；其中
+`task.resources`，以及 definition-first `plan.show`；其中
 prerequisites 使用真实 per-definition route、单任务 selector 与 normalized output。
 `task.resources` 已在独立 stacked slice 中完成真实 OnTrack 路由、ZIP magic 校验、
 definition-first 未实例化任务、artifact safety、native typed schema/handler、human JSON
@@ -355,6 +357,16 @@ task definition / optional instance identity、PDF 三态、submission date/stat
 64 KiB；必需 boolean、optional string、
 snake/camel alias 冲突和 terminal control character 均严格 fail closed；native 与
 `--output agent-json` 共用 canonical snake_case contract，裸 `--json` 保持旧 shape。
+`plan.show` 使用 strict metadata loader 和 unit-wide prerequisite route，输出 task
+definition / optional instance identity、status、visibility、flexible-date capability、
+personal/grade/unit/missing 日期 source、独立 feedback deadline 与 normalized
+prerequisites（同时提供 required/current status；未实例化为 `not_instantiated`，未知
+prerequisite node 为 `null`）。native projection 保留 `tutorial_mismatch` 与 `unknown`
+visibility，`include_beyond_target` 只控制 beyond-target；缺少 flexible-date capability
+会 fail closed。日期按 unit-local calendar date 解释并验证真实公历合法性；prerequisite
+snake/camel alias 冲突、重复关系状态冲突、超过 200 条关系或 512 KiB response/output
+都会 fail closed。native 与 compatibility Agent path 共用该 projection，裸 `--json`
+继续保持旧 PlannerView shape。
 
 Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
 和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接
@@ -476,7 +488,7 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 
 - 全部 read command 接入 compatibility Agent envelope。
 - native typed seam 已覆盖 auth status、definition-first task show、
-  prerequisites、submission status 与 task resources。
+  prerequisites、plan show、submission status 与 task resources。
 - watch/feedback watch 使用 NDJSON envelope frame。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。
 - 人类模式继续使用表格和面板。
