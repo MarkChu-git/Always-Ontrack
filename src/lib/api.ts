@@ -27,6 +27,7 @@ type JsonBody = Record<string, unknown> | undefined;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_TASK_PREREQUISITES_RESPONSE_BYTES = 512 * 1024;
+const MAX_SUBMISSION_DETAILS_RESPONSE_BYTES = 64 * 1024;
 
 type AuthSessionRefresh = () => Promise<SessionData | null>;
 
@@ -675,6 +676,8 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      MAX_SUBMISSION_DETAILS_RESPONSE_BYTES,
     );
   }
 

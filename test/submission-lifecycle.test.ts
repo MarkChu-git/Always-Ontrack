@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import {
   createSubmissionAttempt,
+  InvalidSubmissionDetailsError,
   isSubmissionObserved,
   parseSubmissionDetails,
+  parseStrictSubmissionDetails,
   prepareSubmission,
   transitionSubmissionAttempt,
   validateSubmissionMode,
@@ -52,6 +54,74 @@ test('parseSubmissionDetails exposes PDF processing and task status semantics', 
       taskStatus: 'ready_for_feedback',
     },
   );
+});
+
+test('strict submission details normalize observed aliases and ignore unrelated remote fields', () => {
+  assert.deepEqual(
+    parseStrictSubmissionDetails({
+      hasPdf: true,
+      has_pdf: true,
+      processingPdf: true,
+      processing_pdf: true,
+      submissionDate: null,
+      submission_date: null,
+      taskStatus: ' ready_for_feedback ',
+      task_status: 'ready_for_feedback',
+      auth_token: 'must-not-project',
+    }),
+    {
+      hasPdf: true,
+      processingPdf: true,
+      pdfState: 'processing',
+      submissionDate: undefined,
+      taskStatus: 'ready_for_feedback',
+    },
+  );
+
+  assert.deepEqual(
+    parseStrictSubmissionDetails({
+      has_pdf: false,
+      processing_pdf: false,
+    }),
+    {
+      hasPdf: false,
+      processingPdf: false,
+      pdfState: 'unavailable',
+      submissionDate: undefined,
+      taskStatus: undefined,
+    },
+  );
+});
+
+test('strict submission details fail closed on drift and terminal control characters', () => {
+  const malformedPayloads = [
+    null,
+    [],
+    {},
+    { has_pdf: 'true', processing_pdf: false },
+    { has_pdf: true, hasPdf: false, processing_pdf: false },
+    { has_pdf: true, processing_pdf: false, processingPdf: true },
+    {
+      has_pdf: true,
+      processing_pdf: false,
+      submission_date: '2030-01-01T00:00:00.000Z',
+      submissionDate: null,
+    },
+    { has_pdf: true, processing_pdf: false, task_status: 'working\n' },
+    {
+      has_pdf: true,
+      processing_pdf: false,
+      submission_date: '\t2030-01-01T00:00:00.000Z',
+    },
+    { has_pdf: true, processing_pdf: false, task_status: 'x'.repeat(81) },
+  ];
+
+  for (const payload of malformedPayloads) {
+    assert.throws(
+      () => parseStrictSubmissionDetails(payload),
+      InvalidSubmissionDetailsError,
+    );
+  }
 });
 
 test('prepareSubmission validates and orders evidence slots', () => {
@@ -156,8 +226,20 @@ test('upload-new-files requires an observed existing submission while a first up
   assert.doesNotThrow(() =>
     validateSubmissionMode('upload-new-files', existing),
   );
+  const submitted = parseStrictSubmissionDetails({
+    has_pdf: false,
+    processing_pdf: false,
+    task_status: 'submitted',
+  });
+  const processing = parseStrictSubmissionDetails({
+    has_pdf: false,
+    processing_pdf: false,
+    task_status: 'processing',
+  });
   assert.equal(isSubmissionObserved(unavailable), false);
   assert.equal(isSubmissionObserved(existing), true);
+  assert.equal(isSubmissionObserved(submitted), true);
+  assert.equal(isSubmissionObserved(processing), true);
 });
 
 test('submission cancellation is local-only before dispatch and forbidden while uploading', () => {

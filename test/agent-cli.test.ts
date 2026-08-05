@@ -219,6 +219,31 @@ test("Agent JSON stdin maps only registered fields and failures have stable exit
         "INVALID_ARGUMENT",
       );
     }
+
+    for (const input of [
+      { project_id: 87 },
+      { project_id: 0, abbreviation: "D4" },
+      { project_id: 87, abbreviation: "   " },
+      { project_id: 87, all_tasks: true },
+    ]) {
+      const invalidSubmission = await runCli(
+        [
+          "submission",
+          "status",
+          "--input-json",
+          JSON.stringify(input),
+          "--output",
+          "agent-json",
+        ],
+        configRoot,
+      );
+      assert.equal(invalidSubmission.exitCode, 2);
+      assert.equal(invalidSubmission.stderr, "");
+      assert.equal(
+        (JSON.parse(invalidSubmission.stdout).error as Record<string, unknown>).code,
+        "INVALID_ARGUMENT",
+      );
+    }
   } finally {
     await rm(configRoot, { recursive: true, force: true });
   }
@@ -724,6 +749,242 @@ test("native task.prerequisites classifies malformed and oversized remote payloa
   }
 });
 
+test("agent call submission.status replays the observed definition-first submission contract", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-submission-status-"));
+  let unitCode = "FIT0001";
+  const fixture = JSON.parse(
+    await readFile(
+      resolve(process.cwd(), "test/fixtures/contracts/submission-details-shape.json"),
+      "utf8",
+    ),
+  ) as { payload: Record<string, unknown> };
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        code: unitCode,
+        task_definitions: [{ id: 501, abbreviation: "D4", name: "Design task" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/projects/87/task_def_id/501/submission_details") {
+      response.end(JSON.stringify({
+        ...fixture.payload,
+        auth_token: "must-not-be-projected",
+      }));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      [
+        "agent",
+        "call",
+        "submission.status",
+        "--input-json",
+        JSON.stringify({ project_id: 87, abbreviation: "D4" }),
+      ],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, `${result.stderr}\n${result.stdout}`);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "submission.status");
+    assert.equal(envelope.status, "success");
+    assert.deepEqual(envelope.data, {
+      project_id: 87,
+      unit_id: 55,
+      unit_code: "FIT0001",
+      task_definition_id: 501,
+      task_instance_id: null,
+      abbreviation: "D4",
+      instantiated: false,
+      has_pdf: true,
+      processing_pdf: false,
+      pdf_state: "ready",
+      submission_date: "2030-01-01T00:00:00.000Z",
+      task_status: "working",
+      submission_observed: true,
+    });
+
+    const compatibility = await runCli(
+      [
+        "submission",
+        "status",
+        "--input-json",
+        JSON.stringify({ project_id: 87, task_definition_id: 501 }),
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(compatibility.exitCode, 0, compatibility.stderr);
+    assert.equal(compatibility.stderr, "");
+    const compatibilityEnvelope = JSON.parse(compatibility.stdout) as Record<string, unknown>;
+    assert.equal(compatibilityEnvelope.command, "submission.status");
+    assert.deepEqual(compatibilityEnvelope.data, envelope.data);
+
+    unitCode = "x".repeat(81);
+    const oversizedCompatibility = await runCli(
+      [
+        "submission",
+        "status",
+        "--input-json",
+        JSON.stringify({ project_id: 87, task_definition_id: 501 }),
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(oversizedCompatibility.exitCode, 10);
+    assert.equal(oversizedCompatibility.stderr, "");
+    const oversizedEnvelope = JSON.parse(oversizedCompatibility.stdout) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(
+      (oversizedEnvelope.error as Record<string, unknown>).code,
+      "INTERNAL_ERROR",
+    );
+    assert.equal(oversizedCompatibility.stdout.includes("x".repeat(81)), false);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native submission.status fails closed on malformed remote contract rows", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-submission-status-malformed-"));
+  const malformedPayloads: unknown[] = [
+    [],
+    {},
+    { has_pdf: "true", processing_pdf: false },
+    { has_pdf: true, hasPdf: false, processing_pdf: false },
+    { has_pdf: false, processing_pdf: false, task_status: "bad\nstatus" },
+  ];
+  let statusRequestCount = 0;
+  let includeTaskDefinition = true;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        task_definitions: includeTaskDefinition
+          ? [{ id: 501, abbreviation: "D4", name: "Design task" }]
+          : [],
+      }));
+      return;
+    }
+    if (request.url === "/api/projects/87/task_def_id/501/submission_details") {
+      response.end(JSON.stringify(malformedPayloads[statusRequestCount]));
+      statusRequestCount += 1;
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    for (const _payload of malformedPayloads) {
+      const result = await runCli(
+        [
+          "agent",
+          "call",
+          "submission.status",
+          "--input-json",
+          JSON.stringify({ project_id: 87, abbreviation: "D4" }),
+        ],
+        configRoot,
+      );
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal((envelope.error as Record<string, unknown>).code, "REMOTE_UNAVAILABLE");
+      assert.equal(JSON.stringify(envelope.error).includes("bad"), false);
+      assert.equal(JSON.stringify(envelope.data ?? null).includes("bad"), false);
+    }
+
+    includeTaskDefinition = false;
+    const emptyProject = await runCli(
+      [
+        "agent",
+        "call",
+        "submission.status",
+        "--input-json",
+        JSON.stringify({ project_id: 87, abbreviation: "D4" }),
+      ],
+      configRoot,
+    );
+    assert.equal(emptyProject.exitCode, 5);
+    assert.equal(emptyProject.stderr, "");
+    const emptyEnvelope = JSON.parse(emptyProject.stdout) as Record<string, unknown>;
+    assert.equal(
+      (emptyEnvelope.error as Record<string, unknown>).code,
+      "NOT_FOUND",
+    );
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("agent call task.resources downloads definition resources for an uninstantiated task", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-resources-"));
   const outputRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-resources-output-"));
@@ -836,7 +1097,13 @@ test("agent list and describe are offline projections of the executable commands
       .commands as Array<Record<string, unknown>>;
     assert.deepEqual(
       commands.map((command) => command.path),
-      ["auth.status", "task.show", "task.prerequisites", "task.resources"],
+      [
+        "auth.status",
+        "task.show",
+        "task.prerequisites",
+        "task.resources",
+        "submission.status",
+      ],
     );
 
     const described = await runCli(
@@ -887,6 +1154,18 @@ test("agent list and describe are offline projections of the executable commands
       .input_schema as Record<string, unknown>;
     assert.equal((prerequisiteInput.anyOf as Array<unknown>).length, 2);
     assert.match(JSON.stringify(prerequisiteInput), /task_definition_id/);
+
+    const submission = await runCli(
+      ["agent", "describe", "submission.status"],
+      configRoot,
+    );
+    assert.equal(submission.exitCode, 0, submission.stderr);
+    const submissionData = JSON.parse(submission.stdout).data as Record<string, unknown>;
+    const submissionInput = submissionData.input_schema as Record<string, unknown>;
+    const submissionOutput = submissionData.output_schema as Record<string, unknown>;
+    assert.equal((submissionInput.anyOf as Array<unknown>).length, 2);
+    assert.match(JSON.stringify(submissionInput), /\\S/);
+    assert.match(JSON.stringify(submissionOutput), /submission_observed/);
 
     const missing = await runCli(
       ["agent", "describe", "missing.command"],

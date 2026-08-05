@@ -1,5 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
+import { agentSubmissionStatusOutputSchema } from '../src/lib/agent-commands.js';
 import {
   AGENT_COMMAND_SPECS,
   buildCapabilities,
@@ -62,5 +64,41 @@ test('command path resolution handles grouped and top-level commands', () => {
     Number.MAX_SAFE_INTEGER,
   );
   assert.equal(prerequisiteProperties.abbreviation.pattern, "\\S");
+  const submissionStatus = getCommandSpec('submission.status');
+  assert.deepEqual(submissionStatus.input_schema.anyOf, [
+    { required: ['task_definition_id'] },
+    { required: ['abbreviation'] },
+  ]);
+  assert.deepEqual(
+    submissionStatus.input_schema.properties,
+    prerequisites.input_schema.properties,
+  );
+  const submissionOutput = submissionStatus.output_schema as Record<string, unknown>;
+  const submissionOutputProperties = submissionOutput.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  assert.equal(submissionOutput.type, 'object');
+  assert.equal(submissionOutput.additionalProperties, false);
+  assert.equal(submissionOutputProperties.pdf_state.enum.join(','), 'unavailable,processing,ready');
+  assert.deepEqual(submissionOutput.required, [
+    'project_id',
+    'unit_id',
+    'unit_code',
+    'task_definition_id',
+    'task_instance_id',
+    'abbreviation',
+    'instantiated',
+    'has_pdf',
+    'processing_pdf',
+    'pdf_state',
+    'submission_date',
+    'task_status',
+    'submission_observed',
+  ]);
+  assert.deepEqual(
+    submissionStatus.output_schema,
+    z.toJSONSchema(agentSubmissionStatusOutputSchema),
+  );
   assert.throws(() => getCommandSpec('missing.command'), /Unknown Agent command/);
 });
