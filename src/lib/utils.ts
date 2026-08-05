@@ -165,26 +165,61 @@ export async function promptHidden(question: string): Promise<string> {
 }
 
 /** Open URL in platform-default browser without blocking current process. */
-export function openExternal(url: string): boolean {
-  const platform = process.platform;
-  let command: string;
-  let args: string[];
+export interface ExternalOpenCommand {
+  readonly command: string;
+  readonly args: readonly string[];
+}
 
+function validateExternalUrl(rawUrl: string): string {
+  const candidate = rawUrl.trim();
+  if (
+    /[\u0000-\u001f\u007f]/u.test(candidate) ||
+    /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu.test(candidate)
+  ) {
+    throw new Error('External URL must not contain control characters.');
+  }
+
+  const parsed = new URL(candidate);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('External URL must use HTTP(S).');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('External URL must not include embedded credentials.');
+  }
+  return parsed.toString();
+}
+
+/** Resolve a safe, shell-free platform opener command for a URL. */
+export function resolveExternalOpenCommand(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+): ExternalOpenCommand {
+  const safeUrl = validateExternalUrl(url);
   if (platform === 'darwin') {
-    command = 'open';
-    args = [url];
-  } else if (platform === 'win32') {
-    command = 'cmd';
-    args = ['/c', 'start', '', url];
-  } else {
-    command = 'xdg-open';
-    args = [url];
+    return { command: 'open', args: [safeUrl] };
+  }
+  if (platform === 'win32') {
+    return {
+      command: 'rundll32.exe',
+      args: ['url.dll,FileProtocolHandler', safeUrl],
+    };
+  }
+  return { command: 'xdg-open', args: [safeUrl] };
+}
+
+export function openExternal(url: string): boolean {
+  let opener: ExternalOpenCommand;
+  try {
+    opener = resolveExternalOpenCommand(url);
+  } catch {
+    return false;
   }
 
   try {
-    const child = spawn(command, args, {
+    const child = spawn(opener.command, [...opener.args], {
       detached: true,
       stdio: 'ignore',
+      shell: false,
     });
     child.unref();
     return true;
