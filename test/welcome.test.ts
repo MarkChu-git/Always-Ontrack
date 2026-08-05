@@ -1,6 +1,10 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { getWelcomeMenuItems, parseWelcomeSelection } from '../src/lib/welcome.js';
+import {
+  buildExternalArtifactAuthorizationArgs,
+  getWelcomeMenuItems,
+  parseWelcomeSelection,
+} from '../src/lib/welcome.js';
 
 test('welcome menu ids are stable and sorted', () => {
   const items = getWelcomeMenuItems();
@@ -27,4 +31,19 @@ test('parseWelcomeSelection rejects invalid values', () => {
   assert.equal(parseWelcomeSelection('abc', [1, 2, 3]), null);
   assert.equal(parseWelcomeSelection('3abc', [1, 2, 3]), null);
   assert.equal(parseWelcomeSelection('99', [1, 2, 3]), null);
+});
+
+test('guided external artifact access requires an exact ALLOW approval', () => {
+  assert.deepEqual(
+    buildExternalArtifactAuthorizationArgs([], 'anything', '--allow-external-file'),
+    [],
+  );
+  assert.deepEqual(
+    buildExternalArtifactAuthorizationArgs(['/outside/report.pdf'], 'ALLOW', '--allow-external-file'),
+    ['--allow-external-file'],
+  );
+  assert.throws(
+    () => buildExternalArtifactAuthorizationArgs(['/outside/report.pdf'], 'allow', '--allow-external-file'),
+    /not authorized/,
+  );
 });

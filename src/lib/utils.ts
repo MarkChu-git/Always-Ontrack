@@ -1,8 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type {
   FeedbackItem,
   ProjectSummary,
@@ -14,6 +13,7 @@ import type {
 import { getAgentOutputContext, wrapAgentOutput } from './agent-protocol.js';
 import { buildStudentTaskRows } from './student-task-view.js';
 import type { StudentTaskRow } from './student-task-view.js';
+import { writeArtifactFile } from './artifact-safety.js';
 
 /**
  * Cross-cutting CLI helpers:
@@ -1082,17 +1082,24 @@ export function resolveDownloadDir(outDir?: string, cwd: string = process.cwd())
 }
 
 /** Ensure output directory exists, then persist binary PDF bytes to disk. */
+export interface PdfWriteOptions {
+  readonly allowExternalDir?: boolean;
+  readonly maxBytes?: number;
+}
+
 export async function writePdfFile(
   buffer: Buffer,
   filename: string,
   outDir?: string,
   cwd: string = process.cwd(),
+  options: PdfWriteOptions = {},
 ): Promise<string> {
-  const dir = resolveDownloadDir(outDir, cwd);
-  await mkdir(dir, { recursive: true });
-  const filePath = join(dir, filename);
-  await writeFile(filePath, buffer);
-  return filePath;
+  return writeArtifactFile(buffer, filename, {
+    root: cwd,
+    outDir,
+    allowExternal: options.allowExternalDir,
+    maxBytes: options.maxBytes,
+  });
 }
 
 /** Resolve feedback timestamp from known API field variants. */

@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import { OnTrackApiClient } from './lib/api.js';
 import {
@@ -24,7 +24,17 @@ import {
 import type { MfaMethodOption } from './lib/auto-login.js';
 import type { LoginCredentials } from './lib/auto-login.js';
 import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
-import { getWelcomeMenuItems, parseWelcomeSelection } from './lib/welcome.js';
+import {
+  ArtifactSafetyError,
+  findExternalArtifactPaths,
+  inspectUploadFile,
+  readUploadArtifact,
+} from './lib/artifact-safety.js';
+import {
+  buildExternalArtifactAuthorizationArgs,
+  getWelcomeMenuItems,
+  parseWelcomeSelection,
+} from './lib/welcome.js';
 import {
   buildStudentTaskRows,
   buildStudentTaskViews,
@@ -210,10 +220,10 @@ Usage:
   ontrack plan reset --project-id ID [--confirm] [--idempotency-key KEY] [--json]
   ontrack feedback list --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack feedback watch --project-id ID (--task-definition-id ID | --abbr ABBR) [--interval SEC] [--history N] [--json]
-  ontrack pdf task --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
-  ontrack pdf submission --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
-  ontrack submission upload --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--idempotency-key KEY] [--json]
-  ontrack submission upload-new-files --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--idempotency-key KEY] [--json]
+  ontrack pdf task --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--allow-external-dir] [--json]
+  ontrack pdf submission --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--allow-external-dir] [--json]
+  ontrack submission upload --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--allow-external-file] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--idempotency-key KEY] [--json]
+  ontrack submission upload-new-files --project-id ID (--task-definition-id ID | --abbr ABBR) --file PATH [--file PATH|fileN=PATH ...] [--allow-external-file] [--trigger TRIGGER] [--comment TEXT] [--confirm] [--idempotency-key KEY] [--json]
   ontrack submission status --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
 
@@ -229,8 +239,10 @@ Notes:
   - If Chromium runtime is missing, install it manually through a reviewed dependency-management workflow.
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
   - PDF commands save files into ./downloads by default.
+  - PDF output directories are workspace-scoped and symlink-safe by default; use --allow-external-dir only for explicit external output.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
+  - Upload files are regular, non-symlink, non-hard-link files capped at 50 MiB each; use --allow-external-file only for explicit external input.
   - Planner and submission writes are dry-runs unless --confirm is supplied.
   - Confirmed Agent writes also require --idempotency-key; completed keys replay safely and unknown outcomes stay blocked.
   - Agent callers should use --output agent-json for the versioned ontrack.agent/v1 envelope.
@@ -935,13 +947,37 @@ async function promptUploadFiles(): Promise<string[]> {
   const files: string[] = [];
   while (true) {
     const label = files.length === 0 ? 'File path: ' : 'Additional file path: ';
-    files.push(await promptRequired(label));
+    files.push(expandHomePath(await promptRequired(label)));
     const more = (await prompt('Add another file? [y/N]: ')).trim();
     if (!/^(y|yes)$/i.test(more)) {
       break;
     }
   }
   return files;
+}
+
+/** Ask for explicit human approval before a guided flow crosses the workspace boundary. */
+async function promptExternalArtifactAuthorization(
+  paths: readonly string[],
+  flag: '--allow-external-file' | '--allow-external-dir',
+  artifactLabel: string,
+): Promise<string[]> {
+  const externalPaths = findExternalArtifactPaths(paths, process.cwd());
+  if (externalPaths.length === 0) {
+    return [];
+  }
+
+  renderTerminalPanel(
+    'EXTERNAL PATH AUTHORIZATION',
+    [
+      `${externalPaths.length} ${artifactLabel} path(s) resolve outside the current workspace.`,
+      ...externalPaths.map((path) => `- ${path}`),
+      'External paths remain subject to regular-file, symlink, hard-link, and size checks.',
+    ],
+    'warn',
+  );
+  const approval = await prompt('Type ALLOW to authorize these external paths: ');
+  return buildExternalArtifactAuthorizationArgs(externalPaths, approval, flag);
 }
 
 /** Execute a launcher action id by delegating to command handlers. */
@@ -1015,7 +1051,15 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         { allowBatch: true, allowAllTasks: true },
       );
       const outDir = await promptGuidedOutputDirectory();
-      await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
+      const authorization = await promptExternalArtifactAuthorization(
+        outDir ? [outDir] : [],
+        '--allow-external-dir',
+        'output directory',
+      );
+      await handlePdfDownload(
+        [...selector, ...optionalFlagArgs('--out-dir', outDir), ...authorization],
+        'task',
+      );
       return;
     }
     case 12: {
@@ -1025,7 +1069,15 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         { allowBatch: true, allowAllTasks: true },
       );
       const outDir = await promptGuidedOutputDirectory();
-      await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
+      const authorization = await promptExternalArtifactAuthorization(
+        outDir ? [outDir] : [],
+        '--allow-external-dir',
+        'output directory',
+      );
+      await handlePdfDownload(
+        [...selector, ...optionalFlagArgs('--out-dir', outDir), ...authorization],
+        'submission',
+      );
       return;
     }
     case 13: {
@@ -1034,12 +1086,18 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         'Upload required submission files for the selected task.',
       );
       const files = await promptUploadFiles();
+      const authorization = await promptExternalArtifactAuthorization(
+        files,
+        '--allow-external-file',
+        'upload file',
+      );
       const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
       const comment = await prompt('Comment (optional): ');
       const confirmation = await prompt('Type CONFIRM to dispatch this upload (otherwise dry-run): ');
       const args = [
         ...selector,
         ...files.flatMap((file) => ['--file', file]),
+        ...authorization,
         ...optionalFlagArgs('--trigger', trigger),
         ...optionalFlagArgs('--comment', comment),
         ...(confirmation.trim() === 'CONFIRM' ? ['--confirm'] : []),
@@ -1053,6 +1111,11 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         'Attach extra files to an existing submission.',
       );
       const files = await promptUploadFiles();
+      const authorization = await promptExternalArtifactAuthorization(
+        files,
+        '--allow-external-file',
+        'upload file',
+      );
       const trigger = await prompt('Trigger (need_help/ready_for_feedback, optional): ');
       const comment = await prompt('Comment (optional): ');
       const confirmation = await prompt(
@@ -1061,6 +1124,7 @@ async function runWelcomeAction(actionId: number): Promise<void> {
       const args = [
         ...selector,
         ...files.flatMap((file) => ['--file', file]),
+        ...authorization,
         ...optionalFlagArgs('--trigger', trigger),
         ...optionalFlagArgs('--comment', comment),
         ...(confirmation.trim() === 'CONFIRM' ? ['--confirm'] : []),
@@ -1398,8 +1462,18 @@ function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | un
   throw new Error('--trigger must be one of: need_help, ready_for_feedback.');
 }
 
+/** Preserve actionable artifact policy failures without exposing local paths or raw I/O errors. */
+function safeArtifactFailure(error: unknown): string {
+  return error instanceof ArtifactSafetyError
+    ? error.message
+    : 'Artifact access could not be completed safely.';
+}
+
 /** Read upload file bytes and annotate with server-only key + filename metadata. */
-async function readUploadFiles(assignments: Array<{ key: string; localPath: string }>): Promise<
+async function readUploadFiles(
+  assignments: Array<{ key: string; localPath: string }>,
+  allowExternalFile: boolean,
+): Promise<
   Array<{
     key: string;
     filename: string;
@@ -1407,18 +1481,21 @@ async function readUploadFiles(assignments: Array<{ key: string; localPath: stri
   }>
 > {
   return Promise.all(
-    assignments.map(async (assignment) => {
-      const absolutePath = resolve(process.cwd(), assignment.localPath);
+    assignments.map(async (assignment, index) => {
       try {
-        const content = await readFile(absolutePath);
+        const artifact = await readUploadArtifact(assignment.localPath, {
+          root: process.cwd(),
+          allowExternal: allowExternalFile,
+        });
         return {
           key: assignment.key,
-          filename: basename(absolutePath),
-          content,
+          filename: artifact.filename,
+          content: artifact.content,
         };
       } catch (error) {
-        void error;
-        throw new Error(`Failed to read the local file for evidence slot "${assignment.key}".`);
+        throw new Error(
+          `Failed to read upload file ${index + 1}: ${safeArtifactFailure(error)}`,
+        );
       }
     }),
   );
@@ -3674,6 +3751,7 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
   });
   const resolvedItems = resolveTaskBatchSelector(projects, selector);
   const outDir = getFlagValue(args, '--out-dir');
+  const allowExternalDir = hasFlag(args, '--allow-external-dir');
   const asJson = hasFlag(args, '--json');
 
   const downloads: Array<{
@@ -3721,7 +3799,13 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
 
     // Persist with deterministic filename format for easy scripting and lookup.
     const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
-    const filePath = await writePdfFile(download.buffer, filename, outDir);
+    const filePath = await writePdfFile(
+      download.buffer,
+      filename,
+      outDir,
+      process.cwd(),
+      { allowExternalDir },
+    );
     downloads.push({
       task: resolved.abbr,
       unit: resolved.unitCode ?? '-',
@@ -3775,6 +3859,7 @@ async function handleSubmissionUpload(
   });
   const resolved = resolveTaskSelector(projects, selector);
   const fileInputs = parseUploadFileSpecs(args) as UploadFileInput[];
+  const allowExternalFile = hasFlag(args, '--allow-external-file');
   const explicitTrigger = parseSubmissionTrigger(parseOptionalString(args, '--trigger'));
   const trigger =
     explicitTrigger ??
@@ -3788,19 +3873,21 @@ async function handleSubmissionUpload(
   );
   const inputDetails = await Promise.all(
     fileInputs.map(async (input, index) => {
-      const absolutePath = resolve(process.cwd(), input.path);
-      let size: number;
       try {
-        size = (await stat(absolutePath)).size;
+        const artifact = await inspectUploadFile(input.path, {
+          root: process.cwd(),
+          allowExternal: allowExternalFile,
+        });
+        return {
+          key: input.key,
+          localPath: input.path,
+          size: artifact.size,
+        };
       } catch (error) {
-        void error;
-        throw new Error(`Failed to inspect upload file ${index + 1}.`);
+        throw new Error(
+          `Failed to inspect upload file ${index + 1}: ${safeArtifactFailure(error)}`,
+        );
       }
-      return {
-        key: input.key,
-        localPath: input.path,
-        size,
-      };
     }),
   );
   const prepared = prepareSubmission(view, inputDetails);
@@ -3853,7 +3940,7 @@ async function handleSubmissionUpload(
     return;
   }
 
-  const files = await readUploadFiles(prepared.files);
+  const files = await readUploadFiles(prepared.files, allowExternalFile);
   const command =
     mode === 'upload'
       ? 'submission.upload'
