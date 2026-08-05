@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -401,6 +401,106 @@ test("agent call task.show uses definition-first tasks when project instances ar
   }
 });
 
+test("agent call task.resources downloads definition resources for an uninstantiated task", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-resources-"));
+  const outputRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-resources-output-"));
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        code: "FIT0001",
+        task_definitions: [{ id: 501, abbreviation: "D4", name: "Design task" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/55/task_definitions/501/task_resources.json?as_attachment=true") {
+      response.setHeader("content-type", "application/zip");
+      response.setHeader(
+        "content-disposition",
+        "attachment; filename=FIT0001-D4-TaskResources.zip",
+      );
+      response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+        refreshedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      [
+        "agent",
+        "call",
+        "task.resources",
+        "--input-json",
+        JSON.stringify({
+          project_id: 87,
+          abbreviation: ["D4"],
+          out_dir: outputRoot,
+          allow_external_dir: true,
+        }),
+      ],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, `${result.stderr}\n${result.stdout}`);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "task.resources");
+    assert.equal(envelope.status, "success");
+    const data = envelope.data as Record<string, unknown>;
+    assert.equal(data.project_id, 87);
+    assert.equal(data.selected_count, 1);
+    assert.deepEqual(data.unavailable, []);
+    const downloads = data.downloads as Array<Record<string, unknown>>;
+    assert.equal(downloads.length, 1);
+    assert.equal(downloads[0].task_definition_id, 501);
+    assert.equal(downloads[0].instantiated, false);
+    const artifact = downloads[0].artifact as Record<string, unknown>;
+    assert.equal(artifact.filename, "FIT0001-D4-TaskResources.zip");
+    assert.equal(artifact.bytes, 4);
+    assert.match(String(artifact.sha256), /^[a-f0-9]{64}$/u);
+    const outputPath = join(outputRoot, "FIT0001-D4-TaskResources.zip");
+    assert.equal(await stat(outputPath).then(() => true), true);
+    assert.deepEqual([...await readFile(outputPath)], [0x50, 0x4b, 0x03, 0x04]);
+    assert.equal(result.stdout.includes("fixture-token"), false);
+    assert.equal(result.stdout.includes(configRoot), false);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+    await rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
 test("agent list and describe are offline projections of the executable commands", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-discovery-"));
   try {
@@ -413,7 +513,7 @@ test("agent list and describe are offline projections of the executable commands
       .commands as Array<Record<string, unknown>>;
     assert.deepEqual(
       commands.map((command) => command.path),
-      ["auth.status", "task.show"],
+      ["auth.status", "task.show", "task.resources"],
     );
 
     const described = await runCli(
@@ -428,6 +528,32 @@ test("agent list and describe are offline projections of the executable commands
     const inputSchema = data.input_schema as Record<string, unknown>;
     assert.ok(Array.isArray(inputSchema.anyOf));
     assert.match(JSON.stringify(inputSchema), /\\\\S/);
+
+    const resources = await runCli(
+      ["agent", "describe", "task.resources"],
+      configRoot,
+    );
+    assert.equal(resources.exitCode, 0, resources.stderr);
+    const resourceData = (JSON.parse(resources.stdout).data ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const resourceInput = resourceData.input_schema as Record<string, unknown>;
+    const resourceSelectors = resourceInput.anyOf as Array<Record<string, unknown>>;
+    assert.equal(resourceSelectors.length, 3);
+    assert.equal(
+      resourceSelectors.some((schema) =>
+        (schema.required as string[] | undefined)?.includes("task_definition_id"),
+      ),
+      true,
+    );
+    assert.equal(
+      resourceSelectors.some((schema) =>
+        (schema.required as string[] | undefined)?.includes("abbreviation"),
+      ),
+      true,
+    );
+    assert.equal(JSON.stringify(resourceInput).includes("all_tasks"), true);
 
     const missing = await runCli(
       ["agent", "describe", "missing.command"],

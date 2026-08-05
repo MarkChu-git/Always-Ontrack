@@ -76,6 +76,7 @@ function spec(options: {
   idempotency?: AgentCommandSpec['idempotency'];
   streaming?: boolean;
   fields?: Readonly<Record<string, CommandInputField>>;
+  inputSchema?: Readonly<Record<string, unknown>>;
 }): AgentCommandSpec {
   const fields = options.fields ?? {};
   const risk = options.risk ?? 'read';
@@ -91,7 +92,7 @@ function spec(options: {
       (risk === 'write' ? 'unknown_outcome_guarded' : 'not_applicable'),
     streaming: options.streaming ?? false,
     input_fields: fields,
-    input_schema: jsonSchemaForFields(fields),
+    input_schema: options.inputSchema ?? jsonSchemaForFields(fields),
     output_schema: { type: ['object', 'array', 'null'] },
   };
 }
@@ -106,6 +107,48 @@ const oneTaskSelector = {
   project_id: integerField('--project-id', true),
   task_definition_id: integerField('--task-definition-id'),
   abbreviation: stringField('--abbr'),
+};
+
+const taskResourceFields = {
+  ...jsonTaskSelector,
+  out_dir: stringField('--out-dir'),
+  allow_external_dir: booleanField('--allow-external-dir'),
+};
+const taskResourceInputBaseSchema = jsonSchemaForFields(taskResourceFields);
+const taskResourceInputSchema = {
+  ...taskResourceInputBaseSchema,
+  properties: {
+    ...(taskResourceInputBaseSchema.properties as Readonly<Record<string, unknown>>),
+    abbreviation: {
+      type: 'array',
+      items: { type: 'string', minLength: 1, maxLength: 64 },
+      minItems: 1,
+      maxItems: 32,
+    },
+    out_dir: { type: 'string', minLength: 1, maxLength: 4096 },
+  },
+  allOf: [
+    {
+      anyOf: [
+        { required: ['task_definition_id'] },
+        { required: ['abbreviation'] },
+        {
+          required: ['all_tasks'],
+          properties: { all_tasks: { const: true } },
+        },
+      ],
+    },
+    {
+      not: {
+        required: ['all_tasks'],
+        properties: { all_tasks: { const: true } },
+        anyOf: [
+          { required: ['task_definition_id'] },
+          { required: ['abbreviation'] },
+        ],
+      },
+    },
+  ],
 };
 
 export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
@@ -140,6 +183,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'inbox.list', description: 'List inbox tasks.', fields: { unit_id: integerField('--unit-id'), status: stringField('--status') } }),
   spec({ path: 'task.show', description: 'Read definition-first student task views.', fields: jsonTaskSelector }),
   spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: oneTaskSelector }),
+  spec({ path: 'task.resources', description: 'Download task resource archives with artifact metadata.', fields: taskResourceFields, inputSchema: taskResourceInputSchema }),
   spec({ path: 'plan.show', description: 'Read the student plan.', fields: { project_id: integerField('--project-id', true), include_beyond_target: booleanField('--include-beyond-target') } }),
   spec({ path: 'plan.set_dates', description: 'Prepare or apply personal task dates.', risk: 'write', idempotency: 'client_guarded', fields: { ...oneTaskSelector, start: stringField('--start', true), target: stringField('--target', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'plan.reset', description: 'Prepare or reset personal project dates.', risk: 'write', idempotency: 'client_guarded', fields: { project_id: integerField('--project-id', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
@@ -173,7 +217,7 @@ const GROUPED_PATHS: Readonly<Record<string, Readonly<Record<string, string>>>> 
   },
   project: { show: 'project.show' },
   unit: { show: 'unit.show', tasks: 'unit.tasks' },
-  task: { show: 'task.show', prerequisites: 'task.prerequisites' },
+  task: { show: 'task.show', prerequisites: 'task.prerequisites', resources: 'task.resources' },
   plan: { show: 'plan.show', 'set-dates': 'plan.set_dates', reset: 'plan.reset' },
   feedback: { list: 'feedback.list', watch: 'feedback.watch' },
   pdf: { task: 'pdf.task', submission: 'pdf.submission' },

@@ -1,6 +1,6 @@
 # OnTrack CLI Agent-Ready 实施计划
 
-状态：0.5.0 已发布；0.5.1 加入隔离的 Lightpanda 公共兼容性实验与安全加固
+状态：0.5.1 已发布；task.resources stacked slice 已实现，待完成审查与合并
 分支：`codex/agent-ready-runtime`
 协议目标：`ontrack.agent/v1`
 
@@ -329,14 +329,18 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
+ontrack agent call task.resources \
+  --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
 
 该接口直接把 bounded JSON object 交给带 Zod input/output 的 executable
 command definition，不再经过 JSON → 人类 argv → switch handler。每次调用只向
 stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
 `--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status` 和
-definition-first `task.show`；`task.resources` 等后续命令必须在独立 stacked PR
-中完成真实合同、artifact 安全和代码审查后再加入。
+definition-first `task.show` 与 `task.resources` 已在独立 stacked slice 中完成真实
+OnTrack 路由、ZIP magic 校验、definition-first 未实例化任务、artifact safety、
+native typed schema/handler、human JSON 兼容路径和批量 unavailable contract；合并前仍需
+完成完整验证和三轴代码审查。
 
 Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
 和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接

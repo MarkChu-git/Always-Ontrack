@@ -148,6 +148,22 @@ export interface DownloadResult {
   contentDisposition?: string;
 }
 
+/** Raised when OnTrack returns a successful response without the requested file. */
+export class UnavailableDownloadError extends Error {
+  constructor() {
+    super('Requested download is not available.');
+    this.name = 'UnavailableDownloadError';
+  }
+}
+
+/** Raised when a successful task-resource response is not a ZIP archive. */
+export class InvalidDownloadFormatError extends Error {
+  constructor() {
+    super('OnTrack returned a non-ZIP task resource payload.');
+    this.name = 'InvalidDownloadFormatError';
+  }
+}
+
 /** Probe response payload used by `discover --probe`. */
 export interface ProbeResult {
   endpoint: string;
@@ -228,6 +244,32 @@ async function requestBinary(
     contentType: response.headers.get('content-type') || 'application/octet-stream',
     contentDisposition: response.headers.get('content-disposition') || undefined,
   };
+}
+
+/** Reject OnTrack's HTTP-200 placeholder when a requested file has no backing data. */
+function requireAvailableDownload(download: DownloadResult): DownloadResult {
+  const disposition = download.contentDisposition ?? '';
+  const missingFile =
+    /(?:^|;)\s*filename\*?\s*=\s*(?:UTF-8'[^']*)?["']?FileNotFound\.(?:pdf|zip)["']?(?:\s*;|$)/i;
+  if (missingFile.test(disposition)) {
+    throw new UnavailableDownloadError();
+  }
+  return download;
+}
+
+/** Validate the archive signature before persisting a remote response as a ZIP. */
+function requireZipDownload(download: DownloadResult): DownloadResult {
+  const [first, second, third, fourth] = download.buffer;
+  const isZip =
+    first === 0x50 &&
+    second === 0x4b &&
+    ((third === 0x03 && fourth === 0x04) ||
+      (third === 0x05 && fourth === 0x06) ||
+      (third === 0x07 && fourth === 0x08));
+  if (!isZip) {
+    throw new InvalidDownloadFormatError();
+  }
+  return download;
 }
 
 /** Read a binary response incrementally and stop before an oversized body is buffered. */
@@ -653,6 +695,32 @@ export class OnTrackApiClient {
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
     );
+  }
+
+  /** Download the ZIP archive of resources attached to a task definition. */
+  downloadTaskResources(
+    session: SessionData,
+    unitId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return requestBinary(
+      withApiPath(
+        this.baseUrl,
+        `units/${unitId}/task_definitions/${taskDefId}/task_resources.json?as_attachment=true`,
+      ),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/zip, application/octet-stream, */*',
+          ...authHeaders(this.activeSession(session)),
+        },
+      },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    )
+      .then(requireAvailableDownload)
+      .then(requireZipDownload);
   }
 
   /** Download submission snapshot PDF. */

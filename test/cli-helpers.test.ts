@@ -4,7 +4,9 @@ import { resolve } from 'node:path';
 import type { FeedbackItem, ProjectSummary } from '../src/lib/types.js';
 import {
   buildPdfFilename,
+  buildTaskResourceFilename,
   diffWatchStates,
+  exceedsByteBudget,
   feedbackIdentity,
   getFlagValues,
   getFeedbackTimestamp,
@@ -251,6 +253,29 @@ test('buildPdfFilename and resolveDownloadDir follow defaults', () => {
 
   const outDir = resolveDownloadDir(undefined, '/tmp/workspace');
   assert.equal(outDir, resolve('/tmp/workspace/downloads'));
+});
+
+test('buildTaskResourceFilename follows the OnTrack student download naming contract', () => {
+  assert.equal(
+    buildTaskResourceFilename('FIT2004', 'T1'),
+    'FIT2004-T1-TaskResources.zip',
+  );
+  assert.equal(
+    buildTaskResourceFilename('FIT 2004', 'Task 1'),
+    'FIT_2004-Task_1-TaskResources.zip',
+  );
+  const bounded = buildTaskResourceFilename('U'.repeat(500), 'T'.repeat(500));
+  assert.equal(bounded.length <= 255, true);
+  assert.equal(
+    buildTaskResourceFilename('FIT\u001b[31m', 'P1').includes('\u001b'),
+    false,
+  );
+});
+
+test('exceedsByteBudget enforces an aggregate download cap', () => {
+  assert.equal(exceedsByteBudget(4, 5, 10), false);
+  assert.equal(exceedsByteBudget(4, 6, 10), false);
+  assert.equal(exceedsByteBudget(4, 7, 10), true);
 });
 
 test('diffWatchStates emits status/due/new_feedback deltas', () => {

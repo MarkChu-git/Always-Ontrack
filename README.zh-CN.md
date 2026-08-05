@@ -58,11 +58,13 @@ ontrack <command>
   - `tasks`
   - `inbox`
   - `task show`
+  - `task resources`
 - 反馈与实时跟踪
   - `feedback list`
   - `feedback watch`
   - `watch`
 - 文件能力
+  - `task resources`
   - `pdf task`
   - `pdf submission`
   - `submission upload`
@@ -137,13 +139,17 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
+ontrack agent call task.resources \
+  --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
 
 `task.show` 使用 definition-first 的 Student Task View，因此即使项目的
 `tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化
 任务会明确标记，不会猜测 instance id。也可以使用 `--input -` 读取有大小上限的
-非交互 stdin。当前原生接口覆盖 `auth.status` 与 `task.show`，后续命令会按独立的
-垂直切片逐个审查后加入。
+非交互 stdin。当前原生接口覆盖 `auth.status`、`task.show` 与 `task.resources`，
+后续命令会按独立的垂直切片逐个审查后加入。`task.resources` 返回有边界的
+artifact 元数据（文件名、相对路径、字节数、content type、SHA-256），资源不可用时
+会稳定报告且不会写入占位文件。
 
 更广泛的旧命令仍通过 `--output agent-json` compatibility Adapter 提供；裸
 `--json` 继续保持原有 raw shape。
@@ -166,7 +172,7 @@ shape。
 
 ```bash
 ontrack task show \
-  --input-json '{"project_id":87,"abbreviation":"D4"}' \
+  --input-json '{"project_id":87,"abbreviation":["D4"]}' \
   --output agent-json
 ```
 
@@ -475,7 +481,7 @@ ontrack logout
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show` |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`task.show`、`task.resources` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |
@@ -502,6 +508,7 @@ ontrack logout
 | `ontrack unit tasks --unit-id <id>` | 查看某门课的任务 | 按 unit 聚合 |
 | `ontrack inbox` | 读取 inbox / fallback task list | 优先走 `/units/:id/tasks/inbox`，失败时回退 |
 | `ontrack task show --project-id <id> --abbr <abbr>` | 查看单个或多个任务 | 支持重复/逗号 selector 与 `--all-tasks` |
+| `ontrack task resources --project-id <id> --abbr <abbr>` | 下载 task resource 压缩包 | 使用真实 `/units/:unitId/task_definitions/:taskDefId/task_resources.json?as_attachment=true` 路由；definition-first、支持批量；默认生成 `FIT0001-P1-TaskResources.zip`；外部目录必须显式 `--allow-external-dir` |
 
 ### 反馈与实时跟踪
 
