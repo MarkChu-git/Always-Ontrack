@@ -9,6 +9,8 @@ import {
 import {
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
+  agentUnitShowInputSchema,
+  agentUnitShowOutputSchema,
   createNativeAgentCommands,
 } from '../src/lib/agent-commands.js';
 import { getCommandSpec } from '../src/lib/command-spec.js';
@@ -233,6 +235,18 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   const commands = createNativeAgentCommands({
     authStatus: async () => ({ status: 'signed_out', baseUrl: 'https://example.test/api' }),
     projectsList: async () => ({ count: 0, projects: [] }),
+    unitShow: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      unit_code: 'FIT0001',
+      unit_name: 'Foundations',
+      target_grade: 1,
+      submitted_grade: null,
+      enrolled: true,
+      active: true,
+      task_definition_count: 0,
+    }),
+    tasksList: async () => ({ count: 0, tasks: [] }),
     taskShow: async () => ({ project_id: 1, count: 0, tasks: [] }),
     taskPrerequisites: async () => ({
       project_id: 1,
@@ -276,6 +290,7 @@ test('native definitions keep safety metadata aligned with the compatibility pro
 
   assert.equal(commands.some((command) => command.path === 'plan.show'), true);
   assert.equal(commands.some((command) => command.path === 'projects.list'), true);
+  assert.equal(commands.some((command) => command.path === 'unit.show'), true);
   assert.equal(commands.some((command) => command.path === 'submission.status'), true);
 
   for (const command of commands) {
@@ -332,6 +347,10 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   assert.ok(plan);
   assert.deepEqual(z.toJSONSchema(plan.input), z.toJSONSchema(agentPlanShowInputSchema));
   assert.deepEqual(z.toJSONSchema(plan.output), z.toJSONSchema(agentPlanShowOutputSchema));
+  const unit = commands.find((command) => command.path === 'unit.show');
+  assert.ok(unit);
+  assert.deepEqual(z.toJSONSchema(unit.input), z.toJSONSchema(agentUnitShowInputSchema));
+  assert.deepEqual(z.toJSONSchema(unit.output), z.toJSONSchema(agentUnitShowOutputSchema));
   assert.deepEqual(plan.policy, {
     risk: 'read',
     auth: 'ensure',

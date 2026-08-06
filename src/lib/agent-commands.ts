@@ -45,6 +45,28 @@ export const agentProjectsListOutputSchema = z
 export type AgentProjectsListInput = z.output<typeof agentProjectsListInputSchema>;
 export type AgentProjectsListOutput = z.output<typeof agentProjectsListOutputSchema>;
 
+export const agentUnitShowInputSchema = z
+  .object({
+    project_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  })
+  .strict();
+export const agentUnitShowOutputSchema = z
+  .object({
+    project_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_code: z.string().min(1).max(80).nullable(),
+    unit_name: z.string().min(1).max(512).nullable(),
+    target_grade: z.number().int().nonnegative().nullable(),
+    submitted_grade: z.number().int().nonnegative().nullable(),
+    enrolled: z.boolean().nullable(),
+    active: z.boolean().nullable(),
+    task_definition_count: z.number().int().nonnegative().max(200),
+  })
+  .strict();
+export type AgentUnitShowInput = z.output<typeof agentUnitShowInputSchema>;
+export type AgentUnitShowOutput = z.output<typeof agentUnitShowOutputSchema>;
+
 const agentTaskListSafeText = z
   .string()
   .regex(/\S/u, 'value must contain a non-whitespace character')
@@ -409,6 +431,7 @@ export type AgentAuthStatus = {
 export interface NativeAgentCommandHandlers {
   authStatus(): Promise<AgentAuthStatus>;
   projectsList(): Promise<AgentProjectsListOutput>;
+  unitShow(input: AgentUnitShowInput): Promise<AgentUnitShowOutput>;
   tasksList(input: AgentTasksListInput): Promise<AgentTasksListOutput>;
   taskShow(input: AgentTaskShowInput): Promise<AgentTaskShowOutput>;
   taskPrerequisites(
@@ -462,6 +485,18 @@ export function createNativeAgentCommands(
       input: agentProjectsListInputSchema,
       output: agentProjectsListOutputSchema,
       execute: () => handlers.projectsList(),
+    }),
+    defineAgentCommand({
+      path: 'unit.show',
+      description: 'Read the safe project-scoped Student Unit View.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentUnitShowInputSchema,
+      output: agentUnitShowOutputSchema,
+      execute: (input) => handlers.unitShow(input),
     }),
     defineAgentCommand({
       path: 'tasks.list',

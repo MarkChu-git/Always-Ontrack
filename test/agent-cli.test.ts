@@ -294,6 +294,236 @@ test("native and compatibility tasks.list share a Student Task View catalogue wi
   }
 });
 
+test("native and compatibility unit.show share a safe project-scoped unit view without changing legacy JSON", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-unit-show-"));
+  const sensitiveMarker = "staff-private-marker@example.invalid";
+  const unitPayload = {
+    id: 2001,
+    code: "FIT0001",
+    name: "Foundations",
+    active: true,
+    task_definitions: [{ id: 3001 }, { id: 3002 }],
+    staff: [{ email: sensitiveMarker }],
+    tutorials: [{ id: 4001, students: [{ id: 5001 }]}],
+  };
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    const payload =
+      request.url === "/api/projects/1001"
+        ? {
+            id: 1001,
+            unit: { id: 2001, code: "FIT0001", name: "Foundations" },
+            target_grade: 1,
+            submitted_grade: 0,
+            enrolled: true,
+            student: { email: sensitiveMarker },
+          }
+        : request.url === "/api/units/2001"
+          ? unitPayload
+          : undefined;
+    if (payload === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(payload));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user", role: "student" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+      }),
+      "utf8",
+    );
+
+    const legacy = await runCli(
+      ["unit", "show", "--unit-id", "2001", "--json"],
+      configRoot,
+    );
+    assert.equal(legacy.exitCode, 0, legacy.stderr);
+    assert.deepEqual(JSON.parse(legacy.stdout), unitPayload);
+
+    const compatibility = await runCli(
+      [
+        "unit",
+        "show",
+        "--project-id",
+        "1001",
+        "--unit-id",
+        "2001",
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(compatibility.exitCode, 0, compatibility.stderr);
+    const compatibilityEnvelope = JSON.parse(
+      compatibility.stdout,
+    ) as Record<string, unknown>;
+    assert.equal(compatibilityEnvelope.command, "unit.show");
+    assert.deepEqual(compatibilityEnvelope.data, {
+      project_id: 1001,
+      unit_id: 2001,
+      unit_code: "FIT0001",
+      unit_name: "Foundations",
+      target_grade: 1,
+      submitted_grade: 0,
+      enrolled: true,
+      active: true,
+      task_definition_count: 2,
+    });
+    assert.equal(compatibility.stdout.includes(sensitiveMarker), false);
+    assert.equal(compatibility.stdout.includes("task_definitions"), false);
+    assert.equal(compatibility.stdout.includes("tutorials"), false);
+
+    const native = await runCli(
+      [
+        "agent",
+        "call",
+        "unit.show",
+        "--input-json",
+        '{"project_id":1001,"unit_id":2001}',
+      ],
+      configRoot,
+    );
+    assert.equal(native.exitCode, 0, `${native.stderr}\n${native.stdout}`);
+    assert.equal(native.stderr, "");
+    const nativeEnvelope = JSON.parse(native.stdout) as Record<string, unknown>;
+    assert.equal(nativeEnvelope.command, "unit.show");
+    assert.deepEqual(nativeEnvelope.data, compatibilityEnvelope.data);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("unit.show rejects unscoped, malformed, and mismatched Agent input before remote reads", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-unit-input-"));
+  try {
+    const invocations: string[][] = [
+      ["agent", "call", "unit.show", "--input-json", "{}"],
+      [
+        "agent",
+        "call",
+        "unit.show",
+        "--input-json",
+        '{"project_id":1001,"unknown":true}',
+      ],
+      [
+        "unit",
+        "show",
+        "--unit-id",
+        "2001",
+        "--output",
+        "agent-json",
+      ],
+      ["unit", "show", "--project-id", "0", "--output", "agent-json"],
+    ];
+    for (const args of invocations) {
+      const result = await runCli(args, configRoot);
+      assert.equal(result.exitCode, 2, `${args.join(" ")}\n${result.stdout}`);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(envelope.command, "unit.show");
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "INVALID_ARGUMENT",
+      );
+    }
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("native and compatibility unit.show reject malformed project capabilities before unit reads", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-unit-remote-"));
+  const sensitiveMarker = "student-private-marker@example.invalid";
+  let unitReads = 0;
+  const server = createServer((request, response) => {
+    if (request.url === "/api/projects/1001") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: 1001,
+          unit_id: 2001,
+          targetGrade: 0,
+          target_grade: 1,
+          student: { email: sensitiveMarker },
+        }),
+      );
+      return;
+    }
+    if (request.url === "/api/units/2001") {
+      unitReads += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 2001, task_definitions: [] }));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user", role: "student" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+      }),
+      "utf8",
+    );
+
+    for (const args of [
+      [
+        "agent",
+        "call",
+        "unit.show",
+        "--input-json",
+        '{"project_id":1001}',
+      ],
+      ["unit", "show", "--project-id", "1001", "--output", "agent-json"],
+    ]) {
+      const result = await runCli(args, configRoot);
+      assert.equal(result.exitCode, 7, `${args.join(" ")}\n${result.stdout}`);
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(envelope.command, "unit.show");
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "REMOTE_UNAVAILABLE",
+      );
+      assert.equal(result.stdout.includes(sensitiveMarker), false);
+      assert.equal(result.stdout.includes("targetGrade"), false);
+    }
+    assert.equal(unitReads, 0);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("tasks.list rejects invalid or unscoped Agent input before authentication", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-tasks-input-"));
   try {
@@ -1915,6 +2145,7 @@ test("agent list and describe are offline projections of the executable commands
       [
         "auth.status",
         "projects.list",
+        "unit.show",
         "tasks.list",
         "task.show",
         "task.prerequisites",
@@ -1938,6 +2169,19 @@ test("agent list and describe are offline projections of the executable commands
     });
     assert.match(JSON.stringify(projectData.output_schema), /portfolio_available/);
     assert.equal(JSON.stringify(projectData.output_schema).includes("user_id"), false);
+
+    const unit = await runCli(
+      ["agent", "describe", "unit.show"],
+      configRoot,
+    );
+    assert.equal(unit.exitCode, 0, unit.stderr);
+    const unitData = JSON.parse(unit.stdout).data as Record<string, unknown>;
+    assert.deepEqual(
+      (unitData.input_schema as Record<string, unknown>).required,
+      ["project_id"],
+    );
+    assert.match(JSON.stringify(unitData.output_schema), /task_definition_count/);
+    assert.equal(JSON.stringify(unitData.output_schema).includes("staff"), false);
 
     const taskDirectory = await runCli(
       ["agent", "describe", "tasks.list"],

@@ -4,6 +4,8 @@ import {
   AGENT_TASKS_LIST_MAX_STATUS_LENGTH,
   agentProjectsListInputSchema,
   agentProjectsListOutputSchema,
+  agentUnitShowInputSchema,
+  agentUnitShowOutputSchema,
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
   agentPlanShowInputSchema,
@@ -248,7 +250,26 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   }),
   spec({ path: 'project.show', description: 'Read one project.', fields: { project_id: integerField('--project-id', true) } }),
   spec({ path: 'units.list', description: 'List units visible to the current identity.' }),
-  spec({ path: 'unit.show', description: 'Read one unit.', fields: { unit_id: integerField('--unit-id', true) } }),
+  spec({
+    path: 'unit.show',
+    description: 'Read the safe project-scoped Student Unit View.',
+    fields: {
+      project_id: integerField('--project-id', true, {
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      }),
+      unit_id: integerField('--unit-id', false, {
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      }),
+    },
+    inputSchema: z.toJSONSchema(agentUnitShowInputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+    outputSchema: z.toJSONSchema(agentUnitShowOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({ path: 'unit.tasks', description: 'List tasks for one unit.', fields: { unit_id: integerField('--unit-id', true), status: stringField('--status') } }),
   spec({
     path: 'tasks.list',

@@ -404,7 +404,7 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `whoami --json` | 已修复 | - | 只输出 security identity allowlist，不再序列化 credential |
 | `whoami` | 已加 credential lifecycle gate | P2 | expiry 已知时本地 fail-fast；legacy expiry 未知时交由 server 验证 |
 | `projects` | Agent 发现面已修复 | - | native typed `projects.list` 输出 PII-minimized safe directory；最多 200 条，Agent HTTP response/完整 envelope 各限 512 KiB，alias/identity 冲突与畸形数据 fail-closed；compatibility Agent path 共用投影，裸 `--json` 保持旧 raw shape 与既有 response behavior |
-| `units` | 需要以 project + unit detail 聚合 | P1 | Web 主要由 project summary 选 unit，再加载 `/units/:id` |
+| `unit show` | 已修复 | - | native typed `unit.show` 以 project 为 scope，先校验 project/unit identity，再读取有界 Unit Detail；只输出 PII-minimized Student Unit View 与 task definition count，裸 `--json` 保持旧 raw shape |
 | `tasks` | 已修复 | - | Student Task View 从 Task Definition catalogue 派生，并显式连接可选 Task Instance；native `tasks.list` 以 project-scoped、PII-minimized Student Task View catalogue 暴露同一严格 projection，裸 `--json` 保持原 shape |
 | `task show` | 已修复 | - | selector 统一使用 taskDefinitionId，未实例化任务可读取 |
 | `plan show` | 已修复 | - | native typed definition-first contract；显式 date source、task/prerequisite required+current status、四态 visibility、独立 feedback deadline 和 normalized prerequisites；缺失 flexible-date capability fail-closed；body/output 均有边界 |

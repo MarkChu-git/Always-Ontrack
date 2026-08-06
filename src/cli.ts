@@ -58,6 +58,7 @@ import type { RawTaskPrerequisite } from './lib/planner.js';
 import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
 import { createAgentTasksList } from './lib/agent-tasks.js';
+import { createAgentUnitShow } from './lib/agent-units.js';
 import {
   createSubmissionAttempt,
   InvalidSubmissionDetailsError,
@@ -152,6 +153,8 @@ import {
   type AgentPlanShowInput,
   type AgentPlanShowOutput,
   type AgentProjectsListOutput,
+  type AgentUnitShowInput,
+  type AgentUnitShowOutput,
   type AgentTasksListInput,
   type AgentTasksListOutput,
   type AgentSubmissionStatusInput,
@@ -2358,6 +2361,17 @@ async function readAgentTasksList(
   })(input);
 }
 
+async function readAgentUnitShow(
+  input: AgentUnitShowInput,
+  session: SessionData,
+): Promise<AgentUnitShowOutput> {
+  const api = createAuthenticatedApi(session);
+  return createAgentUnitShow({
+    readProject: (projectId) => api.getProjectForAgent(session, projectId),
+    readUnit: (unitId) => api.getUnitForAgent(session, unitId),
+  })(input);
+}
+
 /** Build compact `status:count` summary used by project detail output. */
 function countTasksByStatus(tasks: StudentTaskRow[]): string {
   if (tasks.length === 0) {
@@ -2443,6 +2457,27 @@ function arrayLength(value: unknown): number {
 /** Show detailed unit payload for one unit id. */
 async function handleUnitShow(args: string[]): Promise<void> {
   const session = await requireSession();
+  if (getAgentOutputContext()) {
+    const projectId = parseOptionalInteger(args, '--project-id');
+    if (projectId === undefined) {
+      throw new AgentProtocolError({
+        code: 'INVALID_ARGUMENT',
+        summary: 'unit.show requires --project-id.',
+      });
+    }
+    const unitId = parseOptionalInteger(args, '--unit-id');
+    printJson(
+      await readAgentUnitShow(
+        {
+          project_id: projectId,
+          ...(unitId === undefined ? {} : { unit_id: unitId }),
+        },
+        session,
+      ),
+    );
+    return;
+  }
+
   const api = createAuthenticatedApi(session);
   const unitId = parseIntegerFlagValue(getFlagValue(args, '--unit-id'), '--unit-id');
   const unit = await api.getUnit(session, unitId);
@@ -5146,6 +5181,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentProjectsList(activeSession);
+      },
+      unitShow: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentUnitShow(input, activeSession);
       },
       tasksList: (input) => {
         if (!activeSession) {
