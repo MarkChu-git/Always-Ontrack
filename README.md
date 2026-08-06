@@ -143,6 +143,8 @@ ontrack agent list
 ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call projects.list --input-json '{}'
+ontrack agent call unit.show --input-json '{"project_id":87}'
+ontrack agent call tasks.list --input-json '{"project_id":87}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
@@ -159,9 +161,13 @@ ontrack agent call task.resources \
 empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
-surface covers `auth.status`, `projects.list`, `task.show`, `task.prerequisites`,
-`plan.show`, `submission.status`, and `task.resources`; more commands are added as
-individually reviewed vertical slices. `submission.status` resolves
+surface covers `auth.status`, `projects.list`, `unit.show`, `tasks.list`,
+`task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and
+`task.resources`; more commands are added as individually reviewed vertical
+slices. `unit.show` uses `projects.list` identity as its scope, then reads the
+matching Unit Detail only to return a PII-minimized unit summary and task
+definition count. It never returns staff, tutorials, groups, people, or raw task
+definitions. `submission.status` resolves
 the task definition even when no task instance exists, reads OnTrack's observed
 per-definition submission-details route, and returns explicit PDF state plus
 `submission_observed` (including submitted/processing lifecycle statuses).
@@ -538,7 +544,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `unit.show`, `tasks.list`, `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
@@ -560,7 +566,7 @@ ontrack logout
 | `ontrack projects` | List accessible projects | Agent mode uses the safe typed `projects.list` directory; bare `--json` keeps the legacy raw response |
 | `ontrack project show --project-id <id>` | Show detailed project information | Useful for unit, grading, and task overview |
 | `ontrack units` | List units | Some accounts fall back to units derived from `/projects` |
-| `ontrack unit show --unit-id <id>` | Show detailed unit information | Includes task definitions when available |
+| `ontrack unit show --unit-id <id>` | Show detailed unit information | Bare `--json` retains the raw legacy payload; Agent mode requires `--project-id` and returns the safe typed `unit.show` projection |
 | `ontrack tasks` | List tasks | Supports `--project-id` and `--status` |
 | `ontrack unit tasks --unit-id <id>` | List tasks for one unit | Unit-scoped view |
 | `ontrack inbox` | Load inbox tasks or fallback task list | Prefers `/units/:id/tasks/inbox` and falls back when needed |

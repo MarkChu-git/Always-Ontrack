@@ -9,6 +9,7 @@ import {
   agentSuccessEnvelope,
 } from './agent-protocol.js';
 import {
+  contractAliasedArray as aliasedArray,
   contractAliasedValue as aliasedValue,
   contractNonNegativeInteger as nonNegativeInteger,
   contractPositiveInteger as positiveInteger,
@@ -43,44 +44,6 @@ export interface AgentTasksListSource {
 
 function invalidArgument(summary: string): never {
   throw new AgentProtocolError({ code: 'INVALID_ARGUMENT', summary });
-}
-
-function aliasedArray(
-  record: Record<string, unknown>,
-  keys: readonly string[],
-  context: string,
-  required: true,
-): unknown[];
-function aliasedArray(
-  record: Record<string, unknown>,
-  keys: readonly string[],
-  context: string,
-  required: false,
-): unknown[] | undefined;
-function aliasedArray(
-  record: Record<string, unknown>,
-  keys: readonly string[],
-  context: string,
-  required: boolean,
-): unknown[] | undefined {
-  const presentKeys = keys.filter((key) => own(record, key));
-  if (presentKeys.length === 0) {
-    if (required) {
-      remoteFailure(`OnTrack omitted ${context}.`);
-    }
-    return undefined;
-  }
-  const values = presentKeys.map((key) => record[key]);
-  if (values.some((value) => !Array.isArray(value))) {
-    remoteFailure(`OnTrack returned an invalid ${context}.`);
-  }
-  if (
-    values.length > 1 &&
-    values.slice(1).some((value) => JSON.stringify(value) !== JSON.stringify(values[0]))
-  ) {
-    remoteFailure(`OnTrack returned conflicting ${context} aliases.`);
-  }
-  return values[0] as unknown[];
 }
 
 function canonicalTaskDefinition(raw: unknown): TaskDefinitionSummary {

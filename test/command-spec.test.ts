@@ -4,6 +4,8 @@ import { z } from 'zod';
 import {
   agentProjectsListInputSchema,
   agentProjectsListOutputSchema,
+  agentUnitShowInputSchema,
+  agentUnitShowOutputSchema,
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
   agentPlanShowInputSchema,
@@ -68,6 +70,14 @@ test('command path resolution handles grouped and top-level commands', () => {
   assert.deepEqual(tasks.input_schema.required, ['project_id']);
   assert.equal(JSON.stringify(tasks.output_schema).includes('task_id'), false);
   assert.equal(JSON.stringify(tasks.output_schema).includes('student'), false);
+  const unit = getCommandSpec('unit.show');
+  assert.deepEqual(unit.input_schema, z.toJSONSchema(agentUnitShowInputSchema));
+  assert.deepEqual(unit.output_schema, z.toJSONSchema(agentUnitShowOutputSchema));
+  assert.deepEqual(unit.input_schema.required, ['project_id']);
+  assert.equal(unit.input_schema.additionalProperties, false);
+  assert.equal(unit.output_schema.additionalProperties, false);
+  assert.equal(JSON.stringify(unit.output_schema).includes('staff'), false);
+  assert.equal(JSON.stringify(unit.output_schema).includes('task_definitions'), false);
   const prerequisites = getCommandSpec('task.prerequisites');
   assert.deepEqual(prerequisites.input_schema.anyOf, [
     { required: ['task_definition_id'] },
