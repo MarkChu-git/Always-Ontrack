@@ -3,10 +3,12 @@ import {
   defineAgentCommand,
   type AgentCommandDefinition,
 } from './agent-execution-engine.js';
+import { AGENT_SAFE_TEXT_PATTERN } from './agent-contract.js';
 
 const taskShowProjectId = z.number().int().positive();
 const taskShowUnitId = z.number().int().positive();
 const taskShowDefinitionId = z.number().int().positive();
+export const AGENT_TASKS_LIST_MAX_STATUS_LENGTH = 80;
 const taskShowAbbreviations = z
   .array(
     z
@@ -42,6 +44,57 @@ export const agentProjectsListOutputSchema = z
   .strict();
 export type AgentProjectsListInput = z.output<typeof agentProjectsListInputSchema>;
 export type AgentProjectsListOutput = z.output<typeof agentProjectsListOutputSchema>;
+
+const agentTaskListSafeText = z
+  .string()
+  .regex(/\S/u, 'value must contain a non-whitespace character')
+  .regex(AGENT_SAFE_TEXT_PATTERN, 'value contains unsafe control characters');
+
+export const agentTasksListInputSchema = z
+  .object({
+    project_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+    status: agentTaskListSafeText
+      .trim()
+      .min(1)
+      .max(AGENT_TASKS_LIST_MAX_STATUS_LENGTH)
+      .optional(),
+  })
+  .strict();
+
+const agentStudentTaskViewItemSchema = z
+  .object({
+    project_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_code: agentTaskListSafeText.min(1).max(80).nullable(),
+    task_definition_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    task_instance_id: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER)
+      .nullable(),
+    abbreviation: agentTaskListSafeText.min(1).max(80),
+    name: agentTaskListSafeText.min(1).max(512).nullable(),
+    status: agentTaskListSafeText
+      .min(1)
+      .max(AGENT_TASKS_LIST_MAX_STATUS_LENGTH),
+    due_date: agentTaskListSafeText.min(1).max(128).nullable(),
+    completion_date: agentTaskListSafeText.min(1).max(128).nullable(),
+    instantiated: z.boolean(),
+    visibility: z.literal('within_target'),
+  })
+  .strict();
+
+export const agentTasksListOutputSchema = z
+  .object({
+    count: z.number().int().nonnegative().max(200),
+    tasks: z.array(agentStudentTaskViewItemSchema).max(200),
+  })
+  .strict();
+
+export type AgentTasksListInput = z.output<typeof agentTasksListInputSchema>;
+export type AgentTasksListOutput = z.output<typeof agentTasksListOutputSchema>;
 
 /**
  * Keep selector invariants in the schema itself so `agent describe` is
@@ -356,6 +409,7 @@ export type AgentAuthStatus = {
 export interface NativeAgentCommandHandlers {
   authStatus(): Promise<AgentAuthStatus>;
   projectsList(): Promise<AgentProjectsListOutput>;
+  tasksList(input: AgentTasksListInput): Promise<AgentTasksListOutput>;
   taskShow(input: AgentTaskShowInput): Promise<AgentTaskShowOutput>;
   taskPrerequisites(
     input: AgentTaskPrerequisitesInput,
@@ -408,6 +462,18 @@ export function createNativeAgentCommands(
       input: agentProjectsListInputSchema,
       output: agentProjectsListOutputSchema,
       execute: () => handlers.projectsList(),
+    }),
+    defineAgentCommand({
+      path: 'tasks.list',
+      description: 'List the safe project-scoped Student Task View catalogue.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentTasksListInputSchema,
+      output: agentTasksListOutputSchema,
+      execute: (input) => handlers.tasksList(input),
     }),
     defineAgentCommand({
       path: 'task.show',
