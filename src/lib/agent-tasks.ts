@@ -478,14 +478,17 @@ export function createAgentTasksList(
   source: AgentTasksListSource,
 ): (input: AgentTasksListInput) => Promise<AgentTasksListOutput> {
   return async (input) => {
-    const project = await source.readProject(input.project_id);
-    const projectRecord = recordValue(project, 'project');
-    authoritativeProjectId(projectRecord, input.project_id);
-    const authoritativeUnitId = contractProjectUnit(projectRecord).id;
-    if (input.unit_id !== undefined && input.unit_id !== authoritativeUnitId) {
-      invalidArgument('The supplied unit_id does not belong to the requested project.');
+    const rawProject = await source.readProject(input.project_id);
+    const project = canonicalProject(
+      rawProject,
+      input.project_id,
+      input.unit_id,
+    );
+    const authoritativeUnitId = project.unit?.id;
+    if (authoritativeUnitId === undefined) {
+      remoteFailure('OnTrack omitted unit id.');
     }
     const unit = await source.readUnit(authoritativeUnitId);
-    return buildOutput(input, project, unit);
+    return buildOutput(input, rawProject, unit);
   };
 }

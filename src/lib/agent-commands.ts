@@ -3,7 +3,10 @@ import {
   defineAgentCommand,
   type AgentCommandDefinition,
 } from './agent-execution-engine.js';
-import { AGENT_SAFE_TEXT_PATTERN } from './agent-contract.js';
+import {
+  AGENT_MULTILINE_SAFE_TEXT_PATTERN,
+  AGENT_SAFE_TEXT_PATTERN,
+} from './agent-contract.js';
 
 const taskShowProjectId = z.number().int().positive();
 const taskShowUnitId = z.number().int().positive();
@@ -278,13 +281,24 @@ const agentSingleTaskInputSchema = z.union([
     .object({
       project_id: taskShowProjectId,
       task_definition_id: taskShowDefinitionId,
-      abbreviation: z.string().regex(/\S/u).trim().min(1).max(64).optional(),
+      abbreviation: z
+        .string()
+        .regex(/^(?=[^,]*\S)[^,]+$/u)
+        .trim()
+        .min(1)
+        .max(64)
+        .optional(),
     })
     .strict(),
   z
     .object({
       project_id: taskShowProjectId,
-      abbreviation: z.string().regex(/\S/u).trim().min(1).max(64),
+      abbreviation: z
+        .string()
+        .regex(/^(?=[^,]*\S)[^,]+$/u)
+        .trim()
+        .min(1)
+        .max(64),
     })
     .strict(),
 ]);
@@ -317,6 +331,44 @@ export type AgentTaskPrerequisitesInput = z.output<
 export type AgentTaskPrerequisitesOutput = z.output<
   typeof agentTaskPrerequisitesOutputSchema
 >;
+
+/** Typed caller contract for one task's bounded, person-free feedback timeline. */
+export const agentFeedbackListInputSchema = agentSingleTaskInputSchema;
+const agentFeedbackTextSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(AGENT_SAFE_TEXT_PATTERN);
+const agentFeedbackMultilineTextSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(AGENT_MULTILINE_SAFE_TEXT_PATTERN);
+const agentFeedbackItemSchema = z
+  .object({
+    feedback_id: z.number().int().positive().nullable(),
+    kind: agentFeedbackTextSchema.max(80),
+    text: agentFeedbackMultilineTextSchema.nullable(),
+    created_at: agentFeedbackTextSchema.max(128).nullable(),
+    updated_at: agentFeedbackTextSchema.max(128).nullable(),
+    is_new: z.boolean().nullable(),
+  })
+  .strict();
+export const agentFeedbackListOutputSchema = z
+  .object({
+    project_id: taskShowProjectId,
+    unit_id: taskShowUnitId,
+    unit_code: agentFeedbackTextSchema.max(80).nullable(),
+    task_definition_id: taskShowDefinitionId,
+    task_instance_id: z.number().int().positive().nullable(),
+    abbreviation: agentFeedbackTextSchema.max(80),
+    instantiated: z.boolean(),
+    count: z.number().int().nonnegative().max(200),
+    feedback: z.array(agentFeedbackItemSchema).max(200),
+  })
+  .strict();
+export type AgentFeedbackListInput = z.output<typeof agentFeedbackListInputSchema>;
+export type AgentFeedbackListOutput = z.output<typeof agentFeedbackListOutputSchema>;
 
 /** Typed caller contract for one task's normalized submission lifecycle status. */
 export const agentSubmissionStatusInputSchema = agentSingleTaskInputSchema;
@@ -437,6 +489,7 @@ export interface NativeAgentCommandHandlers {
   taskPrerequisites(
     input: AgentTaskPrerequisitesInput,
   ): Promise<AgentTaskPrerequisitesOutput>;
+  feedbackList(input: AgentFeedbackListInput): Promise<AgentFeedbackListOutput>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
   planShow(input: AgentPlanShowInput): Promise<AgentPlanShowOutput>;
   submissionStatus(
@@ -533,6 +586,18 @@ export function createNativeAgentCommands(
       input: agentTaskPrerequisitesInputSchema,
       output: agentTaskPrerequisitesOutputSchema,
       execute: (input) => handlers.taskPrerequisites(input),
+    }),
+    defineAgentCommand({
+      path: 'feedback.list',
+      description: 'Read one task\'s bounded, person-free feedback timeline.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentFeedbackListInputSchema,
+      output: agentFeedbackListOutputSchema,
+      execute: (input) => handlers.feedbackList(input),
     }),
     defineAgentCommand({
       path: 'task.resources',

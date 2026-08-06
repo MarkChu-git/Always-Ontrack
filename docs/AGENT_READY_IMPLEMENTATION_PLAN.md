@@ -503,7 +503,7 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 
 - 全部 read command 接入 compatibility Agent envelope。
 - native typed seam 已覆盖 auth status、safe project directory、project-scoped Student Task View catalogue、definition-first task show、
-  prerequisites、plan show、submission status 与 task resources。
+  prerequisites、bounded person-free feedback list、plan show、submission status 与 task resources。
 - watch/feedback watch 使用 NDJSON envelope frame。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。
 - 人类模式继续使用表格和面板。

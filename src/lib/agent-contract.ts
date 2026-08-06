@@ -4,6 +4,8 @@ export const AGENT_SAFE_TEXT_PATTERN =
   /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]*$/u;
 export const AGENT_NONEMPTY_SAFE_TEXT_PATTERN =
   /^(?=.*\S)[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u;
+export const AGENT_MULTILINE_SAFE_TEXT_PATTERN =
+  /^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]*$/u;
 
 export function remoteContractFailure(summary: string): never {
   throw new AgentProtocolError({ code: 'REMOTE_UNAVAILABLE', summary });
@@ -56,6 +58,26 @@ export function contractSafeText(
   }
   const normalized = value.trim();
   if (normalized.length === 0 || normalized.length > maxLength) {
+    remoteContractFailure(`OnTrack returned an invalid ${context}.`);
+  }
+  return normalized;
+}
+
+/** Normalize feedback-style text while allowing line feeds but rejecting other controls. */
+export function contractSafeMultilineText(
+  value: unknown,
+  maxLength: number,
+  context: string,
+): string {
+  if (typeof value !== 'string') {
+    remoteContractFailure(`OnTrack returned an invalid ${context}.`);
+  }
+  const normalized = value.replace(/\r\n?/gu, '\n').trim();
+  if (
+    normalized.length === 0 ||
+    normalized.length > maxLength ||
+    !AGENT_MULTILINE_SAFE_TEXT_PATTERN.test(normalized)
+  ) {
     remoteContractFailure(`OnTrack returned an invalid ${context}.`);
   }
   return normalized;

@@ -104,6 +104,32 @@ test('Student Task View catalogue validates project identity before reading its 
   assert.equal(unitReads, 0);
 });
 
+test('Student Task View catalogue validates project task metadata before reading its unit', async () => {
+  const malformedProjects = [
+    { id: 1001, unit_id: 2001, target_grade: '1', tasks: [] },
+    { id: 1001, unit_id: 2001, tasks: 'not-an-array' },
+    { id: 1001, unit_id: 2001, targetGrade: 1, target_grade: 2, tasks: [] },
+  ];
+
+  for (const project of malformedProjects) {
+    let unitReads = 0;
+    const listTasks = createAgentTasksList({
+      readProject: async () => project,
+      readUnit: async () => {
+        unitReads += 1;
+        return { id: 2001, task_definitions: [] };
+      },
+    });
+
+    await assert.rejects(
+      () => listTasks({ project_id: 1001 }),
+      (error: unknown) =>
+        error instanceof AgentProtocolError && error.code === 'REMOTE_UNAVAILABLE',
+    );
+    assert.equal(unitReads, 0);
+  }
+});
+
 test('Student Task View catalogue reports duplicate Task Instances as sanitized remote contract drift', async () => {
   const listTasks = createAgentTasksList({
     readProject: async () => ({

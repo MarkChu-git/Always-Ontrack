@@ -149,6 +149,8 @@ ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
 ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent call feedback.list \
+  --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call plan.show \
   --input-json '{"project_id":87,"include_beyond_target":false}'
 ontrack agent call submission.status \
@@ -163,7 +165,7 @@ catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
 surface covers `auth.status`, `projects.list`, `unit.show`, `tasks.list`,
 `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and
-`task.resources`; more commands are added as individually reviewed vertical
+`task.resources`, and `feedback.list`; more commands are added as individually reviewed vertical
 slices. `unit.show` uses `projects.list` identity as its scope, then reads the
 matching Unit Detail only to return a PII-minimized unit summary and task
 definition count. It never returns staff, tutorials, groups, people, or raw task
@@ -176,6 +178,11 @@ conflicting snake/camel aliases fail closed as `REMOTE_UNAVAILABLE`.
 `task.resources` returns
 bounded artifact metadata (filename, relative path, byte count, content type,
 and SHA-256) and reports unavailable archives without writing placeholders.
+`feedback.list` resolves one task from the same authoritative catalogue and
+returns at most 200 bounded comment/event records. It retains direct feedback
+text so an Agent can act on it, but never returns author/recipient profiles,
+attachments, or unknown remote fields; malformed aliases and oversized responses
+fail closed.
 `plan.show` uses the same definition-first catalogue, reports optional task
 instance identity and status, keeps personal/grade/unit/missing date sources
 explicit, treats the feedback deadline independently, and exposes normalized
@@ -544,7 +551,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `unit.show`, `tasks.list`, `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `unit.show`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `plan.show`, `submission.status`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
@@ -577,7 +584,7 @@ ontrack logout
 
 | Command | Purpose | Notes |
 | --- | --- | --- |
-| `ontrack feedback list --project-id <id> --abbr <abbr>` | Fetch comments/events for one or many tasks | Supports repeated/comma selectors and `--all-tasks` |
+| `ontrack feedback list --project-id <id> --abbr <abbr>` | Fetch comments/events for one or many tasks | Bare JSON supports repeated/comma selectors, `--all-tasks`, and legacy `--task-id`; `--output agent-json` requires one `--task-definition-id` or `--abbr` and returns the safe native `feedback.list` projection |
 | `ontrack feedback watch --project-id <id> --abbr <abbr>` | Poll task feedback in real time | Default interval is `15s` |
 | `ontrack watch` | Monitor task status, due date, and new comment changes | Default interval is `60s` |
 
