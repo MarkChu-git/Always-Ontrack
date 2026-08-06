@@ -1,7 +1,11 @@
 import { z } from 'zod';
+import { AGENT_NONEMPTY_SAFE_TEXT_PATTERN } from './agent-contract.js';
 import {
+  AGENT_TASKS_LIST_MAX_STATUS_LENGTH,
   agentProjectsListInputSchema,
   agentProjectsListOutputSchema,
+  agentTasksListInputSchema,
+  agentTasksListOutputSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
@@ -246,7 +250,31 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'units.list', description: 'List units visible to the current identity.' }),
   spec({ path: 'unit.show', description: 'Read one unit.', fields: { unit_id: integerField('--unit-id', true) } }),
   spec({ path: 'unit.tasks', description: 'List tasks for one unit.', fields: { unit_id: integerField('--unit-id', true), status: stringField('--status') } }),
-  spec({ path: 'tasks.list', description: 'List student task views.', fields: { project_id: integerField('--project-id'), status: stringField('--status') } }),
+  spec({
+    path: 'tasks.list',
+    description: 'List the safe project-scoped Student Task View catalogue.',
+    fields: {
+      project_id: integerField('--project-id', true, {
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      }),
+      unit_id: integerField('--unit-id', false, {
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      }),
+      status: stringField('--status', false, {
+        minLength: 1,
+        maxLength: AGENT_TASKS_LIST_MAX_STATUS_LENGTH,
+        pattern: AGENT_NONEMPTY_SAFE_TEXT_PATTERN,
+      }),
+    },
+    inputSchema: z.toJSONSchema(agentTasksListInputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+    outputSchema: z.toJSONSchema(agentTasksListOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({ path: 'doctor', description: 'Run read-only environment and API diagnostics.' }),
   spec({ path: 'inbox.list', description: 'List inbox tasks.', fields: { unit_id: integerField('--unit-id'), status: stringField('--status') } }),
   spec({ path: 'task.show', description: 'Read definition-first student task views.', fields: jsonTaskSelector }),

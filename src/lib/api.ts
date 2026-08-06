@@ -27,6 +27,8 @@ type JsonBody = Record<string, unknown> | undefined;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_AGENT_PROJECTS_RESPONSE_BYTES = 512 * 1024;
+const MAX_AGENT_PROJECT_RESPONSE_BYTES = 512 * 1024;
+const MAX_AGENT_UNIT_RESPONSE_BYTES = 512 * 1024;
 const MAX_TASK_PREREQUISITES_RESPONSE_BYTES = 512 * 1024;
 const MAX_SUBMISSION_DETAILS_RESPONSE_BYTES = 64 * 1024;
 
@@ -491,8 +493,11 @@ export class OnTrackApiClient {
     return this.listProjectsWithLimit(session, MAX_AGENT_PROJECTS_RESPONSE_BYTES);
   }
 
-  /** Fetch one project payload, usually including task instances. */
-  getProject(session: SessionData, projectId: number): Promise<ProjectSummary> {
+  private getProjectWithLimit(
+    session: SessionData,
+    projectId: number,
+    maxResponseBytes?: number,
+  ): Promise<ProjectSummary> {
     return requestJson<ProjectSummary>(
       withApiPath(this.baseUrl, `projects/${projectId}`),
       {
@@ -505,7 +510,19 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      maxResponseBytes,
     );
+  }
+
+  /** Fetch one project payload, usually including task instances. */
+  getProject(session: SessionData, projectId: number): Promise<ProjectSummary> {
+    return this.getProjectWithLimit(session, projectId);
+  }
+
+  /** Fetch one project through the bounded Student Task View transport. */
+  getProjectForAgent(session: SessionData, projectId: number): Promise<ProjectSummary> {
+    return this.getProjectWithLimit(session, projectId, MAX_AGENT_PROJECT_RESPONSE_BYTES);
   }
 
   /** List units; some roles may receive 403 (handled by caller fallback). */
@@ -525,8 +542,11 @@ export class OnTrackApiClient {
     );
   }
 
-  /** Fetch a single unit, often used to resolve task definition metadata. */
-  getUnit(session: SessionData, unitId: number): Promise<UnitSummary> {
+  private getUnitWithLimit(
+    session: SessionData,
+    unitId: number,
+    maxResponseBytes?: number,
+  ): Promise<UnitSummary> {
     return requestJson<UnitSummary>(
       withApiPath(this.baseUrl, `units/${unitId}`),
       {
@@ -539,7 +559,20 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      maxResponseBytes,
     );
+  }
+
+
+  /** Fetch a single unit, often used to resolve task definition metadata. */
+  getUnit(session: SessionData, unitId: number): Promise<UnitSummary> {
+    return this.getUnitWithLimit(session, unitId);
+  }
+
+  /** Fetch one unit through the bounded Student Task View transport. */
+  getUnitForAgent(session: SessionData, unitId: number): Promise<UnitSummary> {
+    return this.getUnitWithLimit(session, unitId, MAX_AGENT_UNIT_RESPONSE_BYTES);
   }
 
   /** Inbox endpoint for a specific unit. */

@@ -376,6 +376,13 @@ project/unit identity、unit code/name、target/submitted grade 与必要 capabi
 冲突、重复 project id、控制字符、非法类型或超限数据全部归类为 `REMOTE_UNAVAILABLE`。
 native 与 `projects --output agent-json` 共用该 projection，裸 `projects --json` 保持旧 raw shape。
 
+`tasks.list` 现在提供 project-scoped 的 native typed Student Task View catalogue：`project_id` 必填，
+`unit_id` 可作为来自 `projects.list` 的 scope consistency hint，`status` 支持规范化精确过滤。
+catalogue 以 Task Definition 为主并显式连接可选 Task Instance，保留未实例化但确定可见的任务；
+unknown visibility、identity/alias 歧义、重复 definition/instance、控制字符或超出 200 项与
+512 KiB 完整 envelope 上限时 fail-closed。native 与 `tasks --output agent-json` 共用严格
+projection，裸 `tasks --json` 保持既有 `StudentTaskRow[]` shape 与宽松兼容行为。
+
 Artifact safety 已在下一层 stacked PR 接入：上传读取默认限制工作区、拒绝符号链接
 和硬链接并限制单文件 50 MiB；PDF 输出目录同样默认 workspace-scoped，拒绝符号链接
 组件和硬链接目标，并限制单个二进制响应 100 MiB。外部文件/目录必须由调用方分别显式声明
@@ -495,7 +502,7 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 真实 OnTrack 场景逐层迁移。
 
 - 全部 read command 接入 compatibility Agent envelope。
-- native typed seam 已覆盖 auth status、safe project directory、definition-first task show、
+- native typed seam 已覆盖 auth status、safe project directory、project-scoped Student Task View catalogue、definition-first task show、
   prerequisites、plan show、submission status 与 task resources。
 - watch/feedback watch 使用 NDJSON envelope frame。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。

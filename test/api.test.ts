@@ -108,6 +108,43 @@ test('Agent project listing bounds declared and streamed JSON responses', async 
   assert.deepEqual(await client.listProjects(session), JSON.parse(oversized));
 });
 
+test('Agent Student Task View detail reads are bounded while legacy detail reads remain available', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const oversized = JSON.stringify({ id: 1, value: 'x'.repeat(512 * 1024) });
+
+  for (const read of [
+    () => client.getProjectForAgent(session, 101),
+    () => client.getUnitForAgent(session, 55),
+  ]) {
+    mockFetch(async () =>
+      new Response(oversized, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await assert.rejects(
+      read,
+      (error: unknown) => error instanceof OversizedJsonResponseError,
+    );
+  }
+
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  assert.deepEqual(await client.getProject(session, 101), JSON.parse(oversized));
+
+  mockFetch(async () =>
+    new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  assert.deepEqual(await client.getUnit(session, 55), JSON.parse(oversized));
+});
+
 test('read transport failures use a typed, body-free error', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   mockFetch(async () => {

@@ -405,7 +405,7 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `whoami` | 已加 credential lifecycle gate | P2 | expiry 已知时本地 fail-fast；legacy expiry 未知时交由 server 验证 |
 | `projects` | Agent 发现面已修复 | - | native typed `projects.list` 输出 PII-minimized safe directory；最多 200 条，Agent HTTP response/完整 envelope 各限 512 KiB，alias/identity 冲突与畸形数据 fail-closed；compatibility Agent path 共用投影，裸 `--json` 保持旧 raw shape 与既有 response behavior |
 | `units` | 需要以 project + unit detail 聚合 | P1 | Web 主要由 project summary 选 unit，再加载 `/units/:id` |
-| `tasks` | 已修复 | - | StudentTaskView 从 unit definitions 派生，并显式连接可选 instance |
+| `tasks` | 已修复 | - | Student Task View 从 Task Definition catalogue 派生，并显式连接可选 Task Instance；native `tasks.list` 以 project-scoped、PII-minimized Student Task View catalogue 暴露同一严格 projection，裸 `--json` 保持原 shape |
 | `task show` | 已修复 | - | selector 统一使用 taskDefinitionId，未实例化任务可读取 |
 | `plan show` | 已修复 | - | native typed definition-first contract；显式 date source、task/prerequisite required+current status、四态 visibility、独立 feedback deadline 和 normalized prerequisites；缺失 flexible-date capability fail-closed；body/output 均有边界 |
 | `inbox` | 路由仍在，需重新实测 | P1 | bundle 保留 endpoint，但未在本次学生主流程中触发 |

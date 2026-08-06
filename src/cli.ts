@@ -57,6 +57,7 @@ import {
 import type { RawTaskPrerequisite } from './lib/planner.js';
 import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
+import { createAgentTasksList } from './lib/agent-tasks.js';
 import {
   createSubmissionAttempt,
   InvalidSubmissionDetailsError,
@@ -151,6 +152,8 @@ import {
   type AgentPlanShowInput,
   type AgentPlanShowOutput,
   type AgentProjectsListOutput,
+  type AgentTasksListInput,
+  type AgentTasksListOutput,
   type AgentSubmissionStatusInput,
   type AgentSubmissionStatusOutput,
   agentSubmissionStatusOutputSchema,
@@ -2344,6 +2347,17 @@ async function readAgentProjectsList(
   return buildAgentProjectsListOutput(await api.listProjectsForAgent(session));
 }
 
+async function readAgentTasksList(
+  input: AgentTasksListInput,
+  session: SessionData,
+): Promise<AgentTasksListOutput> {
+  const api = createAuthenticatedApi(session);
+  return createAgentTasksList({
+    readProject: (projectId) => api.getProjectForAgent(session, projectId),
+    readUnit: (unitId) => api.getUnitForAgent(session, unitId),
+  })(input);
+}
+
 /** Build compact `status:count` summary used by project detail output. */
 function countTasksByStatus(tasks: StudentTaskRow[]): string {
   if (tasks.length === 0) {
@@ -2495,7 +2509,31 @@ async function handleUnitTasks(args: string[]): Promise<void> {
 async function handleTasks(args: string[]): Promise<void> {
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
+  const agentOutput = getAgentOutputContext();
   const projectId = parseOptionalInteger(args, '--project-id');
+
+  if (agentOutput) {
+    if (projectId === undefined) {
+      throw new AgentProtocolError({
+        code: 'INVALID_ARGUMENT',
+        summary: 'tasks.list requires --project-id.',
+      });
+    }
+    const unitId = parseOptionalInteger(args, '--unit-id');
+    const status = getFlagValue(args, '--status');
+    printJson(
+      await readAgentTasksList(
+        {
+          project_id: projectId,
+          ...(unitId === undefined ? {} : { unit_id: unitId }),
+          ...(status === undefined ? {} : { status }),
+        },
+        session,
+      ),
+    );
+    return;
+  }
+
   const projects = await loadProjectsWithTaskMetadata(api, session, { projectId });
 
   let tasks = flattenTasks(projects);
@@ -5108,6 +5146,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentProjectsList(activeSession);
+      },
+      tasksList: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentTasksList(input, activeSession);
       },
       taskShow: (input) => {
         if (!activeSession) {
