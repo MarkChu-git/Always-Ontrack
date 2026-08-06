@@ -8,6 +8,7 @@ import {
   agentUnitShowOutputSchema,
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
+  agentFeedbackListOutputSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
@@ -94,7 +95,10 @@ test('command path resolution handles grouped and top-level commands', () => {
     prerequisiteProperties.task_definition_id.maximum,
     Number.MAX_SAFE_INTEGER,
   );
-  assert.equal(prerequisiteProperties.abbreviation.pattern, "\\S");
+  assert.equal(
+    prerequisiteProperties.abbreviation.pattern,
+    '^(?=[^,]*\\S)[^,]+$',
+  );
   const submissionStatus = getCommandSpec('submission.status');
   assert.deepEqual(submissionStatus.input_schema.anyOf, [
     { required: ['task_definition_id'] },
@@ -104,6 +108,15 @@ test('command path resolution handles grouped and top-level commands', () => {
     submissionStatus.input_schema.properties,
     prerequisites.input_schema.properties,
   );
+  const feedback = getCommandSpec('feedback.list');
+  assert.deepEqual(feedback.input_schema, prerequisites.input_schema);
+  assert.equal(feedback.input_schema.type, 'object');
+  assert.deepEqual(
+    feedback.output_schema,
+    z.toJSONSchema(agentFeedbackListOutputSchema),
+  );
+  assert.equal(JSON.stringify(feedback.output_schema).includes('author'), false);
+  assert.equal(JSON.stringify(feedback.output_schema).includes('recipient'), false);
   const submissionOutput = submissionStatus.output_schema as Record<string, unknown>;
   const submissionOutputProperties = submissionOutput.properties as Record<
     string,

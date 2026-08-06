@@ -2149,6 +2149,7 @@ test("agent list and describe are offline projections of the executable commands
         "tasks.list",
         "task.show",
         "task.prerequisites",
+        "feedback.list",
         "task.resources",
         "plan.show",
         "submission.status",
@@ -2204,6 +2205,18 @@ test("agent list and describe are offline projections of the executable commands
       JSON.stringify(taskDirectoryData.output_schema).includes("task_id"),
       false,
     );
+
+    const feedback = await runCli(
+      ["agent", "describe", "feedback.list"],
+      configRoot,
+    );
+    assert.equal(feedback.exitCode, 0, feedback.stderr);
+    const feedbackData = JSON.parse(feedback.stdout).data as Record<string, unknown>;
+    assert.equal(feedbackData.path, "feedback.list");
+    assert.match(JSON.stringify(feedbackData.input_schema), /task_definition_id/);
+    assert.match(JSON.stringify(feedbackData.output_schema), /feedback_id/);
+    assert.equal(JSON.stringify(feedbackData.output_schema).includes("author"), false);
+    assert.equal(JSON.stringify(feedbackData.output_schema).includes("recipient"), false);
 
     const described = await runCli(
       ["agent", "describe", "task.show"],
@@ -2382,6 +2395,250 @@ test("native task.show classifies a closed transport as retryable remote unavail
     const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
     assert.equal((envelope.error as Record<string, unknown>).code, "REMOTE_UNAVAILABLE");
     assert.equal((envelope.error as Record<string, unknown>).retryable, true);
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test('native and compatibility feedback.list share a bounded, person-free feedback projection', async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), 'ontrack-agent-feedback-list-'));
+  const sensitiveMarker = 'marker-private@example.invalid';
+  const server = createServer((request, response) => {
+    assert.equal(request.headers['auth-token'], 'fixture-token');
+    const payload =
+      request.url === '/api/projects'
+        ? [{ id: 1001, unit_id: 2001 }]
+        : request.url === '/api/projects/1001'
+        ? {
+            id: 1001,
+            unit_id: 2001,
+            target_grade: 1,
+            tasks: [{ id: 9001, task_definition_id: 3001, status: 'ready_for_feedback' }],
+          }
+        : request.url === '/api/units/2001'
+          ? {
+              id: 2001,
+              code: 'FIT0001',
+              task_definitions: [
+                { id: 3001, abbreviation: 'D4', name: 'Design reflection', target_grade: 1 },
+              ],
+            }
+          : request.url === '/api/projects/1001/task_def_id/3001/comments'
+            ? [
+                {
+                  id: 7001,
+                  type: 'comment',
+                  comment: 'Clear reasoning. Explain the trade-off in section 2.',
+                  created_at: '2026-08-04T10:00:00.000Z',
+                  is_new: true,
+                  author: { email: sensitiveMarker },
+                  recipient: { email: 'student-private@example.invalid' },
+                  attachments: [{ url: 'https://private.example.invalid/feedback.pdf' }],
+                },
+              ]
+            : undefined;
+    if (payload === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(payload));
+  });
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const sessionDir = join(configRoot, 'ontrack-cli');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, 'session.json'),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: 'fixture-user',
+        authToken: 'fixture-token',
+        user: { id: 1, username: 'fixture-user', role: 'student' },
+        savedAt: '2026-07-31T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        source: 'access-token',
+      }),
+      'utf8',
+    );
+
+    const legacy = await runCli(
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--task-definition-id',
+        '3001',
+        '--json',
+      ],
+      configRoot,
+    );
+    assert.equal(legacy.exitCode, 0, legacy.stderr);
+    assert.equal(JSON.parse(legacy.stdout)[0]?.author?.email, sensitiveMarker);
+
+    const compatibility = await runCli(
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--task-definition-id',
+        '3001',
+        '--output',
+        'agent-json',
+      ],
+      configRoot,
+    );
+    assert.equal(compatibility.exitCode, 0, compatibility.stderr);
+    const compatibilityEnvelope = JSON.parse(compatibility.stdout) as Record<string, unknown>;
+    assert.equal(compatibilityEnvelope.command, 'feedback.list');
+    assert.deepEqual(compatibilityEnvelope.data, {
+      project_id: 1001,
+      unit_id: 2001,
+      unit_code: 'FIT0001',
+      task_definition_id: 3001,
+      task_instance_id: 9001,
+      abbreviation: 'D4',
+      instantiated: true,
+      count: 1,
+      feedback: [
+        {
+          feedback_id: 7001,
+          kind: 'comment',
+          text: 'Clear reasoning. Explain the trade-off in section 2.',
+          created_at: '2026-08-04T10:00:00.000Z',
+          updated_at: null,
+          is_new: true,
+        },
+      ],
+    });
+    assert.equal(compatibility.stdout.includes(sensitiveMarker), false);
+    assert.equal(compatibility.stdout.includes('private.example.invalid'), false);
+
+    const legacySelector = await runCli(
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--task-id',
+        '9001',
+        '--json',
+      ],
+      configRoot,
+    );
+    assert.equal(legacySelector.exitCode, 0, legacySelector.stderr);
+    assert.equal(JSON.parse(legacySelector.stdout)[0]?.author?.email, sensitiveMarker);
+
+    const conflictingSelector = await runCli(
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--task-definition-id',
+        '3001',
+        '--abbr',
+        'other-task',
+        '--output',
+        'agent-json',
+      ],
+      configRoot,
+    );
+    assert.equal(conflictingSelector.exitCode, 2, conflictingSelector.stderr);
+    assert.equal(
+      ((JSON.parse(conflictingSelector.stdout) as Record<string, unknown>).error as Record<
+        string,
+        unknown
+      >).code,
+      'INVALID_ARGUMENT',
+    );
+
+    const native = await runCli(
+      [
+        'agent',
+        'call',
+        'feedback.list',
+        '--input-json',
+        '{"project_id":1001,"task_definition_id":3001}',
+      ],
+      configRoot,
+    );
+    assert.equal(native.exitCode, 0, `${native.stderr}\n${native.stdout}`);
+    assert.equal(native.stderr, '');
+    const nativeEnvelope = JSON.parse(native.stdout) as Record<string, unknown>;
+    assert.equal(nativeEnvelope.command, 'feedback.list');
+    assert.deepEqual(nativeEnvelope.data, compatibilityEnvelope.data);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test('feedback.list rejects unscoped and batch Agent selectors before authentication', async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), 'ontrack-agent-feedback-input-'));
+  try {
+    const invocations = [
+      ['agent', 'call', 'feedback.list', '--input-json', '{"project_id":1001}'],
+      [
+        'agent',
+        'call',
+        'feedback.list',
+        '--input-json',
+        '{"project_id":1001,"abbreviation":"D4,D5"}',
+      ],
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--all-tasks',
+        '--output',
+        'agent-json',
+      ],
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--abbr',
+        ',',
+        '--output',
+        'agent-json',
+      ],
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--task-id',
+        '9001',
+        '--output',
+        'agent-json',
+      ],
+      [
+        'feedback',
+        'list',
+        '--project-id',
+        '1001',
+        '--abbr',
+        'D4,D5',
+        '--output',
+        'agent-json',
+      ],
+    ];
+    for (const args of invocations) {
+      const result = await runCli(args, configRoot);
+      assert.equal(result.exitCode, 2, `${args.join(' ')}\n${result.stdout}`);
+      assert.equal(result.stderr, '');
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(envelope.command, 'feedback.list');
+      assert.equal((envelope.error as Record<string, unknown>).code, 'INVALID_ARGUMENT');
+    }
   } finally {
     await rm(configRoot, { recursive: true, force: true });
   }

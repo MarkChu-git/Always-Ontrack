@@ -409,7 +409,8 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `task show` | 已修复 | - | selector 统一使用 taskDefinitionId，未实例化任务可读取 |
 | `plan show` | 已修复 | - | native typed definition-first contract；显式 date source、task/prerequisite required+current status、四态 visibility、独立 feedback deadline 和 normalized prerequisites；缺失 flexible-date capability fail-closed；body/output 均有边界 |
 | `inbox` | 路由仍在，需重新实测 | P1 | bundle 保留 endpoint，但未在本次学生主流程中触发 |
-| `feedback list/watch` | endpoint 基础仍在，模型不足 | P1 | comments 保留，但缺附件、语音、discussion thread/review |
+| `feedback list` | Agent 读取面已修复 | P1 | native typed `feedback.list` 从 scoped Student Task View 解析一项任务，只返回有界 comment/event timeline；保留 direct feedback text，排除 author/recipient、附件和 unknown fields；attachment、audio、discussion thread/review 仍未覆盖 |
+| `feedback watch` | endpoint 基础仍在，模型不足 | P1 | comments 保留，但缺附件、语音、discussion thread/review |
 | `watch` | 日期与状态语义不足 | P1 | 需要区分个人计划、unit 默认、feedback deadline 和派生状态 |
 | `pdf task` | 基本合同仍在 | P2 | task PDF endpoint 已确认，Web 现在支持内嵌 viewer |
 | `task resources` | 已接入真实下载合同 | - | definition-first；验证 ZIP magic；`FileNotFound.zip` 占位响应稳定归类为 unavailable；默认使用 `FIT0001-P1-TaskResources.zip` 风格 artifact 名称 |

@@ -8,6 +8,7 @@ import {
   agentUnitShowOutputSchema,
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
+  agentFeedbackListOutputSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
@@ -161,7 +162,7 @@ const singleTaskReadFields = {
   abbreviation: stringField('--abbr', false, {
     minLength: 1,
     maxLength: 64,
-    pattern: /\S/u,
+    pattern: /^(?=[^,]*\S)[^,]+$/u,
   }),
 };
 
@@ -320,7 +321,15 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   }),
   spec({ path: 'plan.set_dates', description: 'Prepare or apply personal task dates.', risk: 'write', idempotency: 'client_guarded', fields: { ...oneTaskSelector, start: stringField('--start', true), target: stringField('--target', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'plan.reset', description: 'Prepare or reset personal project dates.', risk: 'write', idempotency: 'client_guarded', fields: { project_id: integerField('--project-id', true), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
-  spec({ path: 'feedback.list', description: 'Read task feedback.', fields: jsonTaskSelector }),
+  spec({
+    path: 'feedback.list',
+    description: 'Read one task\'s bounded, person-free feedback timeline.',
+    fields: singleTaskReadFields,
+    inputSchema: singleTaskReadInputSchema,
+    outputSchema: z.toJSONSchema(agentFeedbackListOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({ path: 'feedback.watch', description: 'Stream task feedback changes.', streaming: true, fields: { ...oneTaskSelector, interval_seconds: integerField('--interval'), history: integerField('--history') } }),
   spec({ path: 'pdf.task', description: 'Download task PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
   spec({ path: 'pdf.submission', description: 'Download submission PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),

@@ -29,6 +29,7 @@ const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_AGENT_PROJECTS_RESPONSE_BYTES = 512 * 1024;
 const MAX_AGENT_PROJECT_RESPONSE_BYTES = 512 * 1024;
 const MAX_AGENT_UNIT_RESPONSE_BYTES = 512 * 1024;
+const MAX_AGENT_FEEDBACK_RESPONSE_BYTES = 512 * 1024;
 const MAX_TASK_PREREQUISITES_RESPONSE_BYTES = 512 * 1024;
 const MAX_SUBMISSION_DETAILS_RESPONSE_BYTES = 64 * 1024;
 
@@ -630,8 +631,12 @@ export class OnTrackApiClient {
     );
   }
 
-  /** Read comments/events for one task definition in a project. */
-  listTaskComments(session: SessionData, projectId: number, taskDefId: number): Promise<FeedbackItem[]> {
+  private listTaskCommentsWithLimit(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    maxResponseBytes?: number,
+  ): Promise<FeedbackItem[]> {
     return requestJson<FeedbackItem[]>(
       withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/comments`),
       {
@@ -644,6 +649,23 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
+      false,
+      maxResponseBytes,
+    );
+  }
+
+  /** Read comments/events for one task definition in a project. */
+  listTaskComments(session: SessionData, projectId: number, taskDefId: number): Promise<FeedbackItem[]> {
+    return this.listTaskCommentsWithLimit(session, projectId, taskDefId);
+  }
+
+  /** Read comments through the bounded Agent feedback transport. */
+  listTaskCommentsForAgent(session: SessionData, projectId: number, taskDefId: number): Promise<FeedbackItem[]> {
+    return this.listTaskCommentsWithLimit(
+      session,
+      projectId,
+      taskDefId,
+      MAX_AGENT_FEEDBACK_RESPONSE_BYTES,
     );
   }
 

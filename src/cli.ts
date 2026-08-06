@@ -59,6 +59,7 @@ import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
 import { createAgentTasksList } from './lib/agent-tasks.js';
 import { createAgentUnitShow } from './lib/agent-units.js';
+import { createAgentFeedbackList } from './lib/agent-feedback.js';
 import {
   createSubmissionAttempt,
   InvalidSubmissionDetailsError,
@@ -157,6 +158,8 @@ import {
   type AgentUnitShowOutput,
   type AgentTasksListInput,
   type AgentTasksListOutput,
+  type AgentFeedbackListInput,
+  type AgentFeedbackListOutput,
   type AgentSubmissionStatusInput,
   type AgentSubmissionStatusOutput,
   agentSubmissionStatusOutputSchema,
@@ -2372,6 +2375,51 @@ async function readAgentUnitShow(
   })(input);
 }
 
+async function readAgentFeedbackList(
+  input: AgentFeedbackListInput,
+  session: SessionData,
+): Promise<AgentFeedbackListOutput> {
+  const api = createAuthenticatedApi(session);
+  return createAgentFeedbackList({
+    readProject: (projectId) => api.getProjectForAgent(session, projectId),
+    readUnit: (unitId) => api.getUnitForAgent(session, unitId),
+    readFeedback: (projectId, taskDefinitionId) =>
+      api.listTaskCommentsForAgent(session, projectId, taskDefinitionId),
+  })(input);
+}
+
+function agentFeedbackListInputFromSelector(
+  selector: ReturnType<typeof parseTaskSelectorArgs>,
+): AgentFeedbackListInput {
+  if (selector.taskDefinitionId !== undefined) {
+    return {
+      project_id: selector.projectId,
+      task_definition_id: selector.taskDefinitionId,
+      ...(selector.abbr ? { abbreviation: selector.abbr } : {}),
+    };
+  }
+  if (selector.abbr === undefined) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'feedback.list requires task_definition_id or abbreviation.',
+    });
+  }
+  return { project_id: selector.projectId, abbreviation: selector.abbr };
+}
+
+function parseAgentFeedbackListSelector(
+  args: string[],
+): ReturnType<typeof parseTaskSelectorArgs> {
+  try {
+    return parseTaskSelectorArgs(args);
+  } catch {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'feedback.list requires exactly one task_definition_id or abbreviation.',
+    });
+  }
+}
+
 /** Build compact `status:count` summary used by project detail output. */
 function countTasksByStatus(tasks: StudentTaskRow[]): string {
   if (tasks.length === 0) {
@@ -3709,6 +3757,17 @@ function presentFeedbackRows(comments: FeedbackItem[]): Array<Record<string, unk
 
 /** List feedback/comments for one or many selected tasks. */
 async function handleFeedbackList(args: string[]): Promise<void> {
+  if (getAgentOutputContext()) {
+    const selector = parseAgentFeedbackListSelector(args);
+    const input = agentFeedbackListInputFromSelector(selector);
+    const session = await requireSession();
+    const output = await readAgentFeedbackList(
+      input,
+      session,
+    );
+    printJson(output);
+    return;
+  }
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
   const selector = parseTaskBatchSelectorArgs(args);
@@ -5217,6 +5276,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskPrerequisites(input, activeSession);
+      },
+      feedbackList: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentFeedbackList(input, activeSession);
       },
       taskResources: (input) => {
         if (!activeSession) {
