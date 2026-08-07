@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import { OnTrackHttpError, OnTrackTransportError } from './auth.js';
 import { MAX_DOWNLOAD_BYTES } from './artifact-safety.js';
+import { normalizeReadOnlyRoute } from './contracts.js';
 
 export { MAX_DOWNLOAD_BYTES } from './artifact-safety.js';
 
@@ -882,7 +883,7 @@ export class OnTrackApiClient {
 
   /** Lightweight GET probe used by discovery tooling to validate endpoint access. */
   async probeGet(session: SessionData, endpointPath: string): Promise<ProbeResult> {
-    const endpoint = normalizeProbePath(endpointPath);
+    const endpoint = normalizeReadOnlyRoute('GET', endpointPath).route;
     const response = await fetchOnTrack(withFlexibleApiPath(this.baseUrl, endpoint), {
       method: 'GET',
       headers: {

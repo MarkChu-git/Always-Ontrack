@@ -33,6 +33,27 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+test('probeGet canonicalizes allowlisted paths and refuses uncatalogued paths before fetch', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const requestedUrls: string[] = [];
+  mockFetch(async (input, init) => {
+    requestedUrls.push(String(input));
+    assert.equal(init?.method, 'GET');
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+
+  const result = await client.probeGet(session, '/api/projects/101');
+  assert.deepEqual(result, { endpoint: '/projects/101', status: 200, ok: true });
+  assert.equal(requestedUrls.length, 1);
+  assert.match(requestedUrls[0] ?? '', /\/api\/projects\/101$/);
+
+  await assert.rejects(
+    () => client.probeGet(session, '/projects/101/reset_target_dates'),
+    /not allowlisted/i,
+  );
+  assert.equal(requestedUrls.length, 1);
+});
+
 test('listTaskComments calls comments endpoint and includes auth headers', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   let requestedUrl = '';

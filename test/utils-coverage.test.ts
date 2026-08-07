@@ -57,6 +57,8 @@ test('normalization, SSO parsing, flags, and dates validate command-boundary inp
   assert.equal(parseIntegerFlagValue(' 42 ', '--project-id'), 42);
   assert.throws(() => parseIntegerFlagValue('--json', '--project-id'), /Missing value/);
   assert.throws(() => parseIntegerFlagValue('nope', '--project-id'), /Expected an integer/);
+  assert.throws(() => parseIntegerFlagValue('42trailing', '--project-id'), /Expected an integer/);
+  assert.throws(() => parseIntegerFlagValue('9007199254740992', '--project-id'), /Expected an integer/);
   assert.equal(formatDate('2026-08-09T23:00:00.000Z'), '2026-08-09');
   assert.equal(formatDate('not-a-date'), 'not-a-date');
   assert.equal(formatDate(), '-');

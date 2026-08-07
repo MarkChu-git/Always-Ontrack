@@ -1,6 +1,6 @@
 import type { ProbeResult } from './api.js';
-import type { ProjectSummary, SessionData } from './types.js';
-import { getTaskDefinitionId } from './utils.js';
+import { normalizeReadOnlyRoute } from './contracts.js';
+import type { SessionData } from './types.js';
 
 /**
  * Static frontend discovery helpers.
@@ -13,8 +13,8 @@ import { getTaskDefinitionId } from './utils.js';
 const DEFAULT_SITE_URL = 'https://ontrack.infotech.monash.edu/home';
 const DEFAULT_SITE_ORIGIN = new URL(DEFAULT_SITE_URL).origin;
 
-const PATH_LITERAL_PATTERN = /(["'`])(\/[A-Za-z0-9_./:-]+)\1/g;
 const JS_SCRIPT_PATTERN = /<(?:script|link)\b[^>]*(?:src|href)=["']([^"']+\.js)["'][^>]*>/gi;
+const IDENTIFIER_EXPRESSION_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
 const ASSET_IGNORE_PATTERN = /\.(?:js|css|woff2?|ttf|png|jpe?g|svg|ico|map)$/i;
 
@@ -55,9 +55,13 @@ export interface ProbeItem {
 }
 
 export interface ProbeApiClient {
-  listProjects(session: SessionData): Promise<ProjectSummary[]>;
   probeGet(session: SessionData, endpointPath: string): Promise<ProbeResult>;
 }
+
+/** Conservative cap for all authenticated discovery probes in one invocation. */
+export const MAX_DISCOVERY_PROBE_REQUEST_BUDGET = 25;
+/** Default probe budget prevents bundle discovery from fanning out across an account. */
+export const DEFAULT_DISCOVERY_PROBE_REQUEST_BUDGET = 10;
 
 /**
  * Normalize discovered path literals and drop obvious noise:
@@ -67,7 +71,7 @@ export interface ProbeApiClient {
  */
 function normalizePath(raw: string): string | null {
   const trimmed = raw.trim();
-  if (!trimmed.startsWith('/')) {
+  if (!trimmed.startsWith('/') || trimmed.includes('?') || trimmed.includes('#')) {
     return null;
   }
 
@@ -123,16 +127,156 @@ export function extractJavascriptAssetPaths(html: string): string[] {
   return [...paths];
 }
 
-/** Extract normalized absolute-like paths from string literals inside JS sources. */
+interface ParsedString {
+  readonly value: string;
+  readonly end: number;
+}
+
+/** Read one quoted JavaScript string without evaluating any source expression. */
+function readQuotedString(source: string, start: number): ParsedString | null {
+  const quote = source[start];
+  if (quote !== "'" && quote !== '"') {
+    return null;
+  }
+
+  let value = '';
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '\\') {
+      const escaped = source[index + 1];
+      if (escaped === undefined) {
+        return null;
+      }
+      value += escaped;
+      index += 1;
+      continue;
+    }
+    if (character === quote) {
+      return { value, end: index + 1 };
+    }
+    if (character === '\n' || character === '\r') {
+      return null;
+    }
+    value += character;
+  }
+  return null;
+}
+
+/** Convert a static identifier/member expression into an auditable path parameter. */
+function placeholderForExpression(expression: string): string | null {
+  if (!IDENTIFIER_EXPRESSION_PATTERN.test(expression)) {
+    return null;
+  }
+  const name = expression
+    .split('.')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join('_');
+  return name ? `:${name}` : null;
+}
+
+/** Read a single template literal while retaining only safe named interpolations. */
+function readTemplatePath(source: string, start: number): ParsedString | null {
+  if (source[start] !== '`') {
+    return null;
+  }
+  const end = source.indexOf('`', start + 1);
+  if (end === -1) {
+    return null;
+  }
+  const raw = source.slice(start + 1, end);
+  let valid = true;
+  const value = raw.replace(/\$\{([^{}]+)\}/g, (_match, expression: string) => {
+    const placeholder = placeholderForExpression(expression.trim());
+    if (!placeholder) {
+      valid = false;
+      return '';
+    }
+    return placeholder;
+  });
+  return valid && !value.includes('${') ? { value, end: end + 1 } : null;
+}
+
+function skipWhitespace(source: string, start: number): number {
+  let index = start;
+  while (index < source.length && /\s/.test(source[index] ?? '')) {
+    index += 1;
+  }
+  return index;
+}
+
+/** Only delimiters may follow an identifier/member path segment. */
+function isStaticExpressionBoundary(character: string | undefined): boolean {
+  return character === undefined || ['+', ';', ',', ')', ']', '}'].includes(character);
+}
+
+/** Reconstruct a path assembled only from quoted strings and identifier members. */
+function readConcatenatedPath(source: string, start: number): ParsedString | null {
+  const first = readQuotedString(source, start);
+  if (!first || !first.value.startsWith('/')) {
+    return null;
+  }
+
+  let value = first.value;
+  let cursor = skipWhitespace(source, first.end);
+  let sawConcatenation = false;
+  while (source[cursor] === '+') {
+    cursor = skipWhitespace(source, cursor + 1);
+    const stringPart = readQuotedString(source, cursor);
+    if (stringPart) {
+      value += stringPart.value;
+      cursor = skipWhitespace(source, stringPart.end);
+      sawConcatenation = true;
+      continue;
+    }
+
+    const expressionMatch = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/.exec(
+      source.slice(cursor),
+    );
+    if (!expressionMatch) {
+      return null;
+    }
+    const placeholder = placeholderForExpression(expressionMatch[0]);
+    if (!placeholder) {
+      return null;
+    }
+    value += placeholder;
+    cursor = skipWhitespace(source, cursor + expressionMatch[0].length);
+    if (!isStaticExpressionBoundary(source[cursor])) {
+      return null;
+    }
+    sawConcatenation = true;
+  }
+
+  return sawConcatenation ? { value, end: cursor } : null;
+}
+
+function isConcatenationPart(source: string, start: number, end: number): boolean {
+  const before = source.slice(0, start).trimEnd();
+  const after = source.slice(end).trimStart();
+  return before.endsWith('+') || after.startsWith('+');
+}
+
+/** Extract normalized absolute-like paths from static JS literals and concatenations. */
 export function extractDiscoveredPaths(source: string): string[] {
   const matches = new Set<string>();
-  let match: RegExpExecArray | null = PATH_LITERAL_PATTERN.exec(source);
-  while (match) {
-    const normalized = normalizePath(match[2] || '');
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const parsed = character === '`'
+      ? readTemplatePath(source, index)
+      : readConcatenatedPath(source, index) ?? readQuotedString(source, index);
+    if (!parsed) {
+      continue;
+    }
+    if (character !== '`' && isConcatenationPart(source, index, parsed.end)) {
+      index = parsed.end - 1;
+      continue;
+    }
+    const normalized = normalizePath(parsed.value);
     if (normalized) {
       matches.add(normalized);
     }
-    match = PATH_LITERAL_PATTERN.exec(source);
+    index = parsed.end - 1;
   }
   return [...matches];
 }
@@ -252,34 +396,44 @@ export async function discoverOnTrackSurface(): Promise<DiscoveryResult> {
 }
 
 export interface ProbeContext {
-  projectId?: number;
-  unitId?: number;
-  taskDefId?: number;
+  readonly projectId?: number;
+  readonly unitId?: number;
+  readonly taskDefinitionId?: number;
 }
 
-/** Build best-effort probe context from the first visible project/task. */
-function toProbeContext(projects: ProjectSummary[]): ProbeContext {
-  const project = projects[0];
-  if (!project) {
-    return {};
-  }
-  return {
-    projectId: project.id,
-    unitId: project.unit?.id,
-    taskDefId: project.tasks?.length ? getTaskDefinitionId(project.tasks[0]) : undefined,
-  };
+export interface ProbeOptions {
+  readonly requestBudget?: number;
 }
 
 const PARAM_RESOLVER: Record<string, keyof ProbeContext> = {
   projectid: 'projectId',
-  project_id: 'projectId',
   unitid: 'unitId',
-  unit_id: 'unitId',
-  id: 'unitId',
-  taskdefid: 'taskDefId',
-  task_def_id: 'taskDefId',
-  task_definition_id: 'taskDefId',
+  taskdefid: 'taskDefinitionId',
+  taskdefinitionid: 'taskDefinitionId',
 };
+
+function contextKeyForParameter(
+  rawName: string,
+  template: string,
+  parameterOffset: number,
+): keyof ProbeContext | undefined {
+  const normalizedName = rawName.replace(/[_-]/g, '').toLowerCase();
+  if (normalizedName !== 'id') {
+    return PARAM_RESOLVER[normalizedName];
+  }
+
+  const prefix = template.slice(0, parameterOffset);
+  if (/\/projects\/$/.test(prefix)) {
+    return 'projectId';
+  }
+  if (/\/units\/$/.test(prefix)) {
+    return 'unitId';
+  }
+  if (/\/(?:task_def_id|task_definitions)\/$/.test(prefix)) {
+    return 'taskDefinitionId';
+  }
+  return undefined;
+}
 
 /** Replace `:param` placeholders with concrete context values where possible. */
 function materializeEndpoint(template: string, context: ProbeContext): {
@@ -287,9 +441,8 @@ function materializeEndpoint(template: string, context: ProbeContext): {
   unresolved: string[];
 } {
   const unresolved: string[] = [];
-  const endpoint = template.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_, rawName: string) => {
-    const key = rawName.toLowerCase();
-    const contextKey = PARAM_RESOLVER[key];
+  const endpoint = template.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_, rawName: string, offset: number) => {
+    const contextKey = contextKeyForParameter(rawName, template, offset);
     if (!contextKey || context[contextKey] === undefined) {
       unresolved.push(rawName);
       return `:${rawName}`;
@@ -310,6 +463,16 @@ function materializeEndpoint(template: string, context: ProbeContext): {
   };
 }
 
+function probeRequestBudget(options: ProbeOptions): number {
+  const requested = options.requestBudget ?? DEFAULT_DISCOVERY_PROBE_REQUEST_BUDGET;
+  if (!Number.isInteger(requested) || requested < 1 || requested > MAX_DISCOVERY_PROBE_REQUEST_BUDGET) {
+    throw new Error(
+      `Probe request budget must be an integer between 1 and ${MAX_DISCOVERY_PROBE_REQUEST_BUDGET}.`,
+    );
+  }
+  return requested;
+}
+
 /** Standardize probe status text to keep table output compact. */
 function statusDetail(result: ProbeResult): string {
   return result.ok ? `HTTP ${result.status}` : `HTTP ${result.status} (not accessible)`;
@@ -323,12 +486,11 @@ export async function probeDiscoveredApiTemplates(
   api: ProbeApiClient,
   session: SessionData,
   templates: string[],
-  contextOverride?: ProbeContext,
+  context: ProbeContext = {},
+  options: ProbeOptions = {},
 ): Promise<ProbeItem[]> {
-  const context =
-    contextOverride ??
-    toProbeContext(await api.listProjects(session));
-
+  const requestBudget = probeRequestBudget(options);
+  let requestsSent = 0;
   const probeItems: ProbeItem[] = [];
   for (const template of templates) {
     const materialized = materializeEndpoint(template, context);
@@ -341,18 +503,41 @@ export async function probeDiscoveredApiTemplates(
       continue;
     }
 
+    let route: string;
     try {
-      const result = await api.probeGet(session, materialized.endpoint);
+      route = normalizeReadOnlyRoute('GET', materialized.endpoint).route;
+    } catch (error) {
       probeItems.push({
         template,
-        endpoint: result.endpoint,
+        status: 'skip',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    if (requestsSent >= requestBudget) {
+      probeItems.push({
+        template,
+        endpoint: route,
+        status: 'skip',
+        detail: `Probe request budget exhausted (${requestBudget} request(s)).`,
+      });
+      continue;
+    }
+
+    try {
+      requestsSent += 1;
+      const result = await api.probeGet(session, route);
+      probeItems.push({
+        template,
+        endpoint: route,
         status: result.ok ? 'ok' : 'error',
         detail: statusDetail(result),
       });
     } catch (error) {
       probeItems.push({
         template,
-        endpoint: materialized.endpoint,
+        endpoint: route,
         status: 'error',
         detail: error instanceof Error ? error.message : String(error),
       });

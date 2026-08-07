@@ -31,6 +31,7 @@ import {
 import type { MfaMethodOption } from "./lib/auto-login.js";
 import type { LoginCredentials } from './lib/auto-login.js';
 import {
+  MAX_DISCOVERY_PROBE_REQUEST_BUDGET,
   discoverOnTrackSurface,
   probeDiscoveredApiTemplates,
 } from "./lib/discovery.js";
@@ -275,7 +276,7 @@ Usage:
   ontrack unit tasks --unit-id ID [--status STATUS] [--json]
   ontrack tasks [--project-id ID] [--status STATUS] [--json]
   ontrack doctor [--json]
-  ontrack discover [--probe] [--limit N] [--json]
+  ontrack discover [--probe] [--project-id ID] [--unit-id ID] [--task-definition-id ID] [--limit N] [--json]
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
@@ -2952,33 +2953,43 @@ function applyLimit<T>(items: T[], limit?: number): T[] {
 /** Frontend route/API discovery helper with optional real-session probe mode. */
 async function handleDiscover(args: string[]): Promise<void> {
   const probe = hasFlag(args, '--probe');
+  const hasProbeSelector = [
+    '--project-id',
+    '--unit-id',
+    '--task-definition-id',
+  ].some((flag) => hasFlag(args, flag));
   const limit = hasFlag(args, '--limit')
     ? parseIntegerFlagValue(getFlagValue(args, '--limit'), '--limit')
     : undefined;
 
+  if (!probe && hasProbeSelector) {
+    throw new Error('Discovery selectors require --probe.');
+  }
   if (limit !== undefined && limit < 1) {
     throw new Error('--limit must be at least 1.');
+  }
+  if (probe && limit !== undefined && limit > MAX_DISCOVERY_PROBE_REQUEST_BUDGET) {
+    throw new Error(
+      `--limit must be at most ${MAX_DISCOVERY_PROBE_REQUEST_BUDGET} when used with --probe.`,
+    );
   }
 
   if (probe) {
     // Probe mode requires authenticated session and checks endpoint accessibility.
+    const probeContext = {
+      projectId: parseOptionalInteger(args, '--project-id'),
+      unitId: parseOptionalInteger(args, '--unit-id'),
+      taskDefinitionId: parseOptionalInteger(args, '--task-definition-id'),
+    };
     const session = await requireSession();
     const api = createAuthenticatedApi(session);
     const discovery = await discoverOnTrackSurface();
-    const apiTemplates = applyLimit(discovery.apiTemplates, limit);
-    const projects = await loadProjectsWithTaskMetadata(api, session);
-    const firstProject = projects[0];
-    // Seed param placeholders (:projectId/:unitId/:taskDefId) from first accessible project.
-    const probeContext = firstProject
-      ? {
-          projectId: firstProject.id,
-          unitId: firstProject.unit?.id,
-          taskDefId: firstProject.tasks?.length
-            ? getTaskDefinitionId(firstProject.tasks[0])
-            : undefined,
-        }
-      : undefined;
-    const probeItems = await probeDiscoveredApiTemplates(api, session, apiTemplates, probeContext);
+    // In probe mode --limit is a request budget, not an output truncation.
+    // Keep the reported candidates aligned with the templates being evaluated.
+    const apiTemplates = discovery.apiTemplates;
+    const probeItems = await probeDiscoveredApiTemplates(api, session, discovery.apiTemplates, probeContext, {
+      requestBudget: limit,
+    });
 
     if (hasFlag(args, '--json')) {
       printJson({
