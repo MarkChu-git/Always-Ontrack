@@ -288,6 +288,26 @@ test('native definitions keep safety metadata aligned with the compatibility pro
         sha256: 'a'.repeat(64),
       },
     }),
+    submissionPdf: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      unit_code: 'FIT0001',
+      task_definition_id: 3,
+      task_instance_id: null,
+      abbreviation: 'P1',
+      instantiated: false,
+      has_pdf: true,
+      processing_pdf: false,
+      pdf_state: 'ready' as const,
+      submission_observed: true as const,
+      artifact: {
+        filename: 'FIT0001-P1-submission.pdf',
+        path: 'downloads/FIT0001-P1-submission.pdf',
+        bytes: 5,
+        content_type: 'application/pdf',
+        sha256: 'a'.repeat(64),
+      },
+    }),
     planShow: async () => ({
       project_id: 1,
       unit_id: 2,
@@ -318,6 +338,7 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   assert.equal(commands.some((command) => command.path === 'unit.show'), true);
   assert.equal(commands.some((command) => command.path === 'tutorials.status'), true);
   assert.equal(commands.some((command) => command.path === 'pdf.task'), true);
+  assert.equal(commands.some((command) => command.path === 'pdf.submission'), true);
   assert.equal(commands.some((command) => command.path === 'submission.status'), true);
 
   for (const command of commands) {

@@ -160,6 +160,8 @@ ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ontrack agent call pdf.task \
   --input-json '{"project_id":87,"abbreviation":"D4","out_dir":"downloads"}'
+ontrack agent call pdf.submission \
+  --input-json '{"project_id":87,"abbreviation":"D4","out_dir":"downloads"}'
 ```
 
 Start with `projects.list`, then use its `project_id` to inspect the matching
@@ -167,7 +169,7 @@ Start with `projects.list`, then use its `project_id` to inspect the matching
 Task Definition for a task-specific read. The native surface currently covers
 `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`,
 `task.show`, `task.prerequisites`, `feedback.list`, `task.resources`, `pdf.task`,
-`plan.show`, and `submission.status`. More commands are added only as
+`pdf.submission`, `plan.show`, and `submission.status`. More commands are added only as
 individually reviewed vertical slices. Use `--input -` for bounded,
 non-interactive stdin.
 
@@ -185,6 +187,7 @@ non-interactive stdin.
 | `feedback.list` | One task's bounded, person-free feedback timeline |
 | `task.resources` | Definition-first resource artifacts and metadata |
 | `pdf.task` | One Task Definition's task-sheet PDF artifact |
+| `pdf.submission` | One ready submission PDF artifact |
 | `plan.show` | Definition-first plan and date-source view |
 | `submission.status` | Definition-first submission lifecycle status |
 
@@ -210,6 +213,13 @@ and SHA-256) and reports unavailable archives without writing placeholders.
 validates the downloaded `%PDF-` signature, and returns the same bounded artifact
 metadata without guessing a Task Instance. It accepts `application/octet-stream`
 only when the downloaded bytes are a valid PDF signature.
+`pdf.submission` uses the same single-Task-Definition selector, first reads the
+strict observed submission state, and downloads only when its PDF is ready. A
+processing PDF returns retryable `CONFLICT` with a `submission.status` next action;
+an unavailable PDF returns `NOT_FOUND`. Its native download rejects placeholders
+and invalid `%PDF-` bytes before the existing artifact can be overwritten. The
+legacy batch `pdf submission --json` and `pdf submission --output agent-json`
+commands retain their compatibility behavior.
 `feedback.list` resolves one task from the same authoritative catalogue and
 returns at most 200 bounded comment/event records. It retains direct feedback
 text so an Agent can act on it, but never returns author/recipient profiles,
@@ -239,14 +249,16 @@ continues to keep its legacy raw shape.
 
 ### Discover the protocol
 
-Agents should discover capabilities and schemas instead of scraping help text:
+Native callers should discover their executable surface instead of scraping help text:
 
 ```bash
-ontrack capabilities --output agent-json
-ontrack schema task.show --output agent-json
+ontrack agent list
+ontrack agent describe pdf.submission
 ```
 
-`--output agent-json` returns the stable `ontrack.agent/v1` envelope with a
+The existing `capabilities`, `schema`, and `--output agent-json` commands are a
+broader compatibility Adapter; their schemas describe that adapter's batch-capable
+surfaces. `--output agent-json` returns the stable `ontrack.agent/v1` envelope with a
 request id, command path, status, structured data, warnings, next actions, and
 artifacts. Errors use stable codes and exit statuses. Existing bare `--json`
 keeps its pre-0.5 raw shape.
@@ -583,7 +595,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope. Current commands: `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `task.resources`, `pdf.task`, `plan.show`, and `submission.status` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope. Current commands: `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `task.resources`, `pdf.task`, `pdf.submission`, `plan.show`, and `submission.status` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |

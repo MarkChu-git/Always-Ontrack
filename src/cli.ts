@@ -203,6 +203,8 @@ import {
   type AgentTaskResourcesOutput,
   type AgentTaskPdfInput,
   type AgentTaskPdfOutput,
+  type AgentSubmissionPdfInput,
+  type AgentSubmissionPdfOutput,
 } from './lib/agent-commands.js';
 import { createOnTrackAuthBroker } from './lib/auth-broker.js';
 import {
@@ -4183,7 +4185,11 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
               })(),
             resolved.taskDefId,
           )
-        : await api.downloadSubmissionPdf(session, resolved.project.id, resolved.taskDefId);
+        : await api.downloadSubmissionPdfForCompatibility(
+            session,
+            resolved.project.id,
+            resolved.taskDefId,
+          );
 
     // Persist with deterministic filename format for easy scripting and lookup.
     const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
@@ -5399,6 +5405,100 @@ async function readAgentTaskPdf(
   return buildAgentTaskPdfOutput(resolved, unitId, download, filePath, filename);
 }
 
+function requireAgentSubmissionPdfReady(
+  resolved: ResolvedTaskSelector,
+  details: SubmissionDetails,
+): void {
+  if (details.pdfState === 'processing') {
+    throw new AgentProtocolError({
+      code: 'CONFLICT',
+      summary: 'The submission PDF is still processing.',
+      retryable: true,
+      nextActions: [
+        {
+          action: 'submission.status',
+          arguments: {
+            project_id: resolved.project.id,
+            task_definition_id: resolved.taskDefId,
+          },
+        },
+      ],
+    });
+  }
+  if (details.pdfState === 'unavailable') {
+    throw new AgentProtocolError({
+      code: 'NOT_FOUND',
+      summary: 'The submission PDF is not available.',
+    });
+  }
+}
+
+function buildAgentSubmissionPdfOutput(
+  resolved: ResolvedTaskSelector,
+  download: DownloadResult,
+  filePath: string,
+  filename: string,
+): AgentSubmissionPdfOutput {
+  return {
+    project_id: resolved.project.id,
+    unit_id: resolved.unitId ?? null,
+    unit_code: resolved.unitCode
+      ? safeTextForHumanDisplay(resolved.unitCode, 'unit')
+      : null,
+    task_definition_id: resolved.taskDefId,
+    task_instance_id: resolved.taskInstanceId ?? null,
+    abbreviation: safeTextForHumanDisplay(resolved.abbr, String(resolved.taskDefId)),
+    instantiated: resolved.task.isInstantiated === true,
+    has_pdf: true,
+    processing_pdf: false,
+    pdf_state: 'ready',
+    submission_observed: true,
+    artifact: {
+      filename,
+      path: relative(process.cwd(), filePath) || filename,
+      bytes: download.buffer.byteLength,
+      content_type: safeTextForHumanDisplay(download.contentType, 'application/pdf'),
+      sha256: createHash('sha256').update(download.buffer).digest('hex'),
+    },
+  };
+}
+
+/** Download one ready submission PDF through the strict native contract. */
+async function readAgentSubmissionPdf(
+  input: AgentSubmissionPdfInput,
+  session: SessionData,
+): Promise<AgentSubmissionPdfOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const resolved = resolveTaskSelector(projects, {
+    projectId: input.project_id,
+    taskDefinitionId:
+      'task_definition_id' in input ? input.task_definition_id : undefined,
+    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
+  });
+  const details = parseStrictSubmissionDetails(
+    await api.getSubmissionDetails(session, resolved.project.id, resolved.taskDefId),
+  );
+  requireAgentSubmissionPdfReady(resolved, details);
+  const download = await api.downloadSubmissionPdf(
+    session,
+    resolved.project.id,
+    resolved.taskDefId,
+  );
+  const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, 'submission');
+  const filePath = await writeArtifactFile(download.buffer, filename, {
+    root: process.cwd(),
+    outDir: input.out_dir,
+    allowExternal: input.allow_external_dir,
+  });
+  return buildAgentSubmissionPdfOutput(resolved, download, filePath, filename);
+}
+
 async function readAgentSubmissionStatus(
   input: AgentSubmissionStatusInput,
   session: SessionData,
@@ -5549,6 +5649,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskPdf(input, activeSession);
+      },
+      submissionPdf: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentSubmissionPdf(input, activeSession);
       },
       planShow: (input) => {
         if (!activeSession) {
@@ -5826,7 +5935,7 @@ function normalizeAgentCliError(error: unknown): AgentProtocolError {
   if (error instanceof InvalidPdfDownloadError) {
     return new AgentProtocolError({
       code: 'REMOTE_UNAVAILABLE',
-      summary: 'OnTrack returned an invalid task PDF.',
+      summary: 'OnTrack returned an invalid PDF download.',
       cause: error,
     });
   }

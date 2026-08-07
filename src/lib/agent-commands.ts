@@ -289,6 +289,28 @@ export const agentTaskPdfOutputSchema = z
 export type AgentTaskPdfInput = z.output<typeof agentTaskPdfInputSchema>;
 export type AgentTaskPdfOutput = z.output<typeof agentTaskPdfOutputSchema>;
 
+/** Typed caller contract for one ready submission snapshot PDF. */
+export const agentSubmissionPdfInputSchema = agentTaskPdfInputSchema;
+export const agentSubmissionPdfOutputSchema = z
+  .object({
+    project_id: taskShowProjectId,
+    unit_id: taskShowUnitId.nullable(),
+    unit_code: agentTaskListSafeText.min(1).max(80).nullable(),
+    task_definition_id: taskShowDefinitionId,
+    task_instance_id: z.number().int().positive().nullable(),
+    abbreviation: agentTaskListSafeText.min(1).max(80),
+    instantiated: z.boolean(),
+    has_pdf: z.literal(true),
+    processing_pdf: z.literal(false),
+    pdf_state: z.literal('ready'),
+    submission_observed: z.literal(true),
+    artifact: agentTaskResourceArtifactSchema,
+  })
+  .strict();
+
+export type AgentSubmissionPdfInput = z.output<typeof agentSubmissionPdfInputSchema>;
+export type AgentSubmissionPdfOutput = z.output<typeof agentSubmissionPdfOutputSchema>;
+
 const agentTaskResourceDownloadSchema = z
   .object({
     project_id: z.number().int().positive(),
@@ -599,6 +621,7 @@ export interface NativeAgentCommandHandlers {
   feedbackList(input: AgentFeedbackListInput): Promise<AgentFeedbackListOutput>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
   taskPdf(input: AgentTaskPdfInput): Promise<AgentTaskPdfOutput>;
+  submissionPdf(input: AgentSubmissionPdfInput): Promise<AgentSubmissionPdfOutput>;
   planShow(input: AgentPlanShowInput): Promise<AgentPlanShowOutput>;
   submissionStatus(
     input: AgentSubmissionStatusInput,
@@ -742,6 +765,18 @@ export function createNativeAgentCommands(
       input: agentTaskPdfInputSchema,
       output: agentTaskPdfOutputSchema,
       execute: (input) => handlers.taskPdf(input),
+    }),
+    defineAgentCommand({
+      path: 'pdf.submission',
+      description: 'Download ready submission PDF artifacts.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentSubmissionPdfInputSchema,
+      output: agentSubmissionPdfOutputSchema,
+      execute: (input) => handlers.submissionPdf(input),
     }),
     defineAgentCommand({
       path: 'plan.show',

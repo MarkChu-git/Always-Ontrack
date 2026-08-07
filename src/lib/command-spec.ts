@@ -368,7 +368,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   }),
   spec({ path: 'feedback.watch', description: 'Stream bounded, person-free task feedback frames.', streaming: true, fields: feedbackWatchFields, inputSchema: feedbackWatchInputSchema, outputSchema: z.toJSONSchema(agentFeedbackWatchFrameSchema) as Readonly<Record<string, unknown>> }),
   spec({ path: 'pdf.task', description: 'Download one Task Definition task-sheet PDF.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
-  spec({ path: 'pdf.submission', description: 'Download submission PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
+  spec({ path: 'pdf.submission', description: 'Download ready submission PDF artifacts.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
   spec({
     path: 'submission.status',
     description: 'Read submission lifecycle status.',
