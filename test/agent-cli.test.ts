@@ -2498,6 +2498,7 @@ test("agent list and describe are offline projections of the executable commands
         "feedback.list",
         "task.resources",
         "pdf.task",
+        "pdf.submission",
         "plan.show",
         "submission.status",
       ],

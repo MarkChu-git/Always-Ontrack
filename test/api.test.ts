@@ -385,6 +385,48 @@ test('downloadTaskPdf rejects successful non-PDF payloads', async () => {
   );
 });
 
+test('downloadSubmissionPdf validates PDF responses while the compatibility adapter remains pass-through', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const placeholder = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d]);
+  mockFetch(async () =>
+    new Response(placeholder, {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': 'attachment; filename=FileNotFound.pdf',
+      },
+    }),
+  );
+  await assert.rejects(
+    () => client.downloadSubmissionPdf(session, 101, 501),
+    (error: unknown) => error instanceof UnavailableDownloadError,
+  );
+
+  mockFetch(async () =>
+    new Response('<html>not a PDF</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  );
+  await assert.rejects(
+    () => client.downloadSubmissionPdf(session, 101, 501),
+    (error: unknown) => error instanceof InvalidPdfDownloadError,
+  );
+
+  mockFetch(async () =>
+    new Response('<html>legacy payload</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  );
+  const compatibility = await client.downloadSubmissionPdfForCompatibility(
+    session,
+    101,
+    501,
+  );
+  assert.equal(compatibility.buffer.toString('utf8'), '<html>legacy payload</html>');
+});
+
 test('downloadTaskResources uses the production task-resource endpoint and returns ZIP bytes', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   let requestedUrl = '';

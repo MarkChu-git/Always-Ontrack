@@ -155,13 +155,15 @@ ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ontrack agent call pdf.task \
   --input-json '{"project_id":87,"abbreviation":"D4","out_dir":"downloads"}'
+ontrack agent call pdf.submission \
+  --input-json '{"project_id":87,"abbreviation":"D4","out_dir":"downloads"}'
 ```
 
 应先调用 `projects.list`，再使用返回的 `project_id` 读取同一项目的 `unit.show`、
 `tutorials.status` 与 `tasks.list` 投影，最后选择一个 Task Definition 进行任务级读取。
 当前原生接口覆盖 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、
 `tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、
-`plan.show` 与 `submission.status`；新命令只会按独立审查的垂直切片加入。也可以使用
+`pdf.submission`、`plan.show` 与 `submission.status`；新命令只会按独立审查的垂直切片加入。也可以使用
 `--input -` 读取有大小上限的非交互 stdin。
 
 #### 原生命令目录
@@ -178,6 +180,7 @@ ontrack agent call pdf.task \
 | `feedback.list` | 单个任务有边界、无人员信息的 feedback timeline |
 | `task.resources` | definition-first 的资源 artifact 与元数据 |
 | `pdf.task` | 单个 Task Definition 的 task-sheet PDF artifact |
+| `pdf.submission` | 单个已就绪 submission PDF 的 artifact |
 | `plan.show` | definition-first 的计划与日期来源视图 |
 | `submission.status` | definition-first 的 submission 生命周期状态 |
 
@@ -198,6 +201,11 @@ artifact 元数据（文件名、相对路径、字节数、content type、SHA-2
 `pdf.task` 有意只支持单个 definition：它解析一个 Task Definition，验证下载内容的
 `%PDF-` 签名，并返回相同的有边界 artifact 元数据，绝不猜测 Task Instance。只有字节
 包含有效 PDF 签名时，才接受 `application/octet-stream`。
+`pdf.submission` 使用同一个单 Task Definition selector，先读取严格的已观察 submission
+状态，只有 PDF 已就绪才下载。PDF 仍在生成时返回可重试的 `CONFLICT`，并给出
+`submission.status` next action；没有 PDF 时返回 `NOT_FOUND`。原生命令会在覆盖已有
+artifact 前拒绝占位文件和无效 `%PDF-` 字节；旧的批量 `pdf submission --json` 与
+`pdf submission --output agent-json` 都保持兼容行为。
 `plan.show` 复用 definition-first catalogue，显式返回可选 task instance 身份与状态、
 personal/grade/unit/missing 日期来源、独立 feedback deadline 和归一化 prerequisites。
 prerequisite 同时返回 required/current status，并保留 tutorial mismatch 与 unknown
@@ -216,15 +224,16 @@ fail closed。unit-wide prerequisite 响应与 canonical 输出均限制为 512 
 
 ### 发现协议
 
-Agent 应查询 capability 与 schema，不需要解析帮助文本：
+原生调用方应发现可执行接口，而不是解析帮助文本：
 
 ```bash
-ontrack capabilities --output agent-json
-ontrack schema task.show --output agent-json
+ontrack agent list
+ontrack agent describe pdf.submission
 ```
 
-`--output agent-json` 返回稳定的 `ontrack.agent/v1` envelope，包含 request
-id、command path、状态、结构化数据、warnings、next actions 与 artifacts。
+现有的 `capabilities`、`schema` 和 `--output agent-json` 是覆盖面更广的兼容 Adapter；
+它们的 schema 描述该 Adapter 的批量命令表面。`--output agent-json` 返回稳定的
+`ontrack.agent/v1` envelope，包含 request id、command path、状态、结构化数据、warnings、next actions 与 artifacts。
 错误使用稳定 code 和退出码。原来的裸 `--json` 在 0.5 中继续保持旧的原始
 shape。
 
@@ -541,7 +550,7 @@ ontrack logout
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、`plan.show`、`submission.status` |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、`pdf.submission`、`plan.show`、`submission.status` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |

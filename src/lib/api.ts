@@ -901,8 +901,7 @@ export class OnTrackApiClient {
       .then(requireZipDownload);
   }
 
-  /** Download submission snapshot PDF. */
-  downloadSubmissionPdf(
+  private requestSubmissionPdf(
     session: SessionData,
     projectId: number,
     taskDefId: number,
@@ -923,6 +922,26 @@ export class OnTrackApiClient {
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
     );
+  }
+
+  /** Download and validate one submission snapshot PDF. */
+  downloadSubmissionPdf(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return this.requestSubmissionPdf(session, projectId, taskDefId)
+      .then(requireAvailableDownload)
+      .then(requirePdfDownload);
+  }
+
+  /** Preserve the human CLI's established pass-through submission-PDF semantics. */
+  downloadSubmissionPdfForCompatibility(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return this.requestSubmissionPdf(session, projectId, taskDefId);
   }
 
   /** Lightweight GET probe used by discovery tooling to validate endpoint access. */
