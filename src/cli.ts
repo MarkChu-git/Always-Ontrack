@@ -61,10 +61,8 @@ import {
 import type { RawTaskPrerequisite } from './lib/planner.js';
 import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
-import {
-  createAgentTasksList,
-  createAgentTutorialsStatus,
-} from './lib/agent-tasks.js';
+import { createAgentTasksList } from './lib/agent-tasks.js';
+import { createAgentTutorialsStatus } from './lib/agent-tutorials.js';
 import { createAgentUnitShow } from './lib/agent-units.js';
 import {
   createAgentFeedbackList,

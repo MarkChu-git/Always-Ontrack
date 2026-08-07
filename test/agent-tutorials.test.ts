@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import { AgentProtocolError } from '../src/lib/agent-protocol.js';
-import { createAgentTutorialsStatus } from '../src/lib/agent-tasks.js';
+import {
+  createAgentTutorialsStatus,
+  type AgentTasksListSource,
+} from '../src/lib/agent-tasks.js';
 
 test('tutorial status resolves enrolled streams without exposing tutorial or learner details', async () => {
   const project = {
@@ -24,10 +27,11 @@ test('tutorial status resolves enrolled streams without exposing tutorial or lea
   };
   const originalProject = structuredClone(project);
   const originalUnit = structuredClone(unit);
-  const readTutorialStatus = createAgentTutorialsStatus({
+  const source = {
     readProject: async () => project,
     readUnit: async () => unit,
-  });
+  } satisfies AgentTasksListSource;
+  const readTutorialStatus = createAgentTutorialsStatus(source);
 
   const output = await readTutorialStatus({ project_id: 1001 });
 
