@@ -160,20 +160,41 @@ ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
 ```
 
+Start with `projects.list`, then use its `project_id` to inspect the matching
+`unit.show`, `tutorials.status`, and `tasks.list` projections before selecting a
+Task Definition for a task-specific read. The native surface currently covers
+`auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`,
+`task.show`, `task.prerequisites`, `feedback.list`, `plan.show`,
+`submission.status`, and `task.resources`. More commands are added only as
+individually reviewed vertical slices. Use `--input -` for bounded,
+non-interactive stdin.
+
+#### Native command inventory
+
+| Command | Safe projection or operation |
+| --- | --- |
+| `auth.status` | Local authentication lifecycle metadata |
+| `projects.list` | PII-minimized project directory |
+| `unit.show` | Project-scoped Student Unit View |
+| `tutorials.status` | Tutorial stream and change-policy status |
+| `tasks.list` | Project-scoped Student Task View catalogue |
+| `task.show` | Definition-first task detail |
+| `task.prerequisites` | One task's prerequisite status |
+| `feedback.list` | One task's bounded, person-free feedback timeline |
+| `plan.show` | Definition-first plan and date-source view |
+| `submission.status` | Definition-first submission lifecycle status |
+| `task.resources` | Definition-first resource artifacts and metadata |
+
 `task.show` uses the definition-first Student Task View, so a project with an
 empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
-instance id. Use `--input -` for bounded non-interactive stdin. The native
-surface covers `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`,
-`task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and
-`task.resources`, and `feedback.list`; more commands are added as individually reviewed vertical
-slices. `unit.show` uses `projects.list` identity as its scope, then reads the
-matching Unit Detail only to return a PII-minimized unit summary and task
+instance id. `unit.show` uses `projects.list` identity as its scope, then reads
+the matching Unit Detail only to return a PII-minimized unit summary and task
 definition count. It never returns staff, tutorials, groups, people, or raw task
 payloads. `tutorials.status` is a separate read-only projection of the verified
-tutorial-enrolment join: stream state and change policy only, never tutorial, room,
-tutor, or learner details.
-definitions. `submission.status` resolves
+tutorial-enrolment join: stream state and change policy only, never tutorial,
+room, tutor, or learner details. `tasks.list` is the bounded catalogue projection
+for selecting a Task Definition. `submission.status` resolves
 the task definition even when no task instance exists, reads OnTrack's observed
 per-definition submission-details route, and returns explicit PDF state plus
 `submission_observed` (including submitted/processing lifecycle statuses).
@@ -555,7 +576,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `plan.show`, `submission.status`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope. Current commands: `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `plan.show`, `submission.status`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
