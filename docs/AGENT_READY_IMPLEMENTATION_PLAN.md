@@ -376,6 +376,16 @@ project/unit identity、unit code/name、target/submitted grade 与必要 capabi
 冲突、重复 project id、控制字符、非法类型或超限数据全部归类为 `REMOTE_UNAVAILABLE`。
 native 与 `projects --output agent-json` 共用该 projection，裸 `projects --json` 保持旧 raw shape。
 
+`watch` 与 `feedback watch` 也已接入 Agent-safe streaming contract。Agent transport
+只使用 bounded project/unit/comment reads；`watch` 复用 `plan.show` 的 strict
+definition-first projection，独立保留 start/target/feedback deadline Plan Date 语义。
+所有 Agent stream 输出为单行 NDJSON envelope：baseline 后只输出 delta frames，Ctrl+C
+不会在 stdout 写入人类停止文案。每个 frame 都执行 schema、RFC 3339 timestamp、200
+task/feedback item 与 512 KiB 限制；单次 poll 的 1,000 个合法事件会分帧（每帧至多
+800），而不会因 aggregate count 失败。feedback projection 只允许 task identity 和
+allowlisted person-free feedback fields，排除 author、recipient、attachment 及未知字段。
+裸 `--json` 继续保留 legacy streaming shape。
+
 `tasks.list` 现在提供 project-scoped 的 native typed Student Task View catalogue：`project_id` 必填，
 `unit_id` 可作为来自 `projects.list` 的 scope consistency hint，`status` 支持规范化精确过滤。
 catalogue 以 Task Definition 为主并显式连接可选 Task Instance，保留未实例化但确定可见的任务；
@@ -504,7 +514,7 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 - 全部 read command 接入 compatibility Agent envelope。
 - native typed seam 已覆盖 auth status、safe project directory、project-scoped Student Task View catalogue、definition-first task show、
   prerequisites、bounded person-free feedback list、plan show、submission status 与 task resources。
-- watch/feedback watch 使用 NDJSON envelope frame。
+- watch/feedback watch 使用 strict bounded NDJSON envelope frame，并保留 legacy `--json` compatibility stream。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。
 - 人类模式继续使用表格和面板。
 

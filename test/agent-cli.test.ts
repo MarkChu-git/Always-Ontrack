@@ -44,6 +44,50 @@ async function runCli(
   });
 }
 
+async function runStreamingCliUntilFirstFrame(
+  args: string[],
+  configRoot: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(
+      process.execPath,
+      [resolve(process.cwd(), "src/cli.ts"), ...args],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, XDG_CONFIG_HOME: configRoot, NO_COLOR: "1" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    const deadline = setTimeout(() => {
+      child.kill("SIGINT");
+      reject(
+        new Error(`Timed out waiting for streaming frame: ${args.join(" ")}`),
+      );
+    }, 5_000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (stdout.includes("\n")) {
+        child.kill("SIGINT");
+      }
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(deadline);
+      resolveResult({ stdout, stderr, exitCode: code ?? 1 });
+    });
+  });
+}
+
 test("capabilities and schema are offline Agent protocol commands", async () => {
   const configRoot = await mkdtemp(
     join(tmpdir(), "ontrack-agent-capabilities-"),
@@ -2638,6 +2682,271 @@ test('feedback.list rejects unscoped and batch Agent selectors before authentica
       const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
       assert.equal(envelope.command, 'feedback.list');
       assert.equal((envelope.error as Record<string, unknown>).code, 'INVALID_ARGUMENT');
+    }
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("Agent streaming watch frames preserve Plan Date kinds and remove feedback people", async () => {
+  const configRoot = await mkdtemp(
+    join(tmpdir(), "ontrack-agent-stream-watch-"),
+  );
+  const privateMarker = "marker-private@example.invalid";
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    const payload =
+      request.url === "/api/projects"
+        ? [{ id: 1001, unit_id: 2001 }]
+        : request.url === "/api/projects/1001"
+          ? {
+              id: 1001,
+              unit_id: 2001,
+              target_grade: 1,
+              tasks: [
+                {
+                  id: 9001,
+                  task_definition_id: 3001,
+                  status: "working_on_it",
+                  target_start_date: "2026-08-10",
+                  target_due_date: "2026-08-20",
+                },
+              ],
+            }
+          : request.url === "/api/units/2001"
+            ? {
+                id: 2001,
+                code: "FIT0001",
+                allow_flexible_dates: true,
+                task_definitions: [
+                  {
+                    id: 3001,
+                    abbreviation: "D4",
+                    name: "Design reflection",
+                    target_grade: 1,
+                    start_date: "2026-08-01",
+                    target_date: "2026-08-15",
+                    due_date: "2026-08-25",
+                  },
+                ],
+              }
+            : request.url === "/api/projects/1001/task_def_id/3001/comments"
+              ? [
+                  {
+                    id: 7001,
+                    type: "comment",
+                    comment: "Review the evidence in section two.",
+                    created_at: "2026-08-01T10:00:00.000Z",
+                    author: { email: privateMarker },
+                    recipient: { email: "student-private@example.invalid" },
+                  },
+                ]
+              : undefined;
+    if (payload === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(payload));
+  });
+
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-08-01T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+      }),
+      "utf8",
+    );
+
+    const watch = await runStreamingCliUntilFirstFrame(
+      [
+        "watch",
+        "--project-id",
+        "1001",
+        "--interval",
+        "1",
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(watch.stderr, "");
+    assert.equal(watch.stdout.trim().split("\n").length, 1);
+    const watchEnvelope = JSON.parse(
+      watch.stdout.split("\n")[0] ?? "",
+    ) as Record<string, unknown>;
+    assert.equal(watchEnvelope.command, "watch");
+    const watchData = watchEnvelope.data as Record<string, unknown>;
+    const task = (watchData.tasks as Array<Record<string, unknown>>)[0] ?? {};
+    assert.deepEqual(task.start, {
+      kind: "start",
+      value: "2026-08-10",
+      source: "personal",
+      editable: true,
+      interpretation: "unit_local_calendar_date",
+    });
+    assert.deepEqual(task.target, {
+      kind: "target",
+      value: "2026-08-20",
+      source: "personal",
+      editable: true,
+      interpretation: "unit_local_calendar_date",
+    });
+    assert.deepEqual(task.feedback_deadline, {
+      kind: "feedback_deadline",
+      value: "2026-08-25",
+      source: "unit_default",
+      editable: false,
+      interpretation: "unit_local_calendar_date",
+    });
+
+    const legacyWatch = await runStreamingCliUntilFirstFrame(
+      ["watch", "--project-id", "1001", "--interval", "1", "--json"],
+      configRoot,
+    );
+    assert.equal(legacyWatch.stderr, "");
+    const legacyWatchFrame = JSON.parse(
+      legacyWatch.stdout.split("\n")[0] ?? "",
+    ) as Record<string, unknown>;
+    assert.equal(legacyWatchFrame.type, "baseline");
+    assert.equal("schema_version" in legacyWatchFrame, false);
+    assert.equal(legacyWatchFrame.intervalSec, 1);
+    assert.equal(Array.isArray(legacyWatchFrame.tasks), true);
+
+    const feedback = await runStreamingCliUntilFirstFrame(
+      [
+        "feedback",
+        "watch",
+        "--project-id",
+        "1001",
+        "--task-definition-id",
+        "3001",
+        "--history",
+        "1",
+        "--interval",
+        "1",
+        "--output",
+        "agent-json",
+      ],
+      configRoot,
+    );
+    assert.equal(feedback.stderr, "");
+    assert.equal(feedback.stdout.trim().split("\n").length, 1);
+    assert.equal(feedback.stdout.includes(privateMarker), false);
+    const feedbackEnvelope = JSON.parse(
+      feedback.stdout.split("\n")[0] ?? "",
+    ) as Record<string, unknown>;
+    assert.equal(feedbackEnvelope.command, "feedback.watch");
+    assert.deepEqual(
+      (feedbackEnvelope.data as Record<string, unknown>).feedback,
+      [
+        {
+          feedback_id: 7001,
+          kind: "comment",
+          text: "Review the evidence in section two.",
+          created_at: "2026-08-01T10:00:00.000Z",
+          updated_at: null,
+          is_new: null,
+        },
+      ],
+    );
+
+    const legacyFeedback = await runStreamingCliUntilFirstFrame(
+      [
+        "feedback",
+        "watch",
+        "--project-id",
+        "1001",
+        "--task-definition-id",
+        "3001",
+        "--history",
+        "1",
+        "--interval",
+        "1",
+        "--json",
+      ],
+      configRoot,
+    );
+    assert.equal(legacyFeedback.stderr, "");
+    const legacyFeedbackFrame = JSON.parse(
+      legacyFeedback.stdout.split("\n")[0] ?? "",
+    ) as Record<string, unknown>;
+    assert.equal(legacyFeedbackFrame.type, "baseline");
+    assert.equal("schema_version" in legacyFeedbackFrame, false);
+    assert.equal(legacyFeedbackFrame.intervalSec, 1);
+    assert.equal(Array.isArray(legacyFeedbackFrame.comments), true);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("streaming Agent commands reject malformed input before authentication", async () => {
+  const configRoot = await mkdtemp(
+    join(tmpdir(), "ontrack-agent-stream-input-"),
+  );
+  try {
+    const invocations = [
+      {
+        args: [
+          "feedback",
+          "watch",
+          "--project-id",
+          "1001",
+          "--output",
+          "agent-json",
+        ],
+        command: "feedback.watch",
+      },
+      {
+        args: [
+          "feedback",
+          "watch",
+          "--project-id",
+          "1001",
+          "--abbr",
+          ",",
+          "--output",
+          "agent-json",
+        ],
+        command: "feedback.watch",
+      },
+      {
+        args: ["watch", "--project-id", "0", "--output", "agent-json"],
+        command: "watch",
+      },
+      {
+        args: ["watch", "--interval", "0", "--output", "agent-json"],
+        command: "watch",
+      },
+    ];
+    for (const invocation of invocations) {
+      const result = await runCli(invocation.args, configRoot);
+      assert.equal(
+        result.exitCode,
+        2,
+        `${invocation.args.join(" ")}\n${result.stdout}`,
+      );
+      assert.equal(result.stderr, "");
+      const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(envelope.command, invocation.command);
+      assert.equal(
+        (envelope.error as Record<string, unknown>).code,
+        "INVALID_ARGUMENT",
+      );
     }
   } finally {
     await rm(configRoot, { recursive: true, force: true });

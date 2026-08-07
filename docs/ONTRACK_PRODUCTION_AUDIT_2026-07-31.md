@@ -410,8 +410,8 @@ Bundle 中出现不代表本次 Student 账号已实际调用或有权限。
 | `plan show` | 已修复 | - | native typed definition-first contract；显式 date source、task/prerequisite required+current status、四态 visibility、独立 feedback deadline 和 normalized prerequisites；缺失 flexible-date capability fail-closed；body/output 均有边界 |
 | `inbox` | 路由仍在，需重新实测 | P1 | bundle 保留 endpoint，但未在本次学生主流程中触发 |
 | `feedback list` | Agent 读取面已修复 | P1 | native typed `feedback.list` 从 scoped Student Task View 解析一项任务，只返回有界 comment/event timeline；保留 direct feedback text，排除 author/recipient、附件和 unknown fields；attachment、audio、discussion thread/review 仍未覆盖 |
-| `feedback watch` | endpoint 基础仍在，模型不足 | P1 | comments 保留，但缺附件、语音、discussion thread/review |
-| `watch` | 日期与状态语义不足 | P1 | 需要区分个人计划、unit 默认、feedback deadline 和派生状态 |
+| `feedback watch` | Agent stream 已加固；功能面仍不足 | P1 | Agent path 以 strict definition-first target 解析任务，输出 bounded person-free NDJSON feedback frame，RFC 3339 timestamp、512 KiB frame、200 items 均 fail-closed；附件、语音、discussion thread/review 仍未覆盖 |
+| `watch` | Agent 日期/状态 stream 已加固；功能面仍不足 | P1 | Agent path 复用 strict plan projection，独立输出 start/target/feedback deadline；每个 NDJSON frame 最多 800 events/512 KiB，满载 poll 自动分帧；非 Agent 旧 due/status stream 保持兼容 |
 | `pdf task` | 基本合同仍在 | P2 | task PDF endpoint 已确认，Web 现在支持内嵌 viewer |
 | `task resources` | 已接入真实下载合同 | - | definition-first；验证 ZIP magic；`FileNotFound.zip` 占位响应稳定归类为 unavailable；默认使用 `FIT0001-P1-TaskResources.zip` 风格 artifact 名称 |
 | `pdf submission` | 已修复 | - | 下载前检查 `submission_details` 的 unavailable/processing/ready |

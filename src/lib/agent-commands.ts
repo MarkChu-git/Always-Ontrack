@@ -4,9 +4,11 @@ import {
   type AgentCommandDefinition,
 } from './agent-execution-engine.js';
 import {
+  AGENT_RFC3339_TIMESTAMP_PATTERN,
   AGENT_MULTILINE_SAFE_TEXT_PATTERN,
   AGENT_SAFE_TEXT_PATTERN,
-} from './agent-contract.js';
+  isAgentRfc3339Timestamp,
+} from "./agent-contract.js";
 
 const taskShowProjectId = z.number().int().positive();
 const taskShowUnitId = z.number().int().positive();
@@ -344,13 +346,18 @@ const agentFeedbackMultilineTextSchema = z
   .min(1)
   .max(4096)
   .regex(AGENT_MULTILINE_SAFE_TEXT_PATTERN);
-const agentFeedbackItemSchema = z
+export const agentRfc3339TimestampSchema = z
+  .string()
+  .max(128)
+  .regex(AGENT_RFC3339_TIMESTAMP_PATTERN)
+  .refine(isAgentRfc3339Timestamp, "timestamp must be a real RFC 3339 instant");
+export const agentFeedbackItemSchema = z
   .object({
     feedback_id: z.number().int().positive().nullable(),
     kind: agentFeedbackTextSchema.max(80),
     text: agentFeedbackMultilineTextSchema.nullable(),
-    created_at: agentFeedbackTextSchema.max(128).nullable(),
-    updated_at: agentFeedbackTextSchema.max(128).nullable(),
+    created_at: agentRfc3339TimestampSchema.nullable(),
+    updated_at: agentRfc3339TimestampSchema.nullable(),
     is_new: z.boolean().nullable(),
   })
   .strict();
@@ -369,6 +376,32 @@ export const agentFeedbackListOutputSchema = z
   .strict();
 export type AgentFeedbackListInput = z.output<typeof agentFeedbackListInputSchema>;
 export type AgentFeedbackListOutput = z.output<typeof agentFeedbackListOutputSchema>;
+
+/** NDJSON frame contract for a bounded, person-free task feedback stream. */
+export const agentFeedbackWatchFrameSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("baseline"),
+      at: agentRfc3339TimestampSchema,
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId,
+      abbreviation: agentFeedbackTextSchema.max(80),
+      interval_seconds: z.number().int().min(1),
+      total_feedback: z.number().int().nonnegative().max(200),
+      feedback: z.array(agentFeedbackItemSchema).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("feedback"),
+      at: agentRfc3339TimestampSchema,
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId,
+      abbreviation: agentFeedbackTextSchema.max(80),
+      feedback: z.array(agentFeedbackItemSchema).min(1).max(200),
+    })
+    .strict(),
+]);
 
 /** Typed caller contract for one task's normalized submission lifecycle status. */
 export const agentSubmissionStatusInputSchema = agentSingleTaskInputSchema;
@@ -407,17 +440,43 @@ const agentPlanSafeShortText = z
   .min(1)
   .max(80)
   .regex(/^[^\u0000-\u001f\u007f]*$/u);
-const agentPlanDateSchema = (
-  kind: 'start' | 'target' | 'feedback_deadline',
-) => z
-  .object({
-    kind: z.literal(kind),
-    value: z.string().length(10).regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
-    source: z.enum(['personal', 'grade_default', 'unit_default', 'missing']),
-    editable: z.boolean(),
-    interpretation: z.literal('unit_local_calendar_date'),
-  })
-  .strict();
+function isCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+const agentPlanCalendarDateSchema = z
+  .string()
+  .length(10)
+  .regex(/^\d{4}-\d{2}-\d{2}$/u)
+  .refine(isCalendarDate, "value must be a real calendar date");
+
+/** Canonical Agent Plan Date contract shared by plan.show and streaming watch. */
+export const agentPlanDateSchema = (
+  kind: "start" | "target" | "feedback_deadline",
+) =>
+  z
+    .object({
+      kind: z.literal(kind),
+      value: agentPlanCalendarDateSchema.nullable(),
+      source: z.enum(["personal", "grade_default", "unit_default", "missing"]),
+      editable: z.boolean(),
+      interpretation: z.literal("unit_local_calendar_date"),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if ((value.value === null) !== (value.source === "missing")) {
+        context.addIssue({
+          code: "custom",
+          message: "missing date values and sources must agree",
+        });
+      }
+    });
 const agentPlanPrerequisiteSchema = z
   .object({
     task_definition_id: taskShowDefinitionId,

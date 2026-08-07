@@ -1,19 +1,26 @@
+import { z } from "zod";
 import {
   agentFeedbackListOutputSchema,
+  agentFeedbackWatchFrameSchema,
   type AgentFeedbackListInput,
   type AgentFeedbackListOutput,
   type AgentTasksListOutput,
-} from './agent-commands.js';
-import { AgentProtocolError, agentSuccessEnvelope } from './agent-protocol.js';
+} from "./agent-commands.js";
+import {
+  AgentProtocolError,
+  agentSuccessEnvelope,
+  assertAgentEnvelopeByteLimit,
+} from "./agent-protocol.js";
 import {
   contractAliasedValue as aliasedValue,
   contractPositiveInteger as positiveInteger,
   contractRecord as recordValue,
+  contractRfc3339Timestamp as rfc3339Timestamp,
   contractSafeMultilineText as safeMultilineText,
   contractSafeText as safeText,
   hasOwnField as own,
   remoteContractFailure as remoteFailure,
-} from './agent-contract.js';
+} from "./agent-contract.js";
 import {
   createAgentTasksList,
   type AgentTasksListSource,
@@ -26,6 +33,20 @@ const MAX_AGENT_REQUEST_ID = `req_${'x'.repeat(120)}`;
 
 type AgentFeedbackItem = AgentFeedbackListOutput['feedback'][number];
 type AgentFeedbackTask = AgentTasksListOutput['tasks'][number];
+export type AgentFeedbackWatchFrame = z.output<
+  typeof agentFeedbackWatchFrameSchema
+>;
+
+export type AgentFeedbackTarget = Pick<
+  AgentFeedbackTask,
+  | "project_id"
+  | "unit_id"
+  | "unit_code"
+  | "task_definition_id"
+  | "task_instance_id"
+  | "abbreviation"
+  | "instantiated"
+>;
 
 export interface AgentFeedbackListSource extends AgentTasksListSource {
   readFeedback(projectId: number, taskDefinitionId: number): Promise<unknown>;
@@ -67,43 +88,55 @@ function feedbackText(item: Record<string, unknown>): string | null {
 }
 
 function feedbackItem(raw: unknown): AgentFeedbackItem {
-  const item = recordValue(raw, 'feedback item');
+  const item = recordValue(raw, "feedback item");
   const text = feedbackText(item);
-  const kind = aliasedValue(item, ['type'], 'feedback type', (value, context) =>
-    safeText(value, 80, context)) ?? (text === null ? 'event' : 'message');
+  const kind =
+    aliasedValue(item, ["type"], "feedback type", (value, context) =>
+      safeText(value, 80, context),
+    ) ?? (text === null ? "event" : "message");
   return {
     feedback_id: feedbackId(item),
     kind,
     text,
     created_at: aliasedValue(
       item,
-      ['createdAt', 'created_at'],
-      'feedback creation timestamp',
-      (value, context) => safeText(value, 128, context),
+      ["createdAt", "created_at"],
+      "feedback creation timestamp",
+      rfc3339Timestamp,
     ),
     updated_at: aliasedValue(
       item,
-      ['updatedAt', 'updated_at'],
-      'feedback update timestamp',
-      (value, context) => safeText(value, 128, context),
+      ["updatedAt", "updated_at"],
+      "feedback update timestamp",
+      rfc3339Timestamp,
     ),
-    is_new: aliasedValue(item, ['isNew', 'is_new'], 'feedback new flag', booleanValue),
+    is_new: aliasedValue(
+      item,
+      ["isNew", "is_new"],
+      "feedback new flag",
+      booleanValue,
+    ),
   };
 }
 
-function feedbackItems(rawFeedback: unknown): AgentFeedbackItem[] {
+/** Project bounded feedback records without exposing people or unknown remote fields. */
+export function projectAgentFeedbackItems(
+  rawFeedback: unknown,
+): AgentFeedbackItem[] {
   if (!Array.isArray(rawFeedback)) {
-    remoteFailure('OnTrack returned an unexpected feedback response shape.');
+    remoteFailure("OnTrack returned an unexpected feedback response shape.");
   }
   if (rawFeedback.length > MAX_AGENT_FEEDBACK_ITEMS) {
-    remoteFailure(`OnTrack returned more than ${MAX_AGENT_FEEDBACK_ITEMS} feedback items.`);
+    remoteFailure(
+      `OnTrack returned more than ${MAX_AGENT_FEEDBACK_ITEMS} feedback items.`,
+    );
   }
   const feedback = rawFeedback.map(feedbackItem);
   const ids = feedback
     .map((item) => item.feedback_id)
     .filter((id): id is number => id !== null);
   if (new Set(ids).size !== ids.length) {
-    remoteFailure('OnTrack returned duplicate feedback identities.');
+    remoteFailure("OnTrack returned duplicate feedback identities.");
   }
   return feedback;
 }
@@ -170,15 +203,51 @@ function validateOutput(output: AgentFeedbackListOutput): AgentFeedbackListOutpu
   return parsed.data;
 }
 
-/** Read one task's bounded, person-free feedback timeline through its authoritative catalogue. */
-export function createAgentFeedbackList(
-  source: AgentFeedbackListSource,
-): (input: AgentFeedbackListInput) => Promise<AgentFeedbackListOutput> {
+/** Validate and size-bound every runtime feedback.watch frame before emission. */
+export function validateAgentFeedbackWatchFrame(
+  value: unknown,
+): AgentFeedbackWatchFrame {
+  const parsed = agentFeedbackWatchFrameSchema.safeParse(value);
+  if (!parsed.success) {
+    remoteFailure("OnTrack returned an invalid Agent feedback watch frame.");
+  }
+  return assertAgentEnvelopeByteLimit({
+    command: "feedback.watch",
+    data: parsed.data,
+    maxBytes: MAX_AGENT_FEEDBACK_OUTPUT_BYTES,
+    failureSummary:
+      "OnTrack returned feedback stream data exceeding the output safety limit.",
+  });
+}
+
+/** Resolve one strict, definition-first feedback target without reading its timeline. */
+export function createAgentFeedbackTarget(
+  source: AgentTasksListSource,
+): (input: AgentFeedbackListInput) => Promise<AgentFeedbackTarget> {
   const listTasks = createAgentTasksList(source);
   return async (input) => {
     const catalogue = await listTasks({ project_id: input.project_id });
     const task = selectFeedbackTask(input, catalogue.tasks);
-    const feedback = feedbackItems(
+    return {
+      project_id: task.project_id,
+      unit_id: task.unit_id,
+      unit_code: task.unit_code,
+      task_definition_id: task.task_definition_id,
+      task_instance_id: task.task_instance_id,
+      abbreviation: task.abbreviation,
+      instantiated: task.instantiated,
+    };
+  };
+}
+
+/** Read one task's bounded, person-free feedback timeline through its authoritative catalogue. */
+export function createAgentFeedbackList(
+  source: AgentFeedbackListSource,
+): (input: AgentFeedbackListInput) => Promise<AgentFeedbackListOutput> {
+  const readTarget = createAgentFeedbackTarget(source);
+  return async (input) => {
+    const task = await readTarget(input);
+    const feedback = projectAgentFeedbackItems(
       await source.readFeedback(task.project_id, task.task_definition_id),
     );
     return validateOutput({

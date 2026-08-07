@@ -27,10 +27,13 @@ import {
   clearAllBrowserSessionState,
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
-} from './lib/auto-login.js';
-import type { MfaMethodOption } from './lib/auto-login.js';
+} from "./lib/auto-login.js";
+import type { MfaMethodOption } from "./lib/auto-login.js";
 import type { LoginCredentials } from './lib/auto-login.js';
-import { discoverOnTrackSurface, probeDiscoveredApiTemplates } from './lib/discovery.js';
+import {
+  discoverOnTrackSurface,
+  probeDiscoveredApiTemplates,
+} from "./lib/discovery.js";
 import {
   ArtifactSafetyError,
   findExternalArtifactPaths,
@@ -42,24 +45,47 @@ import {
   buildExternalArtifactAuthorizationArgs,
   getWelcomeMenuItems,
   parseWelcomeSelection,
-} from './lib/welcome.js';
+} from "./lib/welcome.js";
 import {
   buildStudentTaskRows,
   buildStudentTaskViews,
   resolveStudentTaskViews,
-} from './lib/student-task-view.js';
+} from "./lib/student-task-view.js";
 import type { StudentTaskRow } from './lib/student-task-view.js';
 import {
   buildPlannerViews,
   buildResetTargetDatesMutation,
   buildTargetDateMutation,
-} from './lib/planner.js';
+} from "./lib/planner.js";
 import type { RawTaskPrerequisite } from './lib/planner.js';
 import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
 import { createAgentTasksList } from './lib/agent-tasks.js';
 import { createAgentUnitShow } from './lib/agent-units.js';
-import { createAgentFeedbackList } from './lib/agent-feedback.js';
+import {
+  createAgentFeedbackList,
+  createAgentFeedbackTarget,
+  projectAgentFeedbackItems,
+  validateAgentFeedbackWatchFrame,
+  type AgentFeedbackTarget,
+} from "./lib/agent-feedback.js";
+import {
+  assertAgentStreamFrameLimit,
+  diffAgentWatchStates,
+  splitAgentWatchEventFrames,
+  validateAgentWatchFrame,
+} from "./lib/agent-watch.js";
+import {
+  agentWatchStateMap,
+  buildWatchSnapshots,
+  legacyWatchStates,
+  type WatchSnapshot,
+} from "./lib/watch-snapshots.js";
+import { pollUntilInterrupted } from "./lib/watch-runtime.js";
+import {
+  AGENT_REMOTE_READ_CONCURRENCY,
+  settleWithConcurrency,
+} from "./lib/async-pool.js";
 import {
   createSubmissionAttempt,
   InvalidSubmissionDetailsError,
@@ -69,7 +95,7 @@ import {
   prepareSubmission,
   transitionSubmissionAttempt,
   validateSubmissionMode,
-} from './lib/submission-lifecycle.js';
+} from "./lib/submission-lifecycle.js";
 import type { SubmissionDetails } from './lib/submission-lifecycle.js';
 import {
   buildPdfFilename,
@@ -82,7 +108,6 @@ import {
   getFeedbackText,
   getFeedbackTimestamp,
   getFlagValue,
-  getLatestFeedbackTimestamp,
   getTaskAbbreviation,
   getTaskCompletionDate,
   getTaskDefinitionId,
@@ -91,7 +116,6 @@ import {
   getTaskStatus,
   hasFlag,
   isStaffLikeRole,
-  makeWatchTaskKey,
   normalizeBaseUrl,
   openExternal,
   parseIntegerFlagValue,
@@ -113,7 +137,7 @@ import {
   toWatchStateMap,
   toRedactedError,
   writePdfFile,
-} from './lib/utils.js';
+} from "./lib/utils.js";
 import type {
   FeedbackItem,
   CredentialSource,
@@ -127,7 +151,7 @@ import type {
   UnitSummary,
 } from './lib/types.js';
 import type { WelcomeMenuItem } from './lib/welcome.js';
-import type { ResolvedTaskSelector, WatchTaskState } from './lib/utils.js';
+import type { ResolvedTaskSelector } from "./lib/utils.js";
 import {
   AgentProtocolError,
   agentErrorEnvelope,
@@ -180,7 +204,7 @@ import {
   claimExecution,
   updateExecution,
   validateIdempotencyKey,
-} from './lib/execution-journal.js';
+} from "./lib/execution-journal.js";
 import type { ExecutionClaim } from './lib/execution-journal.js';
 
 /**
@@ -1556,6 +1580,15 @@ function projectMatchesScope(
   return true;
 }
 
+function settleMetadataReads<T>(
+  tasks: readonly (() => Promise<T>)[],
+  agentTransport: boolean,
+): Promise<PromiseSettledResult<T>[]> {
+  return agentTransport
+    ? settleWithConcurrency(tasks, AGENT_REMOTE_READ_CONCURRENCY)
+    : Promise.allSettled(tasks.map((task) => task()));
+}
+
 /**
  * Load projects and progressively enrich with:
  * - project detail payloads (when accessible)
@@ -1565,31 +1598,67 @@ async function loadProjectsWithTaskMetadata(
   api: OnTrackApiClient,
   session: SessionData,
   scope: { projectId?: number; unitId?: number } = {},
-  options: { readonly strictMetadata?: boolean } = {},
+  options: {
+    readonly strictMetadata?: boolean;
+    /** Use the bounded, canonical Agent transport for every remote read. */
+    readonly agentTransport?: boolean;
+  } = {},
 ): Promise<ProjectSummary[]> {
   // Step 1: fetch project overview first (fast, broad visibility).
-  const overview = await api.listProjects(session);
-  const scopedOverview = overview.filter((project) => projectMatchesScope(project, scope));
+  const directAgentProject =
+    options.agentTransport && scope.projectId !== undefined
+      ? await api.getProjectForAgent(session, scope.projectId)
+      : undefined;
+  if (directAgentProject && directAgentProject.id !== scope.projectId) {
+    throw new AgentProtocolError({
+      code: "REMOTE_UNAVAILABLE",
+      summary:
+        "OnTrack returned an unexpected project identity for the Agent scope.",
+    });
+  }
+  const overview = directAgentProject
+    ? [directAgentProject]
+    : await (options.agentTransport
+        ? api.listProjectsForAgent(session)
+        : api.listProjects(session));
+  if (options.agentTransport && overview.length > 200) {
+    throw new AgentProtocolError({
+      code: "REMOTE_UNAVAILABLE",
+      summary: "OnTrack returned more than 200 projects for the Agent watch.",
+    });
+  }
+  const scopedOverview = overview.filter((project) =>
+    projectMatchesScope(project, scope),
+  );
   if (scopedOverview.length === 0) {
     return [];
   }
 
   // Step 2: enrich with project details when accessible (fallback to overview on failure).
-  const detailedResults = await Promise.allSettled(
-    scopedOverview.map(async (project) => api.getProject(session, project.id)),
-  );
+  const detailedResults: PromiseSettledResult<ProjectSummary>[] =
+    directAgentProject
+      ? [{ status: "fulfilled", value: directAgentProject }]
+      : await settleMetadataReads(
+          scopedOverview.map((project) => () =>
+            options.agentTransport
+              ? api.getProjectForAgent(session, project.id)
+              : api.getProject(session, project.id),
+          ),
+          options.agentTransport ?? false,
+        );
 
   const projects: ProjectSummary[] = [];
   for (let index = 0; index < detailedResults.length; index += 1) {
     const result = detailedResults[index];
-    if (result.status === 'fulfilled') {
+    if (result.status === "fulfilled") {
       projects.push(result.value);
       continue;
     }
 
     if (
       options.strictMetadata ||
-      (result.reason instanceof OnTrackHttpError && result.reason.authFailure !== 'other')
+      (result.reason instanceof OnTrackHttpError &&
+        result.reason.authFailure !== "other")
     ) {
       throw result.reason;
     }
@@ -1603,22 +1672,31 @@ async function loadProjectsWithTaskMetadata(
     ...new Set(
       projects
         .map((project) => projectUnitId(project))
-        .filter((id): id is number => typeof id === 'number'),
+        .filter((id): id is number => typeof id === "number"),
     ),
   ];
 
-  const unitResults = await Promise.allSettled(
-    unitIds.map(async (unitId) => api.getUnit(session, unitId)),
+  const unitResults = await settleMetadataReads(
+    unitIds.map((unitId) => () =>
+      options.agentTransport
+        ? api.getUnitForAgent(session, unitId)
+        : api.getUnit(session, unitId),
+    ),
+    options.agentTransport ?? false,
   );
 
   const unitMap = new Map<number, UnitSummary>();
-  const unitDefinitionMap = new Map<number, Map<number, TaskDefinitionSummary>>();
+  const unitDefinitionMap = new Map<
+    number,
+    Map<number, TaskDefinitionSummary>
+  >();
   for (let index = 0; index < unitResults.length; index += 1) {
     const result = unitResults[index];
-    if (result.status !== 'fulfilled') {
+    if (result.status !== "fulfilled") {
       if (
         options.strictMetadata ||
-        (result.reason instanceof OnTrackHttpError && result.reason.authFailure !== 'other')
+        (result.reason instanceof OnTrackHttpError &&
+          result.reason.authFailure !== "other")
       ) {
         throw result.reason;
       }
@@ -1631,7 +1709,7 @@ async function loadProjectsWithTaskMetadata(
       unit.id,
       new Map(
         getUnitTaskDefinitions(unit)
-          .filter((definition) => typeof definition.id === 'number')
+          .filter((definition) => typeof definition.id === "number")
           .map((definition) => [definition.id as number, definition]),
       ),
     );
@@ -1640,9 +1718,11 @@ async function loadProjectsWithTaskMetadata(
   return projects.map((project) => {
     const unitId = projectUnitId(project);
     const fullUnit = unitId !== undefined ? unitMap.get(unitId) : undefined;
-    const taskDefinitions = unitId !== undefined ? unitDefinitionMap.get(unitId) : undefined;
+    const taskDefinitions =
+      unitId !== undefined ? unitDefinitionMap.get(unitId) : undefined;
 
-    const projectUnit = project.unit ?? (unitId !== undefined ? { id: unitId } : undefined);
+    const projectUnit =
+      project.unit ?? (unitId !== undefined ? { id: unitId } : undefined);
     const mergedUnit = fullUnit
       ? {
           ...projectUnit,
@@ -1658,9 +1738,11 @@ async function loadProjectsWithTaskMetadata(
         ...task,
         definition: {
           id: taskDefId,
-          abbreviation: task.definition?.abbreviation ?? taskDefinition?.abbreviation,
+          abbreviation:
+            task.definition?.abbreviation ?? taskDefinition?.abbreviation,
           name: task.definition?.name ?? taskDefinition?.name,
-          targetGrade: task.definition?.targetGrade ?? taskDefinition?.targetGrade,
+          targetGrade:
+            task.definition?.targetGrade ?? taskDefinition?.targetGrade,
           uploadRequirements:
             task.definition?.uploadRequirements ??
             task.definition?.upload_requirements ??
@@ -2385,6 +2467,17 @@ async function readAgentFeedbackList(
     readUnit: (unitId) => api.getUnitForAgent(session, unitId),
     readFeedback: (projectId, taskDefinitionId) =>
       api.listTaskCommentsForAgent(session, projectId, taskDefinitionId),
+  })(input);
+}
+
+async function readAgentFeedbackTarget(
+  input: AgentFeedbackListInput,
+  session: SessionData,
+): Promise<AgentFeedbackTarget> {
+  const api = createAuthenticatedApi(session);
+  return createAgentFeedbackTarget({
+    readProject: (projectId) => api.getProjectForAgent(session, projectId),
+    readUnit: (unitId) => api.getUnitForAgent(session, unitId),
   })(input);
 }
 
@@ -3836,136 +3929,172 @@ async function handleFeedbackList(args: string[]): Promise<void> {
 async function handleFeedbackWatch(args: string[]): Promise<void> {
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
+  const agentOutput = Boolean(getAgentOutputContext());
   const selector = parseTaskSelectorArgs(args);
-  const interval = hasFlag(args, '--interval')
-    ? parseIntegerFlagValue(getFlagValue(args, '--interval'), '--interval')
+  const interval = hasFlag(args, "--interval")
+    ? parseIntegerFlagValue(getFlagValue(args, "--interval"), "--interval")
     : 15;
-  const history = hasFlag(args, '--history')
-    ? parseIntegerFlagValue(getFlagValue(args, '--history'), '--history')
+  const history = hasFlag(args, "--history")
+    ? parseIntegerFlagValue(getFlagValue(args, "--history"), "--history")
     : 30;
-  const asJson = hasFlag(args, '--json');
+  const asJson = hasFlag(args, "--json");
 
   if (interval < 1) {
-    throw new Error('--interval must be at least 1 second.');
+    throw new Error("--interval must be at least 1 second.");
   }
   if (history < 0) {
-    throw new Error('--history must be >= 0.');
+    throw new Error("--history must be >= 0.");
   }
 
-  const projects = await loadProjectsWithTaskMetadata(api, session, {
-    projectId: selector.projectId,
-  });
-  const resolved = resolveTaskSelector(projects, selector);
+  let watchTarget: {
+    readonly projectId: number;
+    readonly taskDefinitionId: number;
+    readonly abbreviation: string;
+    readonly unitCode: string | null | undefined;
+  };
+  if (agentOutput) {
+    const target = await readAgentFeedbackTarget(
+      agentFeedbackListInputFromSelector(selector),
+      session,
+    );
+    watchTarget = {
+      projectId: target.project_id,
+      taskDefinitionId: target.task_definition_id,
+      abbreviation: target.abbreviation,
+      unitCode: target.unit_code,
+    };
+  } else {
+    const resolved = resolveTaskSelector(
+      await loadProjectsWithTaskMetadata(api, session, {
+        projectId: selector.projectId,
+      }),
+      selector,
+    );
+    watchTarget = {
+      projectId: resolved.project.id,
+      taskDefinitionId: resolved.taskDefId,
+      abbreviation: resolved.abbr,
+      unitCode: resolved.unitCode,
+    };
+  }
+  const { projectId, taskDefinitionId, abbreviation, unitCode } = watchTarget;
 
-  const initialComments = sortFeedbackItems(
-    await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
-  );
+  const readComments = (): Promise<FeedbackItem[]> =>
+    agentOutput
+      ? api.listTaskCommentsForAgent(session, projectId, taskDefinitionId)
+      : api.listTaskComments(session, projectId, taskDefinitionId);
+  const initialComments = sortFeedbackItems(await readComments());
+  const initialAgentFeedback = agentOutput
+    ? projectAgentFeedbackItems(initialComments)
+    : undefined;
   const baselineComments = history === 0 ? [] : initialComments.slice(-history);
   // Track seen comment identities so each newly observed comment is emitted once.
-  const seen = new Set(initialComments.map((comment) => feedbackIdentity(comment)));
+  const seen = new Set(
+    initialComments.map((comment) => feedbackIdentity(comment)),
+  );
   const startedAt = new Date().toISOString();
 
-  if (asJson) {
-    printJson({
-      type: 'baseline',
+  if (agentOutput) {
+    printWatchJson(
+      validateAgentFeedbackWatchFrame({
+        type: "baseline",
+        at: startedAt,
+        project_id: projectId,
+        task_definition_id: taskDefinitionId,
+        abbreviation,
+        interval_seconds: interval,
+        total_feedback: initialComments.length,
+        feedback:
+          history === 0 ? [] : (initialAgentFeedback ?? []).slice(-history),
+      }),
+    );
+  } else if (asJson) {
+    printWatchJson({
+      type: "baseline",
       at: startedAt,
-      projectId: resolved.project.id,
-      task: resolved.abbr,
+      projectId,
+      task: abbreviation,
       intervalSec: interval,
       totalComments: initialComments.length,
       comments: baselineComments,
     });
   } else {
     console.log(
-      `Feedback watch started for ${resolved.unitCode ?? '-'} ${resolved.abbr} (project ${resolved.project.id}). Polling every ${interval}s. Press Ctrl+C to stop.`,
+      `Feedback watch started for ${unitCode ?? "-"} ${abbreviation} (project ${projectId}). Polling every ${interval}s. Press Ctrl+C to stop.`,
     );
     if (baselineComments.length === 0) {
-      console.log('No baseline comments.');
+      console.log("No baseline comments.");
     } else {
       printTable(presentFeedbackRows(baselineComments));
     }
   }
 
-  let stopped = false;
-  let interruptWait: (() => void) | undefined;
-  const onSigint = (): void => {
-    stopped = true;
-    if (interruptWait) {
-      interruptWait();
-    }
-  };
-  process.once('SIGINT', onSigint);
-
   try {
-    while (!stopped) {
-      // Interruptible sleep so Ctrl+C exits quickly.
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          interruptWait = undefined;
-          resolve();
-        }, interval * 1000);
+    await pollUntilInterrupted({
+      intervalSeconds: interval,
+      poll: async () => {
+        let comments: FeedbackItem[];
+        try {
+          comments = sortFeedbackItems(await readComments());
+        } catch (error) {
+          rethrowWatchAuthFailure(error);
+          if (agentOutput) {
+            throw error;
+          }
+          const message = toRedactedError(error).message;
+          if (asJson) {
+            printWatchJson({
+              type: "error",
+              at: new Date().toISOString(),
+              message,
+            });
+          } else {
+            console.error(`[feedback-watch] ${message}`);
+          }
+          return;
+        }
 
-        interruptWait = () => {
-          clearTimeout(timer);
-          interruptWait = undefined;
-          resolve();
-        };
-      });
+        // Diff against seen set to emit only incremental updates.
+        const fresh = comments.filter((comment) => {
+          const key = feedbackIdentity(comment);
+          if (seen.has(key)) {
+            return false;
+          }
+          seen.add(key);
+          return true;
+        });
 
-      if (stopped) {
-        break;
-      }
+        if (fresh.length === 0) {
+          return;
+        }
 
-      let comments: FeedbackItem[];
-      try {
-        comments = sortFeedbackItems(
-          await api.listTaskComments(session, resolved.project.id, resolved.taskDefId),
-        );
-      } catch (error) {
-        rethrowWatchAuthFailure(error);
-        const message = toRedactedError(error).message;
-        if (asJson) {
-          printJson({
-            type: 'error',
+        if (agentOutput) {
+          printWatchJson(
+            validateAgentFeedbackWatchFrame({
+              type: "feedback",
+              at: new Date().toISOString(),
+              project_id: projectId,
+              task_definition_id: taskDefinitionId,
+              abbreviation,
+              feedback: projectAgentFeedbackItems(fresh),
+            }),
+          );
+        } else if (asJson) {
+          printWatchJson({
+            type: "comments",
             at: new Date().toISOString(),
-            message,
+            projectId,
+            task: abbreviation,
+            comments: fresh,
           });
         } else {
-          console.error(`[feedback-watch] ${message}`);
+          printTable(presentFeedbackRows(fresh));
         }
-        continue;
-      }
-
-      // Diff against seen set to emit only incremental updates.
-      const fresh = comments.filter((comment) => {
-        const key = feedbackIdentity(comment);
-        if (seen.has(key)) {
-          return false;
-        }
-        seen.add(key);
-        return true;
-      });
-
-      if (fresh.length === 0) {
-        continue;
-      }
-
-      if (asJson) {
-        printJson({
-          type: 'comments',
-          at: new Date().toISOString(),
-          projectId: resolved.project.id,
-          task: resolved.abbr,
-          comments: fresh,
-        });
-      } else {
-        printTable(presentFeedbackRows(fresh));
-      }
-    }
+      },
+    });
   } finally {
-    process.removeListener('SIGINT', onSigint);
-    if (!asJson) {
-      console.log('Feedback watch stopped.');
+    if (!asJson && !agentOutput) {
+      console.log("Feedback watch stopped.");
     }
   }
 }
@@ -4586,22 +4715,6 @@ function agentSubmissionStatusInputFromSelector(
   });
 }
 
-/** Apply optional project/unit filters to watch snapshot candidate projects. */
-function filterProjectsForWatch(
-  projects: ProjectSummary[],
-  projectId?: number,
-  unitId?: number,
-): ProjectSummary[] {
-  let scoped = projects;
-  if (projectId !== undefined) {
-    scoped = scoped.filter((project) => project.id === projectId);
-  }
-  if (unitId !== undefined) {
-    scoped = scoped.filter((project) => project.unit?.id === unitId);
-  }
-  return scoped;
-}
-
 /** Preserve centralized 401/419 handling even when an error occurs inside a poll loop. */
 function rethrowWatchAuthFailure(error: unknown): void {
   if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
@@ -4609,54 +4722,62 @@ function rethrowWatchAuthFailure(error: unknown): void {
   }
 }
 
-/** Build current watch snapshot by combining task metadata and feedback counts. */
+async function readWatchComments(
+  api: OnTrackApiClient,
+  session: SessionData,
+  projectId: number,
+  taskDefinitionId: number,
+  agentOutput: boolean,
+): Promise<FeedbackItem[]> {
+  try {
+    return agentOutput
+      ? await api.listTaskCommentsForAgent(session, projectId, taskDefinitionId)
+      : await api.listTaskComments(session, projectId, taskDefinitionId);
+  } catch (error) {
+    rethrowWatchAuthFailure(error);
+    if (agentOutput) {
+      throw error;
+    }
+    return [];
+  }
+}
+
+/** Build current snapshots through the appropriate Agent or legacy projection. */
 async function buildWatchSnapshot(
   api: OnTrackApiClient,
   session: SessionData,
   projectId?: number,
   unitId?: number,
-): Promise<WatchTaskState[]> {
-  const projects = filterProjectsForWatch(
-    await loadProjectsWithTaskMetadata(api, session, { projectId, unitId }),
-    projectId,
-    unitId,
-  );
-  const tasks = flattenTasks(projects);
-
-  const states: Array<WatchTaskState | null> = await Promise.all(
-    tasks.map(async (task): Promise<WatchTaskState | null> => {
-      const taskDefinitionId = getTaskDefinitionId(task);
-      if (!taskDefinitionId) {
-        return null;
-      }
-
-      let comments: FeedbackItem[] = [];
-      try {
-        comments = await api.listTaskComments(
+  agentOutput = false,
+): Promise<WatchSnapshot[]> {
+  return buildWatchSnapshots(
+    {
+      loadProjects: (options) =>
+        loadProjectsWithTaskMetadata(
+          api,
           session,
-          task.projectId,
+          { projectId: options.projectId, unitId: options.unitId },
+          {
+            strictMetadata: options.agentOutput,
+            agentTransport: options.agentOutput,
+          },
+        ),
+      readComments: (snapshotProjectId, taskDefinitionId, useAgentTransport) =>
+        readWatchComments(
+          api,
+          session,
+          snapshotProjectId,
           taskDefinitionId,
-        );
-      } catch (error) {
-        rethrowWatchAuthFailure(error);
-        comments = [];
-      }
-
-      return {
-        taskKey: makeWatchTaskKey(task.projectId, taskDefinitionId),
-        projectId: task.projectId,
-        taskDefinitionId,
-        unitCode: task.unitCode,
-        abbr: getTaskAbbreviation(task) ?? String(taskDefinitionId),
-        status: getTaskStatus(task),
-        dueDate: getTaskDueDate(task),
-        commentCount: comments.length,
-        lastCommentAt: getLatestFeedbackTimestamp(comments),
-      } satisfies WatchTaskState;
-    }),
+          useAgentTransport,
+        ),
+    },
+    { projectId, unitId, agentOutput },
   );
+}
 
-  return states.filter((state): state is WatchTaskState => state !== null);
+/** Keep both legacy and Agent watch frames one JSON document per line. */
+function printWatchJson(value: unknown): void {
+  printJson(value, { streaming: true });
 }
 
 /** Render watch event into single-line human-readable terminal message. */
@@ -4684,120 +4805,140 @@ function describeWatchEvent(event: {
 async function handleWatch(args: string[]): Promise<void> {
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
-  const unitId = parseOptionalInteger(args, '--unit-id');
-  const projectId = parseOptionalInteger(args, '--project-id');
-  const interval = hasFlag(args, '--interval')
-    ? parseIntegerFlagValue(getFlagValue(args, '--interval'), '--interval')
+  const agentOutput = Boolean(getAgentOutputContext());
+  const unitId = parseOptionalInteger(args, "--unit-id");
+  const projectId = parseOptionalInteger(args, "--project-id");
+  const interval = hasFlag(args, "--interval")
+    ? parseIntegerFlagValue(getFlagValue(args, "--interval"), "--interval")
     : 60;
-  const asJson = hasFlag(args, '--json');
+  const asJson = hasFlag(args, "--json");
 
   if (interval < 1) {
-    throw new Error('--interval must be at least 1 second.');
+    throw new Error("--interval must be at least 1 second.");
   }
 
-  roleScopeHint(session, 'watch', unitId !== undefined || projectId !== undefined);
+  roleScopeHint(
+    session,
+    "watch",
+    unitId !== undefined || projectId !== undefined,
+  );
 
   // Baseline snapshot printed once; subsequent loops emit deltas only.
-  let baseline = await buildWatchSnapshot(api, session, projectId, unitId);
+  let baseline = await buildWatchSnapshot(
+    api,
+    session,
+    projectId,
+    unitId,
+    agentOutput,
+  );
   const startedAt = new Date().toISOString();
 
-  if (asJson) {
-    printJson({
-      type: 'baseline',
+  if (agentOutput) {
+    printWatchJson(
+      validateAgentWatchFrame({
+        type: "baseline",
+        at: startedAt,
+        interval_seconds: interval,
+        tasks: [...agentWatchStateMap(baseline).values()],
+      }),
+    );
+  } else if (asJson) {
+    printWatchJson({
+      type: "baseline",
       at: startedAt,
       intervalSec: interval,
-      tasks: baseline,
+      tasks: legacyWatchStates(baseline),
     });
   } else {
-    console.log(`Watch started at ${startedAt}. Polling every ${interval}s. Press Ctrl+C to stop.`);
+    console.log(
+      `Watch started at ${startedAt}. Polling every ${interval}s. Press Ctrl+C to stop.`,
+    );
     printTable(
-      baseline.map((task) => ({
-        task: task.abbr ?? '-',
-        status: task.status ?? '-',
+      legacyWatchStates(baseline).map((task) => ({
+        task: task.abbr ?? "-",
+        status: task.status ?? "-",
         due: formatDate(task.dueDate),
         comments: task.commentCount,
-        lastCommentAt: task.lastCommentAt ? formatDate(task.lastCommentAt) : '-',
-        unit: task.unitCode ?? '-',
+        lastCommentAt: task.lastCommentAt
+          ? formatDate(task.lastCommentAt)
+          : "-",
+        unit: task.unitCode ?? "-",
         projectId: task.projectId,
       })),
     );
   }
 
-  let previous = toWatchStateMap(baseline);
-  let stopped = false;
-  let interruptWait: (() => void) | undefined;
-  const onSigint = (): void => {
-    stopped = true;
-    if (interruptWait) {
-      interruptWait();
-    }
-  };
-  process.once('SIGINT', onSigint);
+  let previous = toWatchStateMap(legacyWatchStates(baseline));
+  let previousAgent = agentWatchStateMap(baseline);
 
   try {
-    while (!stopped) {
-      // Interruptible sleep so watch loop exits promptly on Ctrl+C.
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          interruptWait = undefined;
-          resolve();
-        }, interval * 1000);
-
-        interruptWait = () => {
-          clearTimeout(timer);
-          interruptWait = undefined;
-          resolve();
-        };
-      });
-
-      if (stopped) {
-        break;
-      }
-
-      let currentSnapshot: WatchTaskState[];
-      try {
-        currentSnapshot = await buildWatchSnapshot(api, session, projectId, unitId);
-      } catch (error) {
-        rethrowWatchAuthFailure(error);
-        const message = toRedactedError(error).message;
-        if (asJson) {
-          printJson({
-            type: 'error',
-            at: new Date().toISOString(),
-            message,
-          });
-        } else {
-          console.error(`[watch] ${message}`);
+    await pollUntilInterrupted({
+      intervalSeconds: interval,
+      poll: async () => {
+        let currentSnapshot: WatchSnapshot[];
+        try {
+          currentSnapshot = await buildWatchSnapshot(
+            api,
+            session,
+            projectId,
+            unitId,
+            agentOutput,
+          );
+        } catch (error) {
+          rethrowWatchAuthFailure(error);
+          if (agentOutput) {
+            throw error;
+          }
+          const message = toRedactedError(error).message;
+          if (asJson) {
+            printWatchJson({
+              type: "error",
+              at: new Date().toISOString(),
+              message,
+            });
+          } else {
+            console.error(`[watch] ${message}`);
+          }
+          return;
         }
-        continue;
-      }
 
-      const now = new Date().toISOString();
-      const current = toWatchStateMap(currentSnapshot);
-      // Compute high-level change events between snapshots.
-      const events = diffWatchStates(previous, current, now);
-
-      if (events.length > 0) {
-        if (asJson) {
-          printJson({
-            type: 'events',
-            at: now,
-            events,
-          });
+        const now = new Date().toISOString();
+        const current = toWatchStateMap(legacyWatchStates(currentSnapshot));
+        const currentAgent = agentWatchStateMap(currentSnapshot);
+        if (agentOutput) {
+          const events = diffAgentWatchStates(previousAgent, currentAgent, now);
+          for (const frame of splitAgentWatchEventFrames(now, events)) {
+            printWatchJson(frame);
+          }
         } else {
-          for (const event of events) {
-            console.log(describeWatchEvent(event));
+          const events = diffWatchStates(previous, current, now);
+          if (events.length === 0) {
+            baseline = currentSnapshot;
+            previous = current;
+            previousAgent = currentAgent;
+            return;
+          }
+          if (asJson) {
+            printWatchJson({
+              type: "events",
+              at: now,
+              events,
+            });
+          } else {
+            for (const event of events) {
+              console.log(describeWatchEvent(event));
+            }
           }
         }
-      }
 
-      baseline = currentSnapshot;
-      previous = current;
-    }
+        baseline = currentSnapshot;
+        previous = current;
+        previousAgent = currentAgent;
+      },
+    });
   } finally {
-    process.removeListener('SIGINT', onSigint);
-    if (!asJson) {
-      console.log('Watch stopped.');
+    if (!asJson && !agentOutput) {
+      console.log("Watch stopped.");
     }
   }
 }

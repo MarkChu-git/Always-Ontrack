@@ -328,10 +328,10 @@ export function formatDate(value?: string): string {
 }
 
 /** Stable pretty JSON printer for machine-consumable output modes. */
-export function printJson(value: unknown): void {
+export function printJson(value: unknown, options: { readonly streaming?: boolean } = {}): void {
   const context = getAgentOutputContext();
   output.write(
-    `${JSON.stringify(wrapAgentOutput(value), null, context?.streaming ? undefined : 2)}\n`,
+    `${JSON.stringify(wrapAgentOutput(value), null, options.streaming || context?.streaming ? undefined : 2)}\n`,
   );
 }
 
