@@ -828,6 +828,26 @@ That makes them a better fit for:
 - log collectors
 - stream-oriented automation
 
+### Agent watch streams
+
+Use `--output agent-json` for a versioned NDJSON stream. Every stdout line is one
+compact `ontrack.agent/v1` envelope; the initial line contains a `baseline` frame
+and later lines contain only `events` or incremental `feedback` frames. The CLI
+does not append human stop text to an Agent stream.
+
+```bash
+ontrack watch --project-id 87 --interval 60 --output agent-json
+ontrack feedback watch --project-id 87 --abbr D4 --history 0 --output agent-json
+```
+
+`watch` projects the strict definition-first plan: `start`, `target`, and
+`feedback_deadline` are independent Plan Dates with `kind`, `source`,
+`editable`, and `unit_local_calendar_date` interpretation. A full poll is split
+into frames of at most 800 events and every frame is bounded to 512 KiB.
+`feedback watch` returns only allowlisted task identity and feedback fields; it
+excludes people, attachments, and unknown remote fields. Agent timestamps are
+validated RFC 3339 instants. Bare `--json` remains the legacy stream shape.
+
 ## Environment variables
 
 | Variable | Purpose | Notes |

@@ -9,10 +9,12 @@ import {
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
   agentFeedbackListOutputSchema,
+  agentFeedbackWatchFrameSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
 } from '../src/lib/agent-commands.js';
+import { agentWatchFrameSchema } from '../src/lib/agent-watch.js';
 import {
   AGENT_COMMAND_SPECS,
   buildCapabilities,
@@ -117,6 +119,48 @@ test('command path resolution handles grouped and top-level commands', () => {
   );
   assert.equal(JSON.stringify(feedback.output_schema).includes('author'), false);
   assert.equal(JSON.stringify(feedback.output_schema).includes('recipient'), false);
+  const feedbackWatch = getCommandSpec('feedback.watch');
+  assert.equal(feedbackWatch.streaming, true);
+  assert.deepEqual(feedbackWatch.input_schema.anyOf, [
+    { required: ['task_definition_id'] },
+    { required: ['abbreviation'] },
+  ]);
+  assert.equal(
+    (
+      feedbackWatch.input_schema.properties as Record<
+        string,
+        Record<string, unknown>
+      >
+    ).interval_seconds.minimum,
+    1,
+  );
+  assert.equal(
+    (
+      feedbackWatch.input_schema.properties as Record<
+        string,
+        Record<string, unknown>
+      >
+    ).history.maximum,
+    200,
+  );
+  assert.deepEqual(
+    feedbackWatch.output_schema,
+    z.toJSONSchema(agentFeedbackWatchFrameSchema),
+  );
+  assert.equal(
+    JSON.stringify(feedbackWatch.output_schema).includes('author'),
+    false,
+  );
+  const watch = getCommandSpec('watch');
+  assert.equal(watch.streaming, true);
+  assert.equal(
+    (watch.input_schema.properties as Record<string, Record<string, unknown>>)
+      .interval_seconds.minimum,
+    1,
+  );
+  assert.deepEqual(watch.output_schema, z.toJSONSchema(agentWatchFrameSchema));
+  assert.match(JSON.stringify(watch.output_schema), /feedback_deadline/);
+  assert.match(JSON.stringify(watch.output_schema), /date_kind/);
   const submissionOutput = submissionStatus.output_schema as Record<string, unknown>;
   const submissionOutputProperties = submissionOutput.properties as Record<
     string,

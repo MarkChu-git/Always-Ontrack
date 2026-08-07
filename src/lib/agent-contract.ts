@@ -6,6 +6,8 @@ export const AGENT_NONEMPTY_SAFE_TEXT_PATTERN =
   /^(?=.*\S)[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u;
 export const AGENT_MULTILINE_SAFE_TEXT_PATTERN =
   /^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]*$/u;
+export const AGENT_RFC3339_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
 
 export function remoteContractFailure(summary: string): never {
   throw new AgentProtocolError({ code: 'REMOTE_UNAVAILABLE', summary });
@@ -61,6 +63,38 @@ export function contractSafeText(
     remoteContractFailure(`OnTrack returned an invalid ${context}.`);
   }
   return normalized;
+}
+
+/** Return whether a value is a real RFC 3339 instant without accepting arbitrary text. */
+export function isAgentRfc3339Timestamp(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = AGENT_RFC3339_TIMESTAMP_PATTERN.exec(value);
+  if (!match) {
+    return false;
+  }
+  const [year, month, day] = match.slice(1, 4).map(Number);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  return Number.isFinite(Date.parse(value));
+}
+
+/** Validate and normalize timestamps so Agent outputs cannot carry arbitrary text. */
+export function contractRfc3339Timestamp(
+  value: unknown,
+  context: string,
+): string {
+  if (!isAgentRfc3339Timestamp(value)) {
+    remoteContractFailure(`OnTrack returned an invalid ${context}.`);
+  }
+  return new Date(Date.parse(value)).toISOString();
 }
 
 /** Normalize feedback-style text while allowing line feeds but rejecting other controls. */

@@ -265,6 +265,27 @@ export function agentSuccessEnvelope<T>(
   };
 }
 
+/** Enforce one compact Agent envelope byte limit using a conservative request id. */
+export function assertAgentEnvelopeByteLimit<T>(options: {
+  readonly command: string;
+  readonly data: T;
+  readonly maxBytes: number;
+  readonly failureSummary: string;
+}): T {
+  const envelope = agentSuccessEnvelope({
+    command: options.command,
+    requestId: `req_${'x'.repeat(120)}`,
+    data: options.data,
+  });
+  if (Buffer.byteLength(JSON.stringify(envelope), 'utf8') > options.maxBytes) {
+    throw new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: options.failureSummary,
+    });
+  }
+  return options.data;
+}
+
 /** Preserve legacy JSON unless the CLI explicitly selected Agent output. */
 export function wrapAgentOutput<T>(data: T): T | AgentSuccessEnvelope<T> {
   if (!activeOutputContext) {

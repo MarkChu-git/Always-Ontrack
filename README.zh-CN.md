@@ -782,6 +782,24 @@ ontrack tasks --project-id 87 --json
 
 进行流式消费。
 
+### Agent watch 流
+
+使用 `--output agent-json` 获得版本化 NDJSON 流。stdout 的每一行都是一个紧凑的
+`ontrack.agent/v1` envelope：首帧为 `baseline`，后续只输出 `events` 或增量
+`feedback` frame。Agent 流结束时 CLI 不会追加人类可读的停止文本。
+
+```bash
+ontrack watch --project-id 87 --interval 60 --output agent-json
+ontrack feedback watch --project-id 87 --abbr D4 --history 0 --output agent-json
+```
+
+`watch` 使用严格的 definition-first plan 投影：`start`、`target`、
+`feedback_deadline` 是相互独立的 Plan Date，均包含 `kind`、`source`、
+`editable` 与 `unit_local_calendar_date` 解释。一次完整轮询会拆分为最多 800 个
+event 的 frame，且每个 frame 限制为 512 KiB。`feedback watch` 只返回 allowlist
+任务标识和反馈字段，排除人员、附件和未知远端字段；Agent 时间戳必须是 RFC 3339
+instant。裸 `--json` 继续保持 legacy stream shape。
+
 ## 环境变量
 
 | 环境变量 | 作用 | 备注 |

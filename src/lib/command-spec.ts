@@ -9,10 +9,12 @@ import {
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
   agentFeedbackListOutputSchema,
+  agentFeedbackWatchFrameSchema,
   agentPlanShowInputSchema,
   agentPlanShowOutputSchema,
   agentSubmissionStatusOutputSchema,
 } from './agent-commands.js';
+import { agentWatchFrameSchema } from './agent-watch.js';
 
 export type AgentCommandRisk = 'read' | 'write' | 'auth' | 'local';
 export type CommandInputType = 'string' | 'integer' | 'boolean' | 'string_array';
@@ -175,6 +177,28 @@ const singleTaskReadInputSchema = {
   ],
 };
 
+const feedbackWatchFields = {
+  ...singleTaskReadFields,
+  interval_seconds: integerField('--interval', false, { minimum: 1, maximum: 86_400 }),
+  history: integerField('--history', false, { minimum: 0, maximum: 200 }),
+};
+const feedbackWatchInputSchema = {
+  ...jsonSchemaForFields(feedbackWatchFields),
+  anyOf: singleTaskReadInputSchema.anyOf,
+};
+
+const watchFields = {
+  unit_id: integerField('--unit-id', false, {
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  }),
+  project_id: integerField('--project-id', false, {
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  }),
+  interval_seconds: integerField('--interval', false, { minimum: 1, maximum: 86_400 }),
+};
+
 const taskResourceFields = {
   ...jsonTaskSelector,
   out_dir: stringField('--out-dir'),
@@ -330,7 +354,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
       Record<string, unknown>
     >,
   }),
-  spec({ path: 'feedback.watch', description: 'Stream task feedback changes.', streaming: true, fields: { ...oneTaskSelector, interval_seconds: integerField('--interval'), history: integerField('--history') } }),
+  spec({ path: 'feedback.watch', description: 'Stream bounded, person-free task feedback frames.', streaming: true, fields: feedbackWatchFields, inputSchema: feedbackWatchInputSchema, outputSchema: z.toJSONSchema(agentFeedbackWatchFrameSchema) as Readonly<Record<string, unknown>> }),
   spec({ path: 'pdf.task', description: 'Download task PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
   spec({ path: 'pdf.submission', description: 'Download submission PDFs.', fields: { ...jsonTaskSelector, out_dir: stringField('--out-dir'), allow_external_dir: booleanField('--allow-external-dir') } }),
   spec({
@@ -344,7 +368,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   }),
   spec({ path: 'submission.upload', description: 'Prepare or dispatch one submission.', risk: 'write', fields: { ...oneTaskSelector, files: stringArrayField('--file', true), allow_external_file: booleanField('--allow-external-file'), trigger: stringField('--trigger'), comment: stringField('--comment'), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
   spec({ path: 'submission.upload_new_files', description: 'Prepare or attach evidence to an existing submission.', risk: 'write', fields: { ...oneTaskSelector, files: stringArrayField('--file', true), allow_external_file: booleanField('--allow-external-file'), trigger: stringField('--trigger'), comment: stringField('--comment'), confirm: booleanField('--confirm'), idempotency_key: stringField('--idempotency-key') } }),
-  spec({ path: 'watch', description: 'Stream cross-project task changes.', streaming: true, fields: { unit_id: integerField('--unit-id'), project_id: integerField('--project-id'), interval_seconds: integerField('--interval') } }),
+  spec({ path: 'watch', description: 'Stream typed task status, Plan Date, and feedback changes.', streaming: true, fields: watchFields, outputSchema: z.toJSONSchema(agentWatchFrameSchema) as Readonly<Record<string, unknown>> }),
 ];
 
 const COMMAND_SPEC_MAP = new Map(AGENT_COMMAND_SPECS.map((item) => [item.path, item]));
