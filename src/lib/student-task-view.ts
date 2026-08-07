@@ -170,6 +170,13 @@ interface TutorialContext {
   appliesToAllStreams: boolean;
 }
 
+export interface StudentTutorialStatus {
+  state: 'known' | 'unknown';
+  availableStreams: readonly string[];
+  enrolledStreams: readonly string[];
+  appliesToAllStreams: boolean | null;
+}
+
 /**
  * Resolve the observed production join:
  * project.tutorial_enrolments[].tutorial_id
@@ -263,6 +270,28 @@ function enrolledTutorialStreams(project: ProjectSummary, unit: UnitSummary): Tu
     enrolledStreams,
     availableStreams,
     appliesToAllStreams,
+  };
+}
+
+/** Project the verified tutorial join without exposing tutorial or learner metadata. */
+export function resolveStudentTutorialStatus(
+  project: ProjectSummary,
+  unit: UnitSummary,
+): StudentTutorialStatus {
+  const context = enrolledTutorialStreams(project, unit);
+  if (context.state === 'unknown') {
+    return {
+      state: 'unknown',
+      availableStreams: [],
+      enrolledStreams: [],
+      appliesToAllStreams: null,
+    };
+  }
+  return {
+    state: 'known',
+    availableStreams: [...context.availableStreams].sort(),
+    enrolledStreams: [...context.enrolledStreams].sort(),
+    appliesToAllStreams: context.appliesToAllStreams,
   };
 }
 

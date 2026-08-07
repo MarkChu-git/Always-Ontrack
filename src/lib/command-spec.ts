@@ -6,6 +6,8 @@ import {
   agentProjectsListOutputSchema,
   agentUnitShowInputSchema,
   agentUnitShowOutputSchema,
+  agentTutorialsStatusInputSchema,
+  agentTutorialsStatusOutputSchema,
   agentTasksListInputSchema,
   agentTasksListOutputSchema,
   agentFeedbackListOutputSchema,
@@ -296,6 +298,16 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
     >,
   }),
   spec({ path: 'unit.tasks', description: 'List tasks for one unit.', fields: { unit_id: integerField('--unit-id', true), status: stringField('--status') } }),
+  spec({
+    path: 'tutorials.status',
+    description: 'Read the safe tutorial enrolment and stream status.',
+    inputSchema: z.toJSONSchema(agentTutorialsStatusInputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+    outputSchema: z.toJSONSchema(agentTutorialsStatusOutputSchema) as Readonly<
+      Record<string, unknown>
+    >,
+  }),
   spec({
     path: 'tasks.list',
     description: 'List the safe project-scoped Student Task View catalogue.',

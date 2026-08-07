@@ -246,6 +246,15 @@ test('native definitions keep safety metadata aligned with the compatibility pro
       active: true,
       task_definition_count: 0,
     }),
+    tutorialsStatus: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      state: 'known' as const,
+      available_streams: ['A'],
+      enrolled_streams: ['A'],
+      applies_to_all_streams: false,
+      can_change_tutorial: true,
+    }),
     tasksList: async () => ({ count: 0, tasks: [] }),
     taskShow: async () => ({ project_id: 1, count: 0, tasks: [] }),
     taskPrerequisites: async () => ({
@@ -291,6 +300,7 @@ test('native definitions keep safety metadata aligned with the compatibility pro
   assert.equal(commands.some((command) => command.path === 'plan.show'), true);
   assert.equal(commands.some((command) => command.path === 'projects.list'), true);
   assert.equal(commands.some((command) => command.path === 'unit.show'), true);
+  assert.equal(commands.some((command) => command.path === 'tutorials.status'), true);
   assert.equal(commands.some((command) => command.path === 'submission.status'), true);
 
   for (const command of commands) {

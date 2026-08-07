@@ -232,6 +232,22 @@ test('Student Task View catalogue accepts equivalent Task Definition catalogue a
   assert.equal(output.tasks[0]?.task_definition_id, 3001);
 });
 
+test('Student Task View catalogue ignores tutorial change policy outside its projection', async () => {
+  const listTasks = createAgentTasksList({
+    readProject: async () => ({ id: 1001, unit_id: 2001, tasks: [] }),
+    readUnit: async () => ({
+      id: 2001,
+      task_definitions: [{ id: 3001, abbreviation: 'T1' }],
+      allow_student_change_tutorial: 'not-a-boolean',
+    }),
+  });
+
+  const output = await listTasks({ project_id: 1001 });
+
+  assert.equal(output.count, 1);
+  assert.equal(output.tasks[0]?.task_definition_id, 3001);
+});
+
 test('Student Task View catalogue joins one Task Instance and applies case-insensitive status filtering', async () => {
   const listTasks = createAgentTasksList({
     readProject: async () => ({

@@ -77,6 +77,21 @@ const agentTaskListSafeText = z
   .regex(/\S/u, 'value must contain a non-whitespace character')
   .regex(AGENT_SAFE_TEXT_PATTERN, 'value contains unsafe control characters');
 
+export const agentTutorialsStatusInputSchema = agentUnitShowInputSchema;
+export const agentTutorialsStatusOutputSchema = z
+  .object({
+    project_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    unit_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    state: z.enum(['known', 'unknown']),
+    available_streams: z.array(agentTaskListSafeText.min(1).max(80)).max(200),
+    enrolled_streams: z.array(agentTaskListSafeText.min(1).max(80)).max(200),
+    applies_to_all_streams: z.boolean().nullable(),
+    can_change_tutorial: z.boolean().nullable(),
+  })
+  .strict();
+export type AgentTutorialsStatusInput = z.output<typeof agentTutorialsStatusInputSchema>;
+export type AgentTutorialsStatusOutput = z.output<typeof agentTutorialsStatusOutputSchema>;
+
 export const agentTasksListInputSchema = z
   .object({
     project_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -543,6 +558,9 @@ export interface NativeAgentCommandHandlers {
   authStatus(): Promise<AgentAuthStatus>;
   projectsList(): Promise<AgentProjectsListOutput>;
   unitShow(input: AgentUnitShowInput): Promise<AgentUnitShowOutput>;
+  tutorialsStatus(
+    input: AgentTutorialsStatusInput,
+  ): Promise<AgentTutorialsStatusOutput>;
   tasksList(input: AgentTasksListInput): Promise<AgentTasksListOutput>;
   taskShow(input: AgentTaskShowInput): Promise<AgentTaskShowOutput>;
   taskPrerequisites(
@@ -609,6 +627,18 @@ export function createNativeAgentCommands(
       input: agentUnitShowInputSchema,
       output: agentUnitShowOutputSchema,
       execute: (input) => handlers.unitShow(input),
+    }),
+    defineAgentCommand({
+      path: 'tutorials.status',
+      description: 'Read the safe tutorial enrolment and stream status.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentTutorialsStatusInputSchema,
+      output: agentTutorialsStatusOutputSchema,
+      execute: (input) => handlers.tutorialsStatus(input),
     }),
     defineAgentCommand({
       path: 'tasks.list',

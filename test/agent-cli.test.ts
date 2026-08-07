@@ -204,6 +204,87 @@ test("native projects.list and compatibility Agent output share a safe project d
   }
 });
 
+test("native tutorials.status projects the verified tutorial join without tutor details", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-tutorials-"));
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    const payload =
+      request.url === "/api/projects/1001"
+        ? {
+            id: 1001,
+            unit_id: 2001,
+            tasks: [],
+            tutorial_enrolments: [{ tutorial_id: 4001 }],
+          }
+        : request.url === "/api/units/2001"
+          ? {
+              id: 2001,
+              task_definitions: [],
+              tutorial_streams: [{ abbreviation: "A" }, { abbreviation: "B" }],
+              tutorials: [
+                {
+                  id: 4001,
+                  tutorial_stream_abbr: "A",
+                  room: "Private room",
+                  tutor: { name: "Private tutor" },
+                },
+              ],
+              allow_student_change_tutorial: true,
+            }
+          : undefined;
+    if (payload === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(payload));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      ["agent", "call", "tutorials.status", "--input-json", '{"project_id":1001}'],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, `${result.stderr}\n${result.stdout}`);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "tutorials.status");
+    assert.deepEqual(envelope.data, {
+      project_id: 1001,
+      unit_id: 2001,
+      state: "known",
+      available_streams: ["A", "B"],
+      enrolled_streams: ["A"],
+      applies_to_all_streams: false,
+      can_change_tutorial: true,
+    });
+    assert.equal(result.stdout.includes("Private room"), false);
+    assert.equal(result.stdout.includes("Private tutor"), false);
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("native and compatibility tasks.list share a Student Task View catalogue without changing legacy JSON", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-tasks-list-"));
   const fixture = JSON.parse(
@@ -2190,6 +2271,7 @@ test("agent list and describe are offline projections of the executable commands
         "auth.status",
         "projects.list",
         "unit.show",
+        "tutorials.status",
         "tasks.list",
         "task.show",
         "task.prerequisites",
@@ -2227,6 +2309,24 @@ test("agent list and describe are offline projections of the executable commands
     );
     assert.match(JSON.stringify(unitData.output_schema), /task_definition_count/);
     assert.equal(JSON.stringify(unitData.output_schema).includes("staff"), false);
+
+    const tutorials = await runCli(
+      ["agent", "describe", "tutorials.status"],
+      configRoot,
+    );
+    assert.equal(tutorials.exitCode, 0, tutorials.stderr);
+    const tutorialsData = JSON.parse(tutorials.stdout).data as Record<string, unknown>;
+    assert.deepEqual(
+      (tutorialsData.input_schema as Record<string, unknown>).required,
+      ["project_id"],
+    );
+    assert.match(JSON.stringify(tutorialsData.output_schema), /available_streams/);
+    const tutorialProperties = (
+      tutorialsData.output_schema as Record<string, unknown>
+    ).properties as Record<string, unknown>;
+    assert.equal(Object.hasOwn(tutorialProperties, "tutor"), false);
+    assert.equal(Object.hasOwn(tutorialProperties, "room"), false);
+    assert.equal(Object.hasOwn(tutorialProperties, "students"), false);
 
     const taskDirectory = await runCli(
       ["agent", "describe", "tasks.list"],
