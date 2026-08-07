@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { MAX_DOWNLOAD_BYTES } from "../src/lib/api.js";
 
 async function runCli(
   args: string[],
@@ -2272,6 +2273,208 @@ test("agent call task.resources downloads definition resources for an uninstanti
   }
 });
 
+test("agent call pdf.task downloads one definition-first task sheet with artifact metadata", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-call-task-pdf-"));
+  const outputRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-task-pdf-output-"));
+  const legacyOutputRoot = await mkdtemp(join(tmpdir(), "ontrack-legacy-task-pdf-output-"));
+  const pdfBytes = Buffer.from("%PDF-1.7\nfixture task sheet\n", "ascii");
+  let pdfResponse = pdfBytes;
+  let pdfContentType = "application/octet-stream";
+  let pdfContentDisposition = "attachment; filename=FIT0001_D4_task.pdf";
+  const server = createServer((request, response) => {
+    assert.equal(request.headers["auth-token"], "fixture-token");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/api/projects") {
+      response.end(JSON.stringify([{ id: 87, unit_id: 55 }]));
+      return;
+    }
+    if (request.url === "/api/projects/87") {
+      response.end(JSON.stringify({ id: 87, unit_id: 55, tasks: [] }));
+      return;
+    }
+    if (request.url === "/api/units/55") {
+      response.end(JSON.stringify({
+        id: 55,
+        code: "FIT0001",
+        task_definitions: [{ id: 501, abbreviation: "D4", name: "Design task" }],
+      }));
+      return;
+    }
+    if (request.url === "/api/units/55/task_definitions/501/task_pdf.json?as_attachment=true") {
+      response.setHeader("content-type", pdfContentType);
+      response.setHeader("content-disposition", pdfContentDisposition);
+      response.end(pdfResponse);
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const sessionDir = join(configRoot, "ontrack-cli");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.json"),
+      JSON.stringify({
+        baseUrl: `http://127.0.0.1:${address.port}/api`,
+        username: "fixture-user",
+        authToken: "fixture-token",
+        user: { id: 1, username: "fixture-user" },
+        savedAt: "2026-07-31T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        source: "access-token",
+        refreshedAt: "2026-07-31T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      [
+        "agent",
+        "call",
+        "pdf.task",
+        "--input-json",
+        JSON.stringify({
+          project_id: 87,
+          abbreviation: "D4",
+          out_dir: outputRoot,
+          allow_external_dir: true,
+        }),
+      ],
+      configRoot,
+    );
+    assert.equal(result.exitCode, 0, `${result.stderr}\n${result.stdout}`);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(envelope.command, "pdf.task");
+    assert.equal(envelope.status, "success");
+    const data = envelope.data as Record<string, unknown>;
+    assert.deepEqual(
+      {
+        project_id: data.project_id,
+        unit_id: data.unit_id,
+        unit_code: data.unit_code,
+        task_definition_id: data.task_definition_id,
+        task_instance_id: data.task_instance_id,
+        abbreviation: data.abbreviation,
+        instantiated: data.instantiated,
+      },
+      {
+        project_id: 87,
+        unit_id: 55,
+        unit_code: "FIT0001",
+        task_definition_id: 501,
+        task_instance_id: null,
+        abbreviation: "D4",
+        instantiated: false,
+      },
+    );
+    const artifact = data.artifact as Record<string, unknown>;
+    assert.equal(artifact.filename, "FIT0001_D4_task.pdf");
+    assert.equal(artifact.bytes, pdfBytes.byteLength);
+    assert.equal(artifact.content_type, "application/octet-stream");
+    assert.match(String(artifact.sha256), /^[a-f0-9]{64}$/u);
+    const outputPath = join(outputRoot, "FIT0001_D4_task.pdf");
+    assert.equal(await stat(outputPath).then(() => true), true);
+    assert.deepEqual(await readFile(outputPath), pdfBytes);
+    assert.equal(result.stdout.includes("fixture-token"), false);
+    assert.equal(result.stdout.includes(configRoot), false);
+
+    pdfResponse = Buffer.from("<html>not a PDF</html>", "ascii");
+    const invalidPdf = await runCli(
+      [
+        "agent",
+        "call",
+        "pdf.task",
+        "--input-json",
+        JSON.stringify({
+          project_id: 87,
+          task_definition_id: 501,
+          out_dir: outputRoot,
+          allow_external_dir: true,
+        }),
+      ],
+      configRoot,
+    );
+    assert.equal(invalidPdf.exitCode, 7, invalidPdf.stderr);
+    assert.equal(
+      (JSON.parse(invalidPdf.stdout).error as Record<string, unknown>).code,
+      "REMOTE_UNAVAILABLE",
+    );
+    assert.deepEqual(await readFile(outputPath), pdfBytes);
+
+    pdfResponse = Buffer.alloc(MAX_DOWNLOAD_BYTES + 1, 0x20);
+    const oversizedPdf = await runCli(
+      [
+        "agent",
+        "call",
+        "pdf.task",
+        "--input-json",
+        JSON.stringify({ project_id: 87, task_definition_id: 501 }),
+      ],
+      configRoot,
+    );
+    assert.equal(oversizedPdf.exitCode, 7, oversizedPdf.stderr);
+    assert.equal(
+      (JSON.parse(oversizedPdf.stdout).error as Record<string, unknown>).code,
+      "REMOTE_UNAVAILABLE",
+    );
+    assert.deepEqual(await readFile(outputPath), pdfBytes);
+
+    pdfResponse = pdfBytes;
+    pdfContentType = "application/pdf";
+    pdfContentDisposition = "attachment; filename=FileNotFound.pdf";
+    const unavailablePdf = await runCli(
+      [
+        "agent",
+        "call",
+        "pdf.task",
+        "--input-json",
+        JSON.stringify({ project_id: 87, task_definition_id: 501 }),
+      ],
+      configRoot,
+    );
+    assert.equal(unavailablePdf.exitCode, 5, unavailablePdf.stderr);
+    assert.equal(
+      (JSON.parse(unavailablePdf.stdout).error as Record<string, unknown>).code,
+      "NOT_FOUND",
+    );
+    assert.deepEqual(await readFile(outputPath), pdfBytes);
+
+    const legacyPdf = await runCli(
+      [
+        "pdf",
+        "task",
+        "--project-id",
+        "87",
+        "--task-definition-id",
+        "501",
+        "--out-dir",
+        legacyOutputRoot,
+        "--allow-external-dir",
+        "--json",
+      ],
+      configRoot,
+    );
+    assert.equal(legacyPdf.exitCode, 0, legacyPdf.stderr);
+    const legacyOutput = JSON.parse(legacyPdf.stdout) as Record<string, unknown>;
+    assert.equal(legacyOutput.taskDefinitionId, 501);
+    assert.deepEqual(
+      await readFile(join(legacyOutputRoot, "FIT0001_D4_task.pdf")),
+      pdfBytes,
+    );
+
+  } finally {
+    server.close();
+    await rm(configRoot, { recursive: true, force: true });
+    await rm(outputRoot, { recursive: true, force: true });
+    await rm(legacyOutputRoot, { recursive: true, force: true });
+  }
+});
+
 test("agent list and describe are offline projections of the executable commands", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-discovery-"));
   try {
@@ -2294,6 +2497,7 @@ test("agent list and describe are offline projections of the executable commands
         "task.prerequisites",
         "feedback.list",
         "task.resources",
+        "pdf.task",
         "plan.show",
         "submission.status",
       ],
@@ -2378,6 +2582,50 @@ test("agent list and describe are offline projections of the executable commands
     assert.match(JSON.stringify(feedbackData.output_schema), /feedback_id/);
     assert.equal(JSON.stringify(feedbackData.output_schema).includes("author"), false);
     assert.equal(JSON.stringify(feedbackData.output_schema).includes("recipient"), false);
+
+    const taskPdf = await runCli(
+      ["agent", "describe", "pdf.task"],
+      configRoot,
+    );
+    assert.equal(taskPdf.exitCode, 0, taskPdf.stderr);
+    const taskPdfData = JSON.parse(taskPdf.stdout).data as Record<string, unknown>;
+    assert.equal(taskPdfData.path, "pdf.task");
+    assert.match(JSON.stringify(taskPdfData.input_schema), /task_definition_id/);
+    assert.equal(JSON.stringify(taskPdfData.input_schema).includes("all_tasks"), false);
+    assert.match(JSON.stringify(taskPdfData.output_schema), /sha256/);
+    assert.equal(JSON.stringify(taskPdfData.output_schema).includes("task_id"), false);
+
+    const invalidPdfInput = await runCli(
+      [
+        "agent",
+        "call",
+        "pdf.task",
+        "--input-json",
+        JSON.stringify({ project_id: 87, all_tasks: true }),
+      ],
+      configRoot,
+    );
+    assert.equal(invalidPdfInput.exitCode, 2);
+    assert.equal(
+      (JSON.parse(invalidPdfInput.stdout).error as Record<string, unknown>).code,
+      "INVALID_ARGUMENT",
+    );
+
+    const conflictingPdfInput = await runCli(
+      [
+        "agent",
+        "call",
+        "pdf.task",
+        "--input-json",
+        JSON.stringify({ project_id: 87, task_definition_id: 501, abbreviation: "D4" }),
+      ],
+      configRoot,
+    );
+    assert.equal(conflictingPdfInput.exitCode, 2);
+    assert.equal(
+      (JSON.parse(conflictingPdfInput.stdout).error as Record<string, unknown>).code,
+      "INVALID_ARGUMENT",
+    );
 
     const described = await runCli(
       ["agent", "describe", "task.show"],

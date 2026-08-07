@@ -191,7 +191,7 @@ async function readBoundedJsonResponse(
   try {
     buffer = await readBoundedResponseBody(response.body, maxBytes);
   } catch (error) {
-    if (error instanceof Error && /Binary response exceeds maximum allowed size/u.test(error.message)) {
+    if (error instanceof OversizedBinaryResponseError) {
       throw new OversizedJsonResponseError(maxBytes);
     }
     throw error;
@@ -218,11 +218,27 @@ export class UnavailableDownloadError extends Error {
   }
 }
 
+/** Raised when a successful task-sheet response is not a PDF document. */
+export class InvalidPdfDownloadError extends Error {
+  constructor() {
+    super('OnTrack returned a non-PDF task sheet payload.');
+    this.name = 'InvalidPdfDownloadError';
+  }
+}
+
 /** Raised when a successful task-resource response is not a ZIP archive. */
 export class InvalidDownloadFormatError extends Error {
   constructor() {
     super('OnTrack returned a non-ZIP task resource payload.');
     this.name = 'InvalidDownloadFormatError';
+  }
+}
+
+/** Raised when a remote binary response exceeds the download safety limit. */
+export class OversizedBinaryResponseError extends Error {
+  constructor(maxBytes: number) {
+    super(`Binary response exceeds maximum allowed size of ${maxBytes} bytes.`);
+    this.name = 'OversizedBinaryResponseError';
   }
 }
 
@@ -296,9 +312,7 @@ async function requestBinary(
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
     await response.body?.cancel().catch(() => undefined);
-    throw new Error(
-      `Binary response exceeds maximum allowed size of ${MAX_DOWNLOAD_BYTES} bytes.`,
-    );
+    throw new OversizedBinaryResponseError(MAX_DOWNLOAD_BYTES);
   }
   const buffer = await readBoundedResponseBody(response.body, MAX_DOWNLOAD_BYTES);
   return {
@@ -334,6 +348,15 @@ function requireZipDownload(download: DownloadResult): DownloadResult {
   return download;
 }
 
+/** Validate the task-sheet PDF signature before persisting a remote response. */
+function requirePdfDownload(download: DownloadResult): DownloadResult {
+  const isPdf = download.buffer.subarray(0, 5).toString('ascii') === '%PDF-';
+  if (!isPdf) {
+    throw new InvalidPdfDownloadError();
+  }
+  return download;
+}
+
 /** Read a binary response incrementally and stop before an oversized body is buffered. */
 export async function readBoundedResponseBody(
   body: ReadableStream<Uint8Array> | null,
@@ -355,9 +378,7 @@ export async function readBoundedResponseBody(
       total += result.value.byteLength;
       if (total > maxBytes) {
         await reader.cancel().catch(() => undefined);
-        throw new Error(
-          `Binary response exceeds maximum allowed size of ${maxBytes} bytes.`,
-        );
+        throw new OversizedBinaryResponseError(maxBytes);
       }
       chunks.push(result.value);
     }
@@ -811,8 +832,11 @@ export class OnTrackApiClient {
     );
   }
 
-  /** Download task sheet PDF. */
-  downloadTaskPdf(session: SessionData, unitId: number, taskDefId: number): Promise<DownloadResult> {
+  private requestTaskPdf(
+    session: SessionData,
+    unitId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
     return requestBinary(
       withApiPath(
         this.baseUrl,
@@ -829,6 +853,26 @@ export class OnTrackApiClient {
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
     );
+  }
+
+  /** Download and validate one Task Definition's task sheet PDF. */
+  downloadTaskPdf(
+    session: SessionData,
+    unitId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return this.requestTaskPdf(session, unitId, taskDefId)
+      .then(requireAvailableDownload)
+      .then(requirePdfDownload);
+  }
+
+  /** Preserve the human CLI's established pass-through task-PDF download semantics. */
+  downloadTaskPdfForCompatibility(
+    session: SessionData,
+    unitId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return this.requestTaskPdf(session, unitId, taskDefId);
   }
 
   /** Download the ZIP archive of resources attached to a task definition. */

@@ -1,9 +1,11 @@
 import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import {
+  InvalidPdfDownloadError,
   InvalidJsonResponseError,
   MAX_DOWNLOAD_BYTES,
   OnTrackApiClient,
+  OversizedBinaryResponseError,
   OversizedJsonResponseError,
   UnavailableDownloadError,
   readBoundedResponseBody,
@@ -336,7 +338,7 @@ test('downloadTaskPdf returns binary payload', async () => {
   let requestedUrl = '';
   mockFetch(async (input) => {
     requestedUrl = String(input);
-    return new Response(Uint8Array.from([0x25, 0x50, 0x44, 0x46]), {
+    return new Response(Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d]), {
       status: 200,
       headers: {
         'content-type': 'application/pdf',
@@ -347,7 +349,40 @@ test('downloadTaskPdf returns binary payload', async () => {
   const result = await client.downloadTaskPdf(session, 55, 501);
   assert.ok(requestedUrl.endsWith('/units/55/task_definitions/501/task_pdf.json?as_attachment=true'));
   assert.equal(result.contentType, 'application/pdf');
-  assert.deepEqual([...result.buffer], [0x25, 0x50, 0x44, 0x46]);
+  assert.deepEqual([...result.buffer], [0x25, 0x50, 0x44, 0x46, 0x2d]);
+});
+
+test('downloadTaskPdf rejects OnTrack FileNotFound.pdf placeholders', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () =>
+    new Response(Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': "attachment; filename*=UTF-8''FileNotFound.pdf",
+      },
+    }),
+  );
+
+  await assert.rejects(
+    () => client.downloadTaskPdf(session, 55, 501),
+    (error: unknown) => error instanceof UnavailableDownloadError,
+  );
+});
+
+test('downloadTaskPdf rejects successful non-PDF payloads', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () =>
+    new Response('<html>not a PDF</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  );
+
+  await assert.rejects(
+    () => client.downloadTaskPdf(session, 55, 501),
+    (error: unknown) => error instanceof InvalidPdfDownloadError,
+  );
 });
 
 test('downloadTaskResources uses the production task-resource endpoint and returns ZIP bytes', async () => {
@@ -445,7 +480,7 @@ test('binary downloads reject an oversized declared response before buffering it
 
   await assert.rejects(
     () => client.downloadTaskPdf(session, 55, 501),
-    /maximum allowed size/,
+    (error: unknown) => error instanceof OversizedBinaryResponseError,
   );
   assert.equal(cancelled, true);
 });
