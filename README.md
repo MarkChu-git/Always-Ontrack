@@ -602,7 +602,15 @@ ontrack logout
 | Command | Purpose | Notes |
 | --- | --- | --- |
 | `ontrack discover` | Scan frontend bundles for route and API templates | Engineering-focused inspection tool |
-| `ontrack discover --probe` | Probe discovered API templates with the current session | Useful for real-account investigation |
+| `ontrack discover --probe` | Probe allowlisted read-only API templates with the current session | Use explicit `--project-id`, `--unit-id`, and `--task-definition-id` selectors as needed; the default budget is 10 requests (maximum 25) |
+
+For a bounded, task-scoped probe suitable for an agent workflow:
+
+```bash
+ontrack discover --probe --project-id 101 --unit-id 55 --task-definition-id 501 --limit 10 --json
+```
+
+Missing selector values cause only the affected API templates to be reported as `skip`; the command never selects a project or task on your behalf.
 
 ## Typical workflows
 

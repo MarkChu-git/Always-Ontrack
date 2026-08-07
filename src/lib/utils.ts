@@ -555,8 +555,12 @@ export function parseIntegerFlagValue(raw: string | undefined, flag: string): nu
     throw new Error(`Missing value for ${flag}.`);
   }
 
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value)) {
+  const trimmed = raw.trim();
+  if (!/^[+-]?\d+$/.test(trimmed)) {
+    throw new Error(`Expected an integer for ${flag}, got "${raw}".`);
+  }
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value)) {
     throw new Error(`Expected an integer for ${flag}, got "${raw}".`);
   }
   return value;
