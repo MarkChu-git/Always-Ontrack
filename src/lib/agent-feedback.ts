@@ -21,10 +21,8 @@ import {
   hasOwnField as own,
   remoteContractFailure as remoteFailure,
 } from "./agent-contract.js";
-import {
-  createAgentTasksList,
-  type AgentTasksListSource,
-} from './agent-tasks.js';
+import { createAgentTasksList } from "./agent-tasks.js";
+import type { AgentProjectUnitSource } from "./agent-project-unit-canonical.js";
 
 const MAX_AGENT_FEEDBACK_ITEMS = 200;
 const MAX_AGENT_FEEDBACK_TEXT_LENGTH = 4096;
@@ -48,7 +46,7 @@ export type AgentFeedbackTarget = Pick<
   | "instantiated"
 >;
 
-export interface AgentFeedbackListSource extends AgentTasksListSource {
+export interface AgentFeedbackListSource extends AgentProjectUnitSource {
   readFeedback(projectId: number, taskDefinitionId: number): Promise<unknown>;
 }
 
@@ -222,7 +220,7 @@ export function validateAgentFeedbackWatchFrame(
 
 /** Resolve one strict, definition-first feedback target without reading its timeline. */
 export function createAgentFeedbackTarget(
-  source: AgentTasksListSource,
+  source: AgentProjectUnitSource,
 ): (input: AgentFeedbackListInput) => Promise<AgentFeedbackTarget> {
   const listTasks = createAgentTasksList(source);
   return async (input) => {

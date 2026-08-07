@@ -206,6 +206,7 @@ test("native projects.list and compatibility Agent output share a safe project d
 
 test("native tutorials.status projects the verified tutorial join without tutor details", async () => {
   const configRoot = await mkdtemp(join(tmpdir(), "ontrack-agent-tutorials-"));
+  let malformedPolicy = false;
   const server = createServer((request, response) => {
     assert.equal(request.headers["auth-token"], "fixture-token");
     const payload =
@@ -229,7 +230,7 @@ test("native tutorials.status projects the verified tutorial join without tutor 
                   tutor: { name: "Private tutor" },
                 },
               ],
-              allow_student_change_tutorial: true,
+              allow_student_change_tutorial: malformedPolicy ? "true" : true,
             }
           : undefined;
     if (payload === undefined) {
@@ -279,6 +280,22 @@ test("native tutorials.status projects the verified tutorial join without tutor 
     });
     assert.equal(result.stdout.includes("Private room"), false);
     assert.equal(result.stdout.includes("Private tutor"), false);
+
+    malformedPolicy = true;
+    const malformed = await runCli(
+      ["agent", "call", "tutorials.status", "--input-json", '{"project_id":1001}'],
+      configRoot,
+    );
+    assert.equal(malformed.exitCode, 7);
+    assert.equal(malformed.stderr, "");
+    const malformedEnvelope = JSON.parse(malformed.stdout) as Record<string, unknown>;
+    assert.equal(malformedEnvelope.command, "tutorials.status");
+    assert.equal(
+      (malformedEnvelope.error as Record<string, unknown>).code,
+      "REMOTE_UNAVAILABLE",
+    );
+    assert.equal(malformed.stdout.includes("Private room"), false);
+    assert.equal(malformed.stdout.includes("Private tutor"), false);
   } finally {
     server.close();
     await rm(configRoot, { recursive: true, force: true });
