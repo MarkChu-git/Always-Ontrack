@@ -61,7 +61,10 @@ import {
 import type { RawTaskPrerequisite } from './lib/planner.js';
 import { buildAgentPlanShowOutput } from './lib/agent-plan.js';
 import { buildAgentProjectsListOutput } from './lib/agent-projects.js';
-import { createAgentTasksList } from './lib/agent-tasks.js';
+import {
+  createAgentTasksList,
+  createAgentTutorialsStatus,
+} from './lib/agent-tasks.js';
 import { createAgentUnitShow } from './lib/agent-units.js';
 import {
   createAgentFeedbackList,
@@ -181,6 +184,8 @@ import {
   type AgentProjectsListOutput,
   type AgentUnitShowInput,
   type AgentUnitShowOutput,
+  type AgentTutorialsStatusInput,
+  type AgentTutorialsStatusOutput,
   type AgentTasksListInput,
   type AgentTasksListOutput,
   type AgentFeedbackListInput,
@@ -2453,6 +2458,17 @@ async function readAgentUnitShow(
 ): Promise<AgentUnitShowOutput> {
   const api = createAuthenticatedApi(session);
   return createAgentUnitShow({
+    readProject: (projectId) => api.getProjectForAgent(session, projectId),
+    readUnit: (unitId) => api.getUnitForAgent(session, unitId),
+  })(input);
+}
+
+async function readAgentTutorialsStatus(
+  input: AgentTutorialsStatusInput,
+  session: SessionData,
+): Promise<AgentTutorialsStatusOutput> {
+  const api = createAuthenticatedApi(session);
+  return createAgentTutorialsStatus({
     readProject: (projectId) => api.getProjectForAgent(session, projectId),
     readUnit: (unitId) => api.getUnitForAgent(session, unitId),
   })(input);
@@ -5401,6 +5417,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentUnitShow(input, activeSession);
+      },
+      tutorialsStatus: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentTutorialsStatus(input, activeSession);
       },
       tasksList: (input) => {
         if (!activeSession) {

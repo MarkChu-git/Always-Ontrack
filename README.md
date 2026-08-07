@@ -144,6 +144,7 @@ ontrack agent describe task.show
 ontrack agent call auth.status --input-json '{}'
 ontrack agent call projects.list --input-json '{}'
 ontrack agent call unit.show --input-json '{"project_id":87}'
+ontrack agent call tutorials.status --input-json '{"project_id":87}'
 ontrack agent call tasks.list --input-json '{"project_id":87}'
 ontrack agent call task.show \
   --input-json '{"project_id":87,"abbreviation":["D4"]}'
@@ -163,12 +164,15 @@ ontrack agent call task.resources \
 empty `tasks` array can still expose tasks from its unit task-definition
 catalogue. It explicitly reports uninstantiated tasks instead of guessing an
 instance id. Use `--input -` for bounded non-interactive stdin. The native
-surface covers `auth.status`, `projects.list`, `unit.show`, `tasks.list`,
+surface covers `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`,
 `task.show`, `task.prerequisites`, `plan.show`, `submission.status`, and
 `task.resources`, and `feedback.list`; more commands are added as individually reviewed vertical
 slices. `unit.show` uses `projects.list` identity as its scope, then reads the
 matching Unit Detail only to return a PII-minimized unit summary and task
 definition count. It never returns staff, tutorials, groups, people, or raw task
+payloads. `tutorials.status` is a separate read-only projection of the verified
+tutorial-enrolment join: stream state and change policy only, never tutorial, room,
+tutor, or learner details.
 definitions. `submission.status` resolves
 the task definition even when no task instance exists, reads OnTrack's observed
 per-definition submission-details route, and returns explicit PDF state plus
@@ -551,7 +555,7 @@ ontrack logout
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
-| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `unit.show`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `plan.show`, `submission.status`, and `task.resources` |
+| `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope; currently `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `plan.show`, `submission.status`, and `task.resources` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |

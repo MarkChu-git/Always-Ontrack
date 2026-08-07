@@ -1,6 +1,9 @@
 import {
   AGENT_TASKS_LIST_MAX_STATUS_LENGTH,
+  agentTutorialsStatusOutputSchema,
   agentTasksListOutputSchema,
+  type AgentTutorialsStatusInput,
+  type AgentTutorialsStatusOutput,
   type AgentTasksListInput,
   type AgentTasksListOutput,
 } from './agent-commands.js';
@@ -22,6 +25,7 @@ import {
 } from './agent-contract.js';
 import {
   buildStudentTaskViews,
+  resolveStudentTutorialStatus,
   type StudentTaskView,
 } from './student-task-view.js';
 import type {
@@ -40,6 +44,13 @@ type AgentTaskCatalogueItem = AgentTasksListOutput['tasks'][number];
 export interface AgentTasksListSource {
   readProject(projectId: number): Promise<unknown>;
   readUnit(unitId: number): Promise<unknown>;
+}
+
+function booleanValue(value: unknown, context: string): boolean {
+  if (typeof value !== 'boolean') {
+    remoteFailure(`OnTrack returned an invalid ${context}.`);
+  }
+  return value;
 }
 
 function invalidArgument(summary: string): never {
@@ -347,6 +358,124 @@ function canonicalUnit(rawUnit: unknown, expectedUnitId: number): UnitSummary {
       ? {}
       : { tutorial_streams: tutorialStreams }),
     ...(tutorials === undefined ? {} : { tutorials }),
+  };
+}
+
+function canonicalTutorialStatusProject(
+  rawProject: unknown,
+  expectedProjectId: number,
+  expectedUnitId?: number,
+): ProjectSummary {
+  const project = recordValue(rawProject, 'project');
+  const projectId = authoritativeProjectId(project, expectedProjectId);
+  const unitId = contractProjectUnit(project).id;
+  if (expectedUnitId !== undefined && unitId !== expectedUnitId) {
+    invalidArgument('The supplied unit_id does not belong to the requested project.');
+  }
+  const tutorialEnrolments = canonicalTutorialEnrolments(project);
+  return {
+    id: projectId,
+    unit: { id: unitId },
+    ...(tutorialEnrolments === undefined
+      ? {}
+      : { tutorial_enrolments: tutorialEnrolments }),
+  };
+}
+
+function canonicalTutorialStatusCollections(unit: Record<string, unknown>) {
+  const tutorialStreams = aliasedArray(
+    unit,
+    ['tutorialStreams', 'tutorial_streams'],
+    'tutorial streams',
+    false,
+  )?.map(canonicalTutorialStream);
+  const tutorials = aliasedArray(unit, ['tutorials'], 'tutorials', false)?.map(
+    canonicalTutorial,
+  );
+  if (tutorials !== undefined) {
+    assertUniqueNumbers(tutorials.map((tutorial) => tutorial.id), 'tutorial');
+  }
+  if (tutorialStreams !== undefined) {
+    assertUniqueStrings(
+      tutorialStreams.map((stream) => stream.abbreviation),
+      'tutorial stream',
+    );
+  }
+  return { tutorials, tutorialStreams };
+}
+
+function canonicalTutorialStatusUnit(rawUnit: unknown, expectedUnitId: number): UnitSummary {
+  const unit = recordValue(rawUnit, 'unit');
+  const unitId = requiredPositiveInteger(unit, ['id'], 'unit id');
+  if (unitId !== expectedUnitId) {
+    remoteFailure('OnTrack returned an unexpected unit identity.');
+  }
+  const { tutorials, tutorialStreams } = canonicalTutorialStatusCollections(unit);
+  const tutorialChangeAllowed = aliasedValue(
+    unit,
+    ['allowStudentChangeTutorial', 'allow_student_change_tutorial'],
+    'tutorial change policy',
+    booleanValue,
+  );
+  return {
+    id: unitId,
+    ...(tutorialStreams === undefined
+      ? {}
+      : { tutorial_streams: tutorialStreams }),
+    ...(tutorials === undefined ? {} : { tutorials }),
+    ...(tutorialChangeAllowed === null
+      ? {}
+      : { allow_student_change_tutorial: tutorialChangeAllowed }),
+  };
+}
+
+function tutorialChangeAllowed(unit: UnitSummary): boolean | null {
+  const value = unit.allow_student_change_tutorial;
+  return typeof value === 'boolean' ? value : null;
+}
+
+function validateTutorialStatus(
+  output: AgentTutorialsStatusOutput,
+): AgentTutorialsStatusOutput {
+  const parsed = agentTutorialsStatusOutputSchema.safeParse(output);
+  if (!parsed.success) {
+    throw new AgentProtocolError({
+      code: 'INTERNAL_ERROR',
+      summary: 'The tutorials.status output failed contract validation.',
+    });
+  }
+  if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > MAX_AGENT_TASKS_OUTPUT_BYTES) {
+    remoteFailure('OnTrack returned tutorial data exceeding the output safety limit.');
+  }
+  return parsed.data;
+}
+
+/** Build a PII-minimized tutorial state from the canonical project-unit join. */
+export function createAgentTutorialsStatus(source: AgentTasksListSource) {
+  return async (
+    input: AgentTutorialsStatusInput,
+  ): Promise<AgentTutorialsStatusOutput> => {
+    const rawProject = await source.readProject(input.project_id);
+    const project = canonicalTutorialStatusProject(
+      rawProject,
+      input.project_id,
+      input.unit_id,
+    );
+    const unitId = project.unit?.id;
+    if (unitId === undefined) {
+      remoteFailure('OnTrack omitted unit id.');
+    }
+    const unit = canonicalTutorialStatusUnit(await source.readUnit(unitId), unitId);
+    const status = resolveStudentTutorialStatus(project, unit);
+    return validateTutorialStatus({
+      project_id: input.project_id,
+      unit_id: unitId,
+      state: status.state,
+      available_streams: [...status.availableStreams],
+      enrolled_streams: [...status.enrolledStreams],
+      applies_to_all_streams: status.appliesToAllStreams,
+      can_change_tutorial: tutorialChangeAllowed(unit),
+    });
   };
 }
 
