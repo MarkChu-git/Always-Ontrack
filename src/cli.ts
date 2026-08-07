@@ -7,12 +7,15 @@ import { join, relative, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import {
   InvalidDownloadFormatError,
+  InvalidPdfDownloadError,
   InvalidJsonResponseError,
   MAX_DOWNLOAD_BYTES,
   OnTrackApiClient,
+  OversizedBinaryResponseError,
   OversizedJsonResponseError,
   UnavailableDownloadError,
 } from './lib/api.js';
+import type { DownloadResult } from './lib/api.js';
 import {
   createSessionFromAccessToken,
   OnTrackHttpError,
@@ -198,6 +201,8 @@ import {
   type AgentTaskShowOutput,
   type AgentTaskResourcesInput,
   type AgentTaskResourcesOutput,
+  type AgentTaskPdfInput,
+  type AgentTaskPdfOutput,
 } from './lib/agent-commands.js';
 import { createOnTrackAuthBroker } from './lib/auth-broker.js';
 import {
@@ -4170,7 +4175,7 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
     // Call type-specific endpoint but normalize naming/output behavior downstream.
     const download =
       type === 'task'
-        ? await api.downloadTaskPdf(
+        ? await api.downloadTaskPdfForCompatibility(
             session,
             resolved.unitId ??
               (() => {
@@ -5328,6 +5333,72 @@ async function readAgentTaskResources(
   };
 }
 
+function buildAgentTaskPdfOutput(
+  resolved: ResolvedTaskSelector,
+  unitId: number,
+  download: DownloadResult,
+  filePath: string,
+  filename: string,
+): AgentTaskPdfOutput {
+  return {
+    project_id: resolved.project.id,
+    unit_id: unitId,
+    unit_code: resolved.unitCode
+      ? safeTextForHumanDisplay(resolved.unitCode, 'unit')
+      : null,
+    task_definition_id: resolved.taskDefId,
+    task_instance_id: resolved.taskInstanceId ?? null,
+    abbreviation: safeTextForHumanDisplay(resolved.abbr, String(resolved.taskDefId)),
+    instantiated: resolved.task.isInstantiated === true,
+    artifact: {
+      filename,
+      path: relative(process.cwd(), filePath) || filename,
+      bytes: download.buffer.byteLength,
+      content_type: safeTextForHumanDisplay(download.contentType, 'application/pdf'),
+      sha256: createHash('sha256').update(download.buffer).digest('hex'),
+    },
+  };
+}
+
+/** Download one Task Definition's task sheet through the strict native contract. */
+async function readAgentTaskPdf(
+  input: AgentTaskPdfInput,
+  session: SessionData,
+): Promise<AgentTaskPdfOutput> {
+  const api = createAuthenticatedApi(session);
+  const projects = await loadProjectsWithTaskMetadata(
+    api,
+    session,
+    { projectId: input.project_id },
+    { strictMetadata: true },
+  );
+  const resolved = resolveTaskSelector(projects, {
+    projectId: input.project_id,
+    taskDefinitionId:
+      'task_definition_id' in input ? input.task_definition_id : undefined,
+    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
+  });
+  const unitId = resolved.unitId;
+  if (unitId === undefined) {
+    throw new AgentProtocolError({
+      code: 'INVALID_ARGUMENT',
+      summary: 'The selected task has no unit identity for task PDF download.',
+    });
+  }
+  const download = await api.downloadTaskPdf(
+    session,
+    unitId,
+    resolved.taskDefId,
+  );
+  const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, 'task');
+  const filePath = await writeArtifactFile(download.buffer, filename, {
+    root: process.cwd(),
+    outDir: input.out_dir,
+    allowExternal: input.allow_external_dir,
+  });
+  return buildAgentTaskPdfOutput(resolved, unitId, download, filePath, filename);
+}
+
 async function readAgentSubmissionStatus(
   input: AgentSubmissionStatusInput,
   session: SessionData,
@@ -5469,6 +5540,15 @@ function createNativeAgentExecutionEngine() {
           });
         }
         return readAgentTaskResources(input, activeSession);
+      },
+      taskPdf: (input) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentTaskPdf(input, activeSession);
       },
       planShow: (input) => {
         if (!activeSession) {
@@ -5740,6 +5820,20 @@ function normalizeAgentCliError(error: unknown): AgentProtocolError {
     return new AgentProtocolError({
       code: 'REMOTE_UNAVAILABLE',
       summary: 'OnTrack returned an invalid task resource archive.',
+      cause: error,
+    });
+  }
+  if (error instanceof InvalidPdfDownloadError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned an invalid task PDF.',
+      cause: error,
+    });
+  }
+  if (error instanceof OversizedBinaryResponseError) {
+    return new AgentProtocolError({
+      code: 'REMOTE_UNAVAILABLE',
+      summary: 'OnTrack returned a download that exceeded the safety limit.',
       cause: error,
     });
   }

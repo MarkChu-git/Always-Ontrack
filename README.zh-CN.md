@@ -153,13 +153,15 @@ ontrack agent call submission.status \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
   --input-json '{"project_id":87,"abbreviation":["D4"],"out_dir":"downloads"}'
+ontrack agent call pdf.task \
+  --input-json '{"project_id":87,"abbreviation":"D4","out_dir":"downloads"}'
 ```
 
 应先调用 `projects.list`，再使用返回的 `project_id` 读取同一项目的 `unit.show`、
 `tutorials.status` 与 `tasks.list` 投影，最后选择一个 Task Definition 进行任务级读取。
 当前原生接口覆盖 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、
-`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`plan.show`、
-`submission.status` 与 `task.resources`；新命令只会按独立审查的垂直切片加入。也可以使用
+`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、
+`plan.show` 与 `submission.status`；新命令只会按独立审查的垂直切片加入。也可以使用
 `--input -` 读取有大小上限的非交互 stdin。
 
 #### 原生命令目录
@@ -174,9 +176,10 @@ ontrack agent call task.resources \
 | `task.show` | definition-first 的任务详情 |
 | `task.prerequisites` | 单个任务的 prerequisite 状态 |
 | `feedback.list` | 单个任务有边界、无人员信息的 feedback timeline |
+| `task.resources` | definition-first 的资源 artifact 与元数据 |
+| `pdf.task` | 单个 Task Definition 的 task-sheet PDF artifact |
 | `plan.show` | definition-first 的计划与日期来源视图 |
 | `submission.status` | definition-first 的 submission 生命周期状态 |
-| `task.resources` | definition-first 的资源 artifact 与元数据 |
 
 `task.show` 使用 definition-first 的 Student Task View，因此即使项目的
 `tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化任务会明确标记，
@@ -192,6 +195,9 @@ per-definition submission-details 路由，并显式返回 PDF 三态与
 alias 会 fail closed 为 `REMOTE_UNAVAILABLE`。`task.resources` 返回有边界的
 artifact 元数据（文件名、相对路径、字节数、content type、SHA-256），资源不可用时
 会稳定报告且不会写入占位文件。
+`pdf.task` 有意只支持单个 definition：它解析一个 Task Definition，验证下载内容的
+`%PDF-` 签名，并返回相同的有边界 artifact 元数据，绝不猜测 Task Instance。只有字节
+包含有效 PDF 签名时，才接受 `application/octet-stream`。
 `plan.show` 复用 definition-first catalogue，显式返回可选 task instance 身份与状态、
 personal/grade/unit/missing 日期来源、独立 feedback deadline 和归一化 prerequisites。
 prerequisite 同时返回 required/current status，并保留 tutorial mismatch 与 unknown
@@ -535,7 +541,7 @@ ontrack logout
 | `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`plan.show`、`submission.status`、`task.resources` |
+| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、`plan.show`、`submission.status` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |

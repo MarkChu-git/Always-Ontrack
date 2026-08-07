@@ -248,6 +248,47 @@ const agentTaskResourceArtifactSchema = z
   })
   .strict();
 
+const agentSingleTaskAbbreviationSchema = z
+  .string()
+  .regex(/^(?=[^,]*\S)[^,]+$/u)
+  .trim()
+  .min(1)
+  .max(64);
+
+/** Typed caller contract for one Task Definition's task-sheet PDF. */
+export const agentTaskPdfInputSchema = z.union([
+  z
+    .object({
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId,
+      ...taskResourceOptionsSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      project_id: taskShowProjectId,
+      abbreviation: agentSingleTaskAbbreviationSchema,
+      ...taskResourceOptionsSchema.shape,
+    })
+    .strict(),
+]);
+
+export const agentTaskPdfOutputSchema = z
+  .object({
+    project_id: taskShowProjectId,
+    unit_id: taskShowUnitId,
+    unit_code: agentTaskListSafeText.min(1).max(80).nullable(),
+    task_definition_id: taskShowDefinitionId,
+    task_instance_id: z.number().int().positive().nullable(),
+    abbreviation: agentTaskListSafeText.min(1).max(80),
+    instantiated: z.boolean(),
+    artifact: agentTaskResourceArtifactSchema,
+  })
+  .strict();
+
+export type AgentTaskPdfInput = z.output<typeof agentTaskPdfInputSchema>;
+export type AgentTaskPdfOutput = z.output<typeof agentTaskPdfOutputSchema>;
+
 const agentTaskResourceDownloadSchema = z
   .object({
     project_id: z.number().int().positive(),
@@ -298,24 +339,13 @@ const agentSingleTaskInputSchema = z.union([
     .object({
       project_id: taskShowProjectId,
       task_definition_id: taskShowDefinitionId,
-      abbreviation: z
-        .string()
-        .regex(/^(?=[^,]*\S)[^,]+$/u)
-        .trim()
-        .min(1)
-        .max(64)
-        .optional(),
+      abbreviation: agentSingleTaskAbbreviationSchema.optional(),
     })
     .strict(),
   z
     .object({
       project_id: taskShowProjectId,
-      abbreviation: z
-        .string()
-        .regex(/^(?=[^,]*\S)[^,]+$/u)
-        .trim()
-        .min(1)
-        .max(64),
+      abbreviation: agentSingleTaskAbbreviationSchema,
     })
     .strict(),
 ]);
@@ -568,6 +598,7 @@ export interface NativeAgentCommandHandlers {
   ): Promise<AgentTaskPrerequisitesOutput>;
   feedbackList(input: AgentFeedbackListInput): Promise<AgentFeedbackListOutput>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
+  taskPdf(input: AgentTaskPdfInput): Promise<AgentTaskPdfOutput>;
   planShow(input: AgentPlanShowInput): Promise<AgentPlanShowOutput>;
   submissionStatus(
     input: AgentSubmissionStatusInput,
@@ -699,6 +730,18 @@ export function createNativeAgentCommands(
       input: agentTaskResourcesInputSchema,
       output: agentTaskResourcesOutputSchema,
       execute: (input) => handlers.taskResources(input),
+    }),
+    defineAgentCommand({
+      path: 'pdf.task',
+      description: 'Download one Task Definition task-sheet PDF.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+      },
+      input: agentTaskPdfInputSchema,
+      output: agentTaskPdfOutputSchema,
+      execute: (input) => handlers.taskPdf(input),
     }),
     defineAgentCommand({
       path: 'plan.show',
