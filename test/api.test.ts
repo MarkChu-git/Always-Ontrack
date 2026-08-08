@@ -118,6 +118,55 @@ test('Agent feedback reads bound comment response bytes while legacy feedback re
   assert.deepEqual(await client.listTaskComments(session, 101, 501), JSON.parse(oversized));
 });
 
+test('Agent feedback and catalogue reads forward a caller cancellation signal', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const controller = new AbortController();
+  const observedSignals: Array<AbortSignal | null | undefined> = [];
+  mockFetch(async (_input, init) => {
+    observedSignals.push(init?.signal);
+    return new Response(JSON.stringify({ id: 101 }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  await client.getProjectForAgent(session, 101, controller.signal);
+  await client.getUnitForAgent(session, 55, controller.signal);
+  await client.listTaskCommentsForAgent(session, 101, 501, controller.signal);
+
+  assert.deepEqual(observedSignals, [controller.signal, controller.signal, controller.signal]);
+});
+
+test('Agent feedback reads abort a stalled transport through the caller signal', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const controller = new AbortController();
+  let observedSignal: AbortSignal | null | undefined;
+  mockFetch(async (_input, init) => {
+    observedSignal = init?.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('aborted', 'AbortError')),
+        { once: true },
+      );
+    });
+  });
+
+  const pending = client.listTaskCommentsForAgent(
+    session,
+    101,
+    501,
+    controller.signal,
+  );
+  controller.abort();
+
+  await assert.rejects(
+    pending,
+    (error: unknown) => error instanceof OnTrackTransportError,
+  );
+  assert.equal(observedSignal, controller.signal);
+});
+
 test('Agent project listing bounds declared and streamed JSON responses', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   const oversized = JSON.stringify([{ id: 1, value: 'x'.repeat(512 * 1024) }]);

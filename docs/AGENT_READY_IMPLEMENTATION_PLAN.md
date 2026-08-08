@@ -334,6 +334,8 @@ ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call plan.show \
   --input-json '{"project_id":87,"include_beyond_target":false}'
+ontrack agent stream feedback.watch \
+  --input-json '{"project_id":87,"abbreviation":"D4","interval_seconds":15,"history":30}'
 ontrack agent call submission.status \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call task.resources \
@@ -341,8 +343,9 @@ ontrack agent call task.resources \
 ```
 
 该接口直接把 bounded JSON object 交给带 Zod input/output 的 executable
-command definition，不再经过 JSON → 人类 argv → switch handler。每次调用只向
-stdout 输出一份 `ontrack.agent/v1` envelope；旧 `--output agent-json` 与裸
+command definition，不再经过 JSON → 人类 argv → switch handler。`agent call` 每次只向
+stdout 输出一份 `ontrack.agent/v1` envelope；`agent stream` 对每个有边界 frame 输出一行
+NDJSON envelope；旧 `--output agent-json` 与裸
 `--json` 作为兼容 Adapter 保留。当前原生切片已接入 `auth.status`、
 PII-minimized `projects.list`、definition-first `task.show`、`task.prerequisites`、`submission.status` 与
 `task.resources`，以及 definition-first `plan.show`；其中
@@ -383,8 +386,14 @@ definition-first projection，独立保留 start/target/feedback deadline Plan D
 不会在 stdout 写入人类停止文案。每个 frame 都执行 schema、RFC 3339 timestamp、200
 task/feedback item 与 512 KiB 限制；单次 poll 的 1,000 个合法事件会分帧（每帧至多
 800），而不会因 aggregate count 失败。feedback projection 只允许 task identity 和
-allowlisted person-free feedback fields，排除 author、recipient、attachment 及未知字段。
+allowlisted person-free feedback fields，过滤正文中的人员/凭证样式文本，并排除 author、recipient、
+attachment 及未知字段。
 裸 `--json` 继续保留 legacy streaming shape。
+`feedback.watch` 现通过原生 `agent stream` 暴露：输入为一个严格的 definition-first
+task selector，加上默认值为 15 秒和 30 条 history 的 interval/history；它仅在首帧输出 baseline，
+随后只输出未见过的 feedback delta。每条 stream record 都要求稳定的服务器 feedback ID，缺失 ID
+会 fail closed，避免因模糊去重丢失 delta。`SIGINT` 会中止进行中的远端读取并取消 stream，且不会向
+stdout 写入人类停止文本或 error frame。
 
 `tasks.list` 现在提供 project-scoped 的 native typed Student Task View catalogue：`project_id` 必填，
 `unit_id` 可作为来自 `projects.list` 的 scope consistency hint，`status` 支持规范化精确过滤。
@@ -513,8 +522,8 @@ printf '%s' '{"project_id":87,"task_definition_id":501}' |
 
 - 全部 read command 接入 compatibility Agent envelope。
 - native typed seam 已覆盖 auth status、safe project directory、project-scoped Student Task View catalogue、definition-first task show、
-  prerequisites、bounded person-free feedback list、plan show、submission status 与 task resources。
-- watch/feedback watch 使用 strict bounded NDJSON envelope frame，并保留 legacy `--json` compatibility stream。
+  prerequisites、bounded person-free feedback list、native cancellable feedback watch、plan show、submission status 与 task resources。
+- `feedback.watch` 使用 native `agent stream` strict bounded NDJSON envelope frame；legacy watch/feedback watch 保留 `--json` compatibility stream。
 - 对结构化输入设置 64 KiB 边界，输出统一执行 credential sanitization。
 - 人类模式继续使用表格和面板。
 

@@ -135,8 +135,9 @@ bun run dev -- auth-method
 ### Native caller-first interface
 
 New Agent integrations should use the explicit caller-first surface. It accepts
-one bounded JSON object, never translates that object into human CLI flags, and
-emits exactly one `ontrack.agent/v1` envelope on stdout:
+one bounded JSON object and never translates that object into human CLI flags.
+`agent call` emits exactly one `ontrack.agent/v1` envelope; `agent stream` emits
+one NDJSON envelope per bounded frame:
 
 ```bash
 ontrack agent list
@@ -152,6 +153,8 @@ ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call feedback.list \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent stream feedback.watch \
+  --input-json '{"project_id":87,"abbreviation":"D4","interval_seconds":15,"history":30}'
 ontrack agent call plan.show \
   --input-json '{"project_id":87,"include_beyond_target":false}'
 ontrack agent call submission.status \
@@ -168,7 +171,7 @@ Start with `projects.list`, then use its `project_id` to inspect the matching
 `unit.show`, `tutorials.status`, and `tasks.list` projections before selecting a
 Task Definition for a task-specific read. The native surface currently covers
 `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`,
-`task.show`, `task.prerequisites`, `feedback.list`, `task.resources`, `pdf.task`,
+`task.show`, `task.prerequisites`, `feedback.list`, `feedback.watch`, `task.resources`, `pdf.task`,
 `pdf.submission`, `plan.show`, and `submission.status`. More commands are added only as
 individually reviewed vertical slices. Use `--input -` for bounded,
 non-interactive stdin.
@@ -185,6 +188,7 @@ non-interactive stdin.
 | `task.show` | Definition-first task detail |
 | `task.prerequisites` | One task's prerequisite status |
 | `feedback.list` | One task's bounded, person-free feedback timeline |
+| `feedback.watch` | Cancellable bounded feedback delta stream |
 | `task.resources` | Definition-first resource artifacts and metadata |
 | `pdf.task` | One Task Definition's task-sheet PDF artifact |
 | `pdf.submission` | One ready submission PDF artifact |
@@ -221,10 +225,16 @@ and invalid `%PDF-` bytes before the existing artifact can be overwritten. The
 legacy batch `pdf submission --json` and `pdf submission --output agent-json`
 commands retain their compatibility behavior.
 `feedback.list` resolves one task from the same authoritative catalogue and
-returns at most 200 bounded comment/event records. It retains direct feedback
-text so an Agent can act on it, but never returns author/recipient profiles,
-attachments, or unknown remote fields; malformed aliases and oversized responses
-fail closed.
+returns at most 200 bounded comment/event records. It retains actionable feedback
+text, but redacts person- and credential-shaped text and never returns
+author/recipient profiles, attachments, or unknown remote fields; malformed aliases
+and oversized responses fail closed.
+`feedback.watch` resolves that same Task Definition once, emits one baseline, then
+only unseen feedback deltas. Every emitted record has a stable server feedback ID;
+records without one fail closed rather than risking a lost delta. It is cancellable
+with `SIGINT`, which aborts active reads and adds no human text or error frame to
+stdout. Use `agent stream feedback.watch`, not `agent call`, because the former
+preserves the one-envelope-per-line NDJSON contract.
 `plan.show` uses the same definition-first catalogue, reports optional task
 instance identity and status, keeps personal/grade/unit/missing date sources
 explicit, treats the feedback deadline independently, and exposes normalized
@@ -596,6 +606,7 @@ ontrack logout
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
 | `ontrack agent call <command> --input-json <object>` | Execute a native caller-first command | One structured envelope. Current commands: `auth.status`, `projects.list`, `unit.show`, `tutorials.status`, `tasks.list`, `task.show`, `task.prerequisites`, `feedback.list`, `task.resources`, `pdf.task`, `pdf.submission`, `plan.show`, and `submission.status` |
+| `ontrack agent stream <command> --input-json <object>` | Run a native caller-first stream | NDJSON envelope frames. Current stream: `feedback.watch` |
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |

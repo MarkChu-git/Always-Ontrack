@@ -68,6 +68,7 @@ import { createAgentTasksList } from './lib/agent-tasks.js';
 import { createAgentTutorialsStatus } from './lib/agent-tutorials.js';
 import { createAgentUnitShow } from './lib/agent-units.js';
 import {
+  createAgentFeedbackWatch,
   createAgentFeedbackList,
   createAgentFeedbackTarget,
   projectAgentFeedbackItems,
@@ -178,6 +179,7 @@ import { parseAgentCallInvocation } from './lib/agent-call-input.js';
 import {
   createAgentExecutionEngine,
   exitCodeForAgentEnvelope,
+  type AgentExecutionEngine,
 } from './lib/agent-execution-engine.js';
 import {
   type AgentPlanShowInput,
@@ -191,6 +193,7 @@ import {
   type AgentTasksListOutput,
   type AgentFeedbackListInput,
   type AgentFeedbackListOutput,
+  type AgentFeedbackWatchInput,
   type AgentSubmissionStatusInput,
   type AgentSubmissionStatusOutput,
   agentSubmissionStatusOutputSchema,
@@ -271,6 +274,7 @@ Usage:
   ontrack agent list
   ontrack agent describe COMMAND
   ontrack agent call COMMAND [--input-json OBJECT | --input -]
+  ontrack agent stream COMMAND [--input-json OBJECT | --input -]
   ontrack capabilities [--output agent-json]
   ontrack schema COMMAND [--output agent-json]
   ontrack login [--base-url URL] [--redirect-url URL]
@@ -2501,6 +2505,27 @@ async function readAgentFeedbackTarget(
     readProject: (projectId) => api.getProjectForAgent(session, projectId),
     readUnit: (unitId) => api.getUnitForAgent(session, unitId),
   })(input);
+}
+
+function readAgentFeedbackWatch(
+  input: AgentFeedbackWatchInput,
+  session: SessionData,
+  signal: AbortSignal,
+) {
+  const api = createAuthenticatedApi(session);
+  return createAgentFeedbackWatch({
+    readProject: (projectId, sourceSignal) =>
+      api.getProjectForAgent(session, projectId, sourceSignal),
+    readUnit: (unitId, sourceSignal) =>
+      api.getUnitForAgent(session, unitId, sourceSignal),
+    readFeedback: (projectId, taskDefinitionId, sourceSignal) =>
+      api.listTaskCommentsForAgent(
+        session,
+        projectId,
+        taskDefinitionId,
+        sourceSignal,
+      ),
+  })(input, { signal });
 }
 
 function agentFeedbackListInputFromSelector(
@@ -5632,6 +5657,15 @@ function createNativeAgentExecutionEngine() {
         }
         return readAgentFeedbackList(input, activeSession);
       },
+      feedbackWatch: (input, context) => {
+        if (!activeSession) {
+          throw new AgentProtocolError({
+            code: 'INTERNAL_ERROR',
+            summary: 'The Agent auth policy did not provide a session.',
+          });
+        }
+        return readAgentFeedbackWatch(input, activeSession, context.signal);
+      },
       taskResources: (input) => {
         if (!activeSession) {
           throw new AgentProtocolError({
@@ -5689,6 +5723,29 @@ function createNativeAgentExecutionEngine() {
   );
 }
 
+async function writeNativeAgentStream(
+  engine: AgentExecutionEngine,
+  command: string,
+  input: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  const controller = new AbortController();
+  const onSigint = (): void => controller.abort();
+  let exitCode = 0;
+  process.once('SIGINT', onSigint);
+  try {
+    for await (const envelope of engine.stream(
+      { command, input },
+      { signal: controller.signal },
+    )) {
+      console.log(JSON.stringify(envelope));
+      exitCode ||= exitCodeForAgentEnvelope(envelope);
+    }
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+  }
+  process.exitCode = exitCode;
+}
+
 /** Execute the caller-first Agent interface without translating JSON into argv. */
 async function handleNativeAgentCommand(args: string[]): Promise<void> {
   const requestId = `req_${randomUUID()}`;
@@ -5698,8 +5755,10 @@ async function handleNativeAgentCommand(args: string[]): Promise<void> {
       ? 'agent.list'
       : subcommand === 'describe'
         ? 'agent.describe'
-        : subcommand === 'call'
+      : subcommand === 'call'
           ? (rest[0] ?? 'agent.call')
+          : subcommand === 'stream'
+            ? (rest[0] ?? 'agent.stream')
           : 'agent';
   let envelope;
 
@@ -5739,6 +5798,13 @@ async function handleNativeAgentCommand(args: string[]): Promise<void> {
         command: invocation.command,
         input: invocation.input,
       });
+    } else if (subcommand === 'stream') {
+      const invocation = await parseAgentCallInvocation(rest, {
+        invocationLabel: 'agent stream',
+      });
+      command = invocation.command;
+      await writeNativeAgentStream(engine, invocation.command, invocation.input);
+      return;
     } else {
       throw new AgentProtocolError({
         code: 'INVALID_ARGUMENT',

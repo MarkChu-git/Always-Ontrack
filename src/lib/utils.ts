@@ -680,12 +680,18 @@ function redactQueryParams(rawUrl: string): string {
 const URL_PATTERN = /https?:\/\/[^\s)"']+/gi;
 const SENSITIVE_FIELD_NAME =
   'auth[-_]?token|password|passcode|session[-_]?token|id[-_]?token|access[-_]?token|api[-_]?key|cookie|secret|email|username|phone|mobile|address|code|state';
+const NON_OAUTH_SENSITIVE_FIELD_NAME =
+  'auth[-_]?token|password|passcode|session[-_]?token|id[-_]?token|access[-_]?token|api[-_]?key|cookie|secret|email|username|phone|mobile|address';
 const QUOTED_SENSITIVE_FIELD_PATTERN = new RegExp(
   `("(?:${SENSITIVE_FIELD_NAME})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`,
   'gi',
 );
 const UNQUOTED_SENSITIVE_FIELD_PATTERN = new RegExp(
   `\\b((?:${SENSITIVE_FIELD_NAME})\\b\\s*[:=]\\s*)(?!\\[REDACTED\\])([^\\s,;}&\\]]+)`,
+  'gi',
+);
+const UNQUOTED_NON_OAUTH_SENSITIVE_FIELD_PATTERN = new RegExp(
+  `\\b((?:${NON_OAUTH_SENSITIVE_FIELD_NAME})\\b\\s*[:=]\\s*)(?!\\[REDACTED\\])([^\\s,;}&\\]]+)`,
   'gi',
 );
 const AUTHORIZATION_PATTERN =
@@ -695,17 +701,30 @@ const PHONE_PATTERN = /\+?\d(?:[\s().-]*\d){9,}/g;
 const PRIVATE_KEY_BLOCK_PATTERN =
   /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?(?:-----END(?: [A-Z0-9]+)* PRIVATE KEY-----|$)/gi;
 
+export interface RedactSensitiveTextOptions {
+  /** Preserve natural-language `code:` and `state:` fields outside JSON and URLs. */
+  readonly redactBareOAuthFields?: boolean;
+}
+
 /**
- * Redact token/password fields from free-form error strings.
- * Used before printing any external error to terminal.
+ * Redact sensitive fields from free-form externally sourced text.
+ * Used before printing errors and projecting Agent feedback.
  */
-export function redactSensitiveText(value: string): string {
+export function redactSensitiveText(
+  value: string,
+  options: RedactSensitiveTextOptions = {},
+): string {
   let output = value;
   output = output.replace(URL_PATTERN, (match) => redactQueryParams(match));
   output = output.replace(PRIVATE_KEY_BLOCK_PATTERN, '[REDACTED]');
   output = output.replace(AUTHORIZATION_PATTERN, '$1[REDACTED]');
   output = output.replace(QUOTED_SENSITIVE_FIELD_PATTERN, '$1"[REDACTED]"');
-  output = output.replace(UNQUOTED_SENSITIVE_FIELD_PATTERN, '$1[REDACTED]');
+  output = output.replace(
+    options.redactBareOAuthFields === false
+      ? UNQUOTED_NON_OAUTH_SENSITIVE_FIELD_PATTERN
+      : UNQUOTED_SENSITIVE_FIELD_PATTERN,
+    '$1[REDACTED]',
+  );
   output = output.replace(EMAIL_PATTERN, '[REDACTED]');
   output = output.replace(PHONE_PATTERN, '[REDACTED]');
   return output;

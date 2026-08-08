@@ -26,6 +26,10 @@ import type {
 export interface AgentTasksListSource extends AgentProjectUnitSource {}
 export { createAgentTutorialsStatus } from './agent-tutorials.js';
 
+export interface AgentTasksListContext {
+  readonly signal?: AbortSignal;
+}
+
 const MAX_AGENT_TASKS = 200;
 const MAX_AGENT_TASKS_OUTPUT_BYTES = 512 * 1024;
 const MAX_AGENT_REQUEST_ID = `req_${'x'.repeat(120)}`;
@@ -162,9 +166,12 @@ function buildOutput(
 /** Create the project-scoped, definition-first Student Task View catalogue. */
 export function createAgentTasksList(
   source: AgentProjectUnitSource,
-): (input: AgentTasksListInput) => Promise<AgentTasksListOutput> {
-  return async (input) => {
-    const rawProject = await source.readProject(input.project_id);
+): (
+  input: AgentTasksListInput,
+  context?: AgentTasksListContext,
+) => Promise<AgentTasksListOutput> {
+  return async (input, context) => {
+    const rawProject = await source.readProject(input.project_id, context?.signal);
     const project = canonicalTaskCatalogueProject(
       rawProject,
       input.project_id,
@@ -174,6 +181,6 @@ export function createAgentTasksList(
     if (unitId === undefined) {
       remoteFailure('OnTrack omitted unit id.');
     }
-    return buildOutput(input, rawProject, await source.readUnit(unitId));
+    return buildOutput(input, rawProject, await source.readUnit(unitId, context?.signal));
   };
 }

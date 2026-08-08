@@ -130,8 +130,8 @@ bun run dev -- auth-method
 ### 原生 caller-first 接口
 
 新的 Agent 集成应使用显式的 caller-first 接口。它接收一个有大小上限的
-JSON object，不会把 JSON 转译成人类 CLI flag，并且 stdout 恰好输出一个
-`ontrack.agent/v1` envelope：
+JSON object，不会把 JSON 转译成人类 CLI flag。`agent call` 在 stdout 输出恰好一个
+`ontrack.agent/v1` envelope；`agent stream` 对每个有边界 frame 输出一行 NDJSON envelope：
 
 ```bash
 ontrack agent list
@@ -147,6 +147,8 @@ ontrack agent call task.prerequisites \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
 ontrack agent call feedback.list \
   --input-json '{"project_id":87,"abbreviation":"D4"}'
+ontrack agent stream feedback.watch \
+  --input-json '{"project_id":87,"abbreviation":"D4","interval_seconds":15,"history":30}'
 ontrack agent call plan.show \
   --input-json '{"project_id":87,"include_beyond_target":false}'
 ontrack agent call submission.status \
@@ -162,7 +164,7 @@ ontrack agent call pdf.submission \
 应先调用 `projects.list`，再使用返回的 `project_id` 读取同一项目的 `unit.show`、
 `tutorials.status` 与 `tasks.list` 投影，最后选择一个 Task Definition 进行任务级读取。
 当前原生接口覆盖 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、
-`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、
+`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`feedback.watch`、`task.resources`、`pdf.task`、
 `pdf.submission`、`plan.show` 与 `submission.status`；新命令只会按独立审查的垂直切片加入。也可以使用
 `--input -` 读取有大小上限的非交互 stdin。
 
@@ -178,6 +180,7 @@ ontrack agent call pdf.submission \
 | `task.show` | definition-first 的任务详情 |
 | `task.prerequisites` | 单个任务的 prerequisite 状态 |
 | `feedback.list` | 单个任务有边界、无人员信息的 feedback timeline |
+| `feedback.watch` | 可取消且有边界的 feedback 增量流 |
 | `task.resources` | definition-first 的资源 artifact 与元数据 |
 | `pdf.task` | 单个 Task Definition 的 task-sheet PDF artifact |
 | `pdf.submission` | 单个已就绪 submission PDF 的 artifact |
@@ -206,6 +209,13 @@ artifact 元数据（文件名、相对路径、字节数、content type、SHA-2
 `submission.status` next action；没有 PDF 时返回 `NOT_FOUND`。原生命令会在覆盖已有
 artifact 前拒绝占位文件和无效 `%PDF-` 字节；旧的批量 `pdf submission --json` 与
 `pdf submission --output agent-json` 都保持兼容行为。
+Agent feedback 投影保留可执行的正文，但会替换人员和凭证样式的敏感文本；它从不返回
+author/recipient profile、attachment 或未知远端字段，畸形 alias 和超限响应都会 fail closed。
+`feedback.watch` 解析同一个 Task Definition，只输出一个 baseline 和之后未见过的
+feedback delta。每条输出记录都必须有稳定的服务器 feedback ID；没有 ID 的记录会 fail closed，
+避免丢失 delta。可通过 `SIGINT` 取消，它会中止正在进行的读取，且不会向 stdout 追加人类文本或
+error frame。必须使用 `agent stream feedback.watch`，不要使用 `agent call`，从而保持每行一个
+envelope 的 NDJSON 契约。
 `plan.show` 复用 definition-first catalogue，显式返回可选 task instance 身份与状态、
 personal/grade/unit/missing 日期来源、独立 feedback deadline 和归一化 prerequisites。
 prerequisite 同时返回 required/current status，并保留 tutorial mismatch 与 unknown
@@ -551,6 +561,7 @@ ontrack logout
 | `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
 | `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
 | `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、`pdf.submission`、`plan.show`、`submission.status` |
+| `ontrack agent stream <command> --input-json <object>` | 执行原生 caller-first stream | NDJSON envelope frame；当前 stream：`feedback.watch` |
 | `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
 | `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
 | `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |

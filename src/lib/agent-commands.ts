@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   defineAgentCommand,
+  defineAgentStreamCommand,
+  type AgentStreamContext,
   type AgentCommandDefinition,
 } from './agent-execution-engine.js';
 import {
@@ -403,6 +405,28 @@ export type AgentTaskPrerequisitesOutput = z.output<
 
 /** Typed caller contract for one task's bounded, person-free feedback timeline. */
 export const agentFeedbackListInputSchema = agentSingleTaskInputSchema;
+const agentFeedbackWatchOptions = {
+  interval_seconds: z.number().int().min(1).max(86_400).default(15),
+  history: z.number().int().min(0).max(200).default(30),
+};
+/** Typed caller contract for one cancellable task-feedback stream. */
+export const agentFeedbackWatchInputSchema = z.union([
+  z
+    .object({
+      project_id: taskShowProjectId,
+      task_definition_id: taskShowDefinitionId,
+      abbreviation: agentSingleTaskAbbreviationSchema.optional(),
+      ...agentFeedbackWatchOptions,
+    })
+    .strict(),
+  z
+    .object({
+      project_id: taskShowProjectId,
+      abbreviation: agentSingleTaskAbbreviationSchema,
+      ...agentFeedbackWatchOptions,
+    })
+    .strict(),
+]);
 const agentFeedbackTextSchema = z
   .string()
   .min(1)
@@ -428,6 +452,11 @@ export const agentFeedbackItemSchema = z
     is_new: z.boolean().nullable(),
   })
   .strict();
+const agentFeedbackWatchItemSchema = agentFeedbackItemSchema
+  .extend({
+    feedback_id: z.number().int().positive(),
+  })
+  .strict();
 export const agentFeedbackListOutputSchema = z
   .object({
     project_id: taskShowProjectId,
@@ -443,6 +472,9 @@ export const agentFeedbackListOutputSchema = z
   .strict();
 export type AgentFeedbackListInput = z.output<typeof agentFeedbackListInputSchema>;
 export type AgentFeedbackListOutput = z.output<typeof agentFeedbackListOutputSchema>;
+export type AgentFeedbackWatchInput = z.output<
+  typeof agentFeedbackWatchInputSchema
+>;
 
 /** NDJSON frame contract for a bounded, person-free task feedback stream. */
 export const agentFeedbackWatchFrameSchema = z.discriminatedUnion("type", [
@@ -455,7 +487,7 @@ export const agentFeedbackWatchFrameSchema = z.discriminatedUnion("type", [
       abbreviation: agentFeedbackTextSchema.max(80),
       interval_seconds: z.number().int().min(1),
       total_feedback: z.number().int().nonnegative().max(200),
-      feedback: z.array(agentFeedbackItemSchema).max(200),
+      feedback: z.array(agentFeedbackWatchItemSchema).max(200),
     })
     .strict(),
   z
@@ -465,7 +497,7 @@ export const agentFeedbackWatchFrameSchema = z.discriminatedUnion("type", [
       project_id: taskShowProjectId,
       task_definition_id: taskShowDefinitionId,
       abbreviation: agentFeedbackTextSchema.max(80),
-      feedback: z.array(agentFeedbackItemSchema).min(1).max(200),
+      feedback: z.array(agentFeedbackWatchItemSchema).min(1).max(200),
     })
     .strict(),
 ]);
@@ -619,6 +651,10 @@ export interface NativeAgentCommandHandlers {
     input: AgentTaskPrerequisitesInput,
   ): Promise<AgentTaskPrerequisitesOutput>;
   feedbackList(input: AgentFeedbackListInput): Promise<AgentFeedbackListOutput>;
+  feedbackWatch(
+    input: AgentFeedbackWatchInput,
+    context: AgentStreamContext,
+  ): AsyncIterable<z.output<typeof agentFeedbackWatchFrameSchema>>;
   taskResources(input: AgentTaskResourcesInput): Promise<AgentTaskResourcesOutput>;
   taskPdf(input: AgentTaskPdfInput): Promise<AgentTaskPdfOutput>;
   submissionPdf(input: AgentSubmissionPdfInput): Promise<AgentSubmissionPdfOutput>;
@@ -741,6 +777,19 @@ export function createNativeAgentCommands(
       input: agentFeedbackListInputSchema,
       output: agentFeedbackListOutputSchema,
       execute: (input) => handlers.feedbackList(input),
+    }),
+    defineAgentStreamCommand({
+      path: 'feedback.watch',
+      description: 'Stream bounded, person-free task feedback frames.',
+      policy: {
+        ...readPolicy,
+        risk: 'read' as const,
+        auth: 'ensure' as const,
+        streaming: true,
+      },
+      input: agentFeedbackWatchInputSchema,
+      output: agentFeedbackWatchFrameSchema,
+      stream: (input, context) => handlers.feedbackWatch(input, context),
     }),
     defineAgentCommand({
       path: 'task.resources',

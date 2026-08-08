@@ -36,7 +36,7 @@ async function listNativeAgentCommands(): Promise<string[]> {
 }
 
 function commandPathsFromExamples(document: string): string[] {
-  return [...document.matchAll(/^ontrack agent call ([a-z][a-z0-9.]*)\b/gmu)].map(
+  return [...document.matchAll(/^ontrack agent (?:call|stream) ([a-z][a-z0-9.]*)\b/gmu)].map(
     (match) => match[1],
   );
 }
