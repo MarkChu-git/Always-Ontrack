@@ -4,12 +4,14 @@ import {
   agentFeedbackWatchFrameSchema,
   type AgentFeedbackListInput,
   type AgentFeedbackListOutput,
+  type AgentFeedbackWatchInput,
   type AgentTasksListOutput,
 } from "./agent-commands.js";
 import {
   AgentProtocolError,
   agentSuccessEnvelope,
   assertAgentEnvelopeByteLimit,
+  sanitizeAgentData,
 } from "./agent-protocol.js";
 import {
   contractAliasedValue as aliasedValue,
@@ -23,6 +25,7 @@ import {
 } from "./agent-contract.js";
 import { createAgentTasksList } from "./agent-tasks.js";
 import type { AgentProjectUnitSource } from "./agent-project-unit-canonical.js";
+import { redactSensitiveText } from './utils.js';
 
 const MAX_AGENT_FEEDBACK_ITEMS = 200;
 const MAX_AGENT_FEEDBACK_TEXT_LENGTH = 4096;
@@ -30,6 +33,9 @@ const MAX_AGENT_FEEDBACK_OUTPUT_BYTES = 512 * 1024;
 const MAX_AGENT_REQUEST_ID = `req_${'x'.repeat(120)}`;
 
 type AgentFeedbackItem = AgentFeedbackListOutput['feedback'][number];
+type AgentFeedbackWatchItem = Omit<AgentFeedbackItem, 'feedback_id'> & {
+  readonly feedback_id: number;
+};
 type AgentFeedbackTask = AgentTasksListOutput['tasks'][number];
 export type AgentFeedbackWatchFrame = z.output<
   typeof agentFeedbackWatchFrameSchema
@@ -47,7 +53,19 @@ export type AgentFeedbackTarget = Pick<
 >;
 
 export interface AgentFeedbackListSource extends AgentProjectUnitSource {
-  readFeedback(projectId: number, taskDefinitionId: number): Promise<unknown>;
+  readFeedback(
+    projectId: number,
+    taskDefinitionId: number,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+}
+
+interface AgentFeedbackReadContext {
+  readonly signal?: AbortSignal;
+}
+
+export interface AgentFeedbackWatchContext extends AgentFeedbackReadContext {
+  readonly signal: AbortSignal;
 }
 
 function invalidArgument(summary: string): never {
@@ -81,8 +99,14 @@ function feedbackId(item: Record<string, unknown>): number | null {
 }
 
 function feedbackText(item: Record<string, unknown>): string | null {
-  return aliasedValue(item, ['comment', 'text'], 'feedback text', (value, context) =>
-    safeMultilineText(value, MAX_AGENT_FEEDBACK_TEXT_LENGTH, context));
+  return aliasedValue(item, ['comment', 'text'], 'feedback text', (value, context) => {
+    const redacted = redactSensitiveText(
+      safeMultilineText(value, MAX_AGENT_FEEDBACK_TEXT_LENGTH, context),
+      { redactBareOAuthFields: false },
+    );
+    const sanitized = sanitizeAgentData(redacted);
+    return typeof sanitized === 'string' ? sanitized : '[REDACTED]';
+  });
 }
 
 function feedbackItem(raw: unknown): AgentFeedbackItem {
@@ -218,13 +242,70 @@ export function validateAgentFeedbackWatchFrame(
   });
 }
 
+function feedbackWatchIdentity(item: AgentFeedbackItem): string {
+  if (item.feedback_id === null) {
+    remoteFailure('OnTrack omitted a feedback id required for streaming.');
+  }
+  return `id:${item.feedback_id}`;
+}
+
+function requireFeedbackWatchItem(
+  item: AgentFeedbackItem,
+): AgentFeedbackWatchItem {
+  if (item.feedback_id === null) {
+    remoteFailure('OnTrack omitted a feedback id required for streaming.');
+  }
+  return { ...item, feedback_id: item.feedback_id };
+}
+
+function sortAgentFeedbackItems(
+  feedback: readonly AgentFeedbackItem[],
+): AgentFeedbackItem[] {
+  return [...feedback].sort((left, right) => {
+    const leftTime = left.created_at ? Date.parse(left.created_at) : Number.NaN;
+    const rightTime = right.created_at ? Date.parse(right.created_at) : Number.NaN;
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    if (Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return -1;
+    if (!Number.isFinite(leftTime) && Number.isFinite(rightTime)) return 1;
+    if (
+      left.feedback_id !== null &&
+      right.feedback_id !== null &&
+      left.feedback_id !== right.feedback_id
+    ) {
+      return left.feedback_id - right.feedback_id;
+    }
+    return feedbackWatchIdentity(left).localeCompare(feedbackWatchIdentity(right));
+  });
+}
+
+function waitForAgentFeedbackPoll(
+  intervalSeconds: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, intervalSeconds * 1000);
+    signal.addEventListener('abort', finish, { once: true });
+  });
+}
+
 /** Resolve one strict, definition-first feedback target without reading its timeline. */
 export function createAgentFeedbackTarget(
   source: AgentProjectUnitSource,
-): (input: AgentFeedbackListInput) => Promise<AgentFeedbackTarget> {
+): (
+  input: AgentFeedbackListInput,
+  context?: AgentFeedbackReadContext,
+) => Promise<AgentFeedbackTarget> {
   const listTasks = createAgentTasksList(source);
-  return async (input) => {
-    const catalogue = await listTasks({ project_id: input.project_id });
+  return async (input, context) => {
+    const catalogue = await listTasks({ project_id: input.project_id }, context);
     const task = selectFeedbackTask(input, catalogue.tasks);
     return {
       project_id: task.project_id,
@@ -259,5 +340,73 @@ export function createAgentFeedbackList(
       count: feedback.length,
       feedback,
     });
+  };
+}
+
+/** Stream definition-first feedback frames without human rendering or argv parsing. */
+export function createAgentFeedbackWatch(
+  source: AgentFeedbackListSource,
+): (
+  input: AgentFeedbackWatchInput,
+  context: AgentFeedbackWatchContext,
+) => AsyncIterable<AgentFeedbackWatchFrame> {
+  const readTarget = createAgentFeedbackTarget(source);
+  return async function* (input, context) {
+    const target = await readTarget(input, context);
+    if (context.signal.aborted) return;
+
+    const initial = sortAgentFeedbackItems(
+      projectAgentFeedbackItems(
+        await source.readFeedback(
+          target.project_id,
+          target.task_definition_id,
+          context.signal,
+        ),
+      ),
+    ).map(requireFeedbackWatchItem);
+    if (context.signal.aborted) return;
+
+    const seen = new Set(initial.map(feedbackWatchIdentity));
+    yield validateAgentFeedbackWatchFrame({
+      type: 'baseline',
+      at: new Date().toISOString(),
+      project_id: target.project_id,
+      task_definition_id: target.task_definition_id,
+      abbreviation: target.abbreviation,
+      interval_seconds: input.interval_seconds,
+      total_feedback: initial.length,
+      feedback: input.history === 0 ? [] : initial.slice(-input.history),
+    });
+
+    while (!context.signal.aborted) {
+      await waitForAgentFeedbackPoll(input.interval_seconds, context.signal);
+      if (context.signal.aborted) return;
+
+      const current = sortAgentFeedbackItems(
+        projectAgentFeedbackItems(
+          await source.readFeedback(
+            target.project_id,
+            target.task_definition_id,
+            context.signal,
+          ),
+        ),
+      ).map(requireFeedbackWatchItem);
+      const fresh = current.filter((item) => {
+        const identity = feedbackWatchIdentity(item);
+        if (seen.has(identity)) return false;
+        seen.add(identity);
+        return true;
+      });
+      if (fresh.length === 0) continue;
+
+      yield validateAgentFeedbackWatchFrame({
+        type: 'feedback',
+        at: new Date().toISOString(),
+        project_id: target.project_id,
+        task_definition_id: target.task_definition_id,
+        abbreviation: target.abbreviation,
+        feedback: fresh,
+      });
+    }
   };
 }

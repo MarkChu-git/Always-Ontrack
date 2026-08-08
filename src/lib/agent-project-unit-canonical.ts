@@ -20,8 +20,8 @@ import type {
 } from './types.js';
 
 export interface AgentProjectUnitSource {
-  readProject(projectId: number): Promise<unknown>;
-  readUnit(unitId: number): Promise<unknown>;
+  readProject(projectId: number, signal?: AbortSignal): Promise<unknown>;
+  readUnit(unitId: number, signal?: AbortSignal): Promise<unknown>;
 }
 
 function booleanValue(value: unknown, context: string): boolean {

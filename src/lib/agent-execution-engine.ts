@@ -46,7 +46,13 @@ export interface AgentCommandDefinition {
   readonly policy: AgentCommandPolicy;
   readonly input: z.ZodType;
   readonly output: z.ZodType;
-  execute(input: unknown): Promise<unknown>;
+  execute?(input: unknown): Promise<unknown>;
+  stream?(input: unknown, context: AgentStreamContext): AsyncIterable<unknown>;
+}
+
+/** Runtime context for a cancellable native Agent stream. */
+export interface AgentStreamContext {
+  readonly signal: AbortSignal;
 }
 
 export interface AgentPolicyRuntime {
@@ -75,6 +81,21 @@ interface DefineAgentCommandOptions<TInputSchema extends z.ZodType, TOutputSchem
   execute(input: z.output<TInputSchema>): Promise<z.input<TOutputSchema>>;
 }
 
+interface DefineAgentStreamCommandOptions<
+  TInputSchema extends z.ZodType,
+  TOutputSchema extends z.ZodType,
+> {
+  readonly path: string;
+  readonly description: string;
+  readonly policy: AgentCommandPolicy;
+  readonly input: TInputSchema;
+  readonly output: TOutputSchema;
+  stream(
+    input: z.output<TInputSchema>,
+    context: AgentStreamContext,
+  ): AsyncIterable<z.input<TOutputSchema>>;
+}
+
 export function defineAgentCommand<
   TInputSchema extends z.ZodType,
   TOutputSchema extends z.ZodType,
@@ -91,6 +112,24 @@ export function defineAgentCommand<
   };
 }
 
+/** Define a typed command whose output is a sequence of Agent-safe frames. */
+export function defineAgentStreamCommand<
+  TInputSchema extends z.ZodType,
+  TOutputSchema extends z.ZodType,
+>(
+  options: DefineAgentStreamCommandOptions<TInputSchema, TOutputSchema>,
+): AgentCommandDefinition {
+  return {
+    path: options.path,
+    description: options.description,
+    policy: { ...options.policy },
+    input: options.input,
+    output: options.output,
+    stream: (input, context) =>
+      options.stream(input as z.output<TInputSchema>, context),
+  };
+}
+
 export type AgentExecutionEnvelope =
   | AgentSuccessEnvelope<unknown>
   | AgentFailureEnvelope;
@@ -102,6 +141,10 @@ export interface AgentCallRequest {
 
 export interface AgentExecutionEngine {
   call(request: AgentCallRequest): Promise<AgentExecutionEnvelope>;
+  stream(
+    request: AgentCallRequest,
+    context?: AgentStreamContext,
+  ): AsyncIterable<AgentExecutionEnvelope>;
   describe(command: string): AgentCommandManifest;
   capabilities(): readonly AgentCommandManifest[];
 }
@@ -155,6 +198,38 @@ function invalidArgument(summary: string): AgentProtocolError {
     code: 'INVALID_ARGUMENT',
     summary,
   });
+}
+
+interface PreparedAgentCall {
+  readonly command: AgentCommandDefinition;
+  readonly request: AgentCallRequest;
+}
+
+function prepareAgentCall(
+  commandMap: ReadonlyMap<string, AgentCommandDefinition>,
+  request: AgentCallRequest,
+): PreparedAgentCall {
+  if (!isValidCommandPath(request.command)) {
+    throw invalidArgument('Agent call requires a stable command path.');
+  }
+  const command = commandMap.get(request.command);
+  if (!command) {
+    throw invalidArgument('The requested Agent command is not available.');
+  }
+  if (containsUnsafeInputKey(request.input)) {
+    throw invalidArgument('Agent input contains an unsafe object key.');
+  }
+
+  const parsedInput = command.input.safeParse(request.input);
+  if (!parsedInput.success) {
+    throw invalidArgument(
+      `Agent input does not match the ${command.path} schema.`,
+    );
+  }
+  return {
+    command,
+    request: { ...request, input: parsedInput.data },
+  };
 }
 
 async function enforcePolicy(
@@ -215,6 +290,18 @@ function assertSafePolicy(command: AgentCommandDefinition): void {
     readonly confirmation: string;
     readonly idempotency: string;
   };
+  if (command.policy.streaming) {
+    if (!command.stream || command.execute) {
+      throw new Error(
+        `Streaming Agent command requires exactly one stream handler: ${command.path}`,
+      );
+    }
+  } else if (!command.execute || command.stream) {
+    throw new Error(
+      `Non-streaming Agent command requires exactly one execute handler: ${command.path}`,
+    );
+  }
+
   if (policy.risk === 'write') {
     if (
       policy.auth !== 'ensure' ||
@@ -225,10 +312,7 @@ function assertSafePolicy(command: AgentCommandDefinition): void {
         `Unsafe write policy for Agent command: ${command.path}`,
       );
     }
-    return;
-  }
-
-  if (
+  } else if (
     policy.confirmation !== 'none' ||
     policy.idempotency !== 'not_applicable'
   ) {
@@ -262,31 +346,20 @@ export function createAgentExecutionEngine(
       const requestId = nextRequestId();
       let envelopeCommand = 'agent.call';
       try {
-        if (!isValidCommandPath(request.command)) {
-          throw invalidArgument('Agent call requires a stable command path.');
-        }
-        const command = commandMap.get(request.command);
-        if (!command) {
-          throw invalidArgument('The requested Agent command is not available.');
-        }
+        const knownCommand = isValidCommandPath(request.command)
+          ? commandMap.get(request.command)
+          : undefined;
+        if (knownCommand) envelopeCommand = knownCommand.path;
+        const prepared = prepareAgentCall(commandMap, request);
+        const { command } = prepared;
         envelopeCommand = command.path;
-        if (containsUnsafeInputKey(request.input)) {
-          throw invalidArgument('Agent input contains an unsafe object key.');
-        }
-
-        const parsedInput = command.input.safeParse(request.input);
-        if (!parsedInput.success) {
+        if (command.policy.streaming) {
           throw invalidArgument(
-            `Agent input does not match the ${command.path} schema.`,
+            'The requested Agent command is streaming; use agent stream.',
           );
         }
-
-        const canonicalRequest: AgentCallRequest = {
-          ...request,
-          input: parsedInput.data,
-        };
-        await enforcePolicy(command, canonicalRequest, options.policyRuntime);
-        const rawOutput = await command.execute(parsedInput.data);
+        await enforcePolicy(command, prepared.request, options.policyRuntime);
+        const rawOutput = await command.execute!(prepared.request.input);
         const parsedOutput = command.output.safeParse(rawOutput);
         if (!parsedOutput.success) {
           throw new AgentProtocolError({
@@ -305,6 +378,58 @@ export function createAgentExecutionEngine(
           ? options.normalizeError(error)
           : error;
         return agentErrorEnvelope({
+          command: envelopeCommand,
+          requestId,
+          error: normalized,
+        });
+      }
+    },
+    stream: async function* (
+      request: AgentCallRequest,
+      context: AgentStreamContext = { signal: new AbortController().signal },
+    ): AsyncIterable<AgentExecutionEnvelope> {
+      const requestId = nextRequestId();
+      let envelopeCommand = 'agent.stream';
+      try {
+        const knownCommand = isValidCommandPath(request.command)
+          ? commandMap.get(request.command)
+          : undefined;
+        if (knownCommand) envelopeCommand = knownCommand.path;
+        const prepared = prepareAgentCall(commandMap, request);
+        const { command } = prepared;
+        envelopeCommand = command.path;
+        if (!command.policy.streaming) {
+          throw invalidArgument('The requested Agent command is not streaming.');
+        }
+        await enforcePolicy(command, prepared.request, options.policyRuntime);
+        for await (const rawOutput of command.stream!(
+          prepared.request.input,
+          context,
+        )) {
+          if (context.signal.aborted) {
+            return;
+          }
+          const parsedOutput = command.output.safeParse(rawOutput);
+          if (!parsedOutput.success) {
+            throw new AgentProtocolError({
+              code: 'INTERNAL_ERROR',
+              summary: 'The command returned stream data that failed contract validation.',
+            });
+          }
+          yield agentSuccessEnvelope({
+            command: command.path,
+            requestId,
+            data: parsedOutput.data,
+          });
+        }
+      } catch (error) {
+        if (context.signal.aborted) {
+          return;
+        }
+        const normalized = options.normalizeError
+          ? options.normalizeError(error)
+          : error;
+        yield agentErrorEnvelope({
           command: envelopeCommand,
           requestId,
           error: normalized,

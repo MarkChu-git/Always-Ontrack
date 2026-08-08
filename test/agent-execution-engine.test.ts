@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   createAgentExecutionEngine,
   defineAgentCommand,
+  defineAgentStreamCommand,
   exitCodeForAgentEnvelope,
 } from '../src/lib/agent-execution-engine.js';
 import {
@@ -61,6 +62,116 @@ test('engine validates input before execution and exposes schema-derived metadat
   assert.equal(description.input_schema.type, 'object');
   assert.deepEqual(description.input_schema.required, ['value']);
   assert.equal(engine.capabilities().length, 1);
+});
+
+test('engine streams validated frames with one request id and one policy check', async () => {
+  const observed: string[] = [];
+  const engine = createAgentExecutionEngine(
+    [
+      defineAgentStreamCommand({
+        path: 'fixture.stream',
+        description: 'Emit a bounded fixture stream.',
+        policy: {
+          risk: 'read',
+          auth: 'ensure',
+          interaction: 'never',
+          confirmation: 'none',
+          idempotency: 'not_applicable',
+          streaming: true,
+        },
+        input: z.object({ value: z.string().min(1) }).strict(),
+        output: z.object({ value: z.string().min(1) }).strict(),
+        stream: async function* (input) {
+          observed.push(`stream:${input.value}`);
+          yield { value: input.value };
+          yield { value: `${input.value}-next` };
+        },
+      }),
+    ],
+    {
+      requestId: () => 'req_stream',
+      policyRuntime: {
+        ensureAuth: async () => observed.push('auth'),
+      },
+    },
+  );
+
+  const frames = [];
+  for await (const frame of engine.stream({
+    command: 'fixture.stream',
+    input: { value: 'feedback' },
+  })) {
+    frames.push(frame);
+  }
+
+  assert.deepEqual(observed, ['auth', 'stream:feedback']);
+  assert.deepEqual(
+    frames.map((frame) => ({
+      requestId: frame.request_id,
+      command: frame.command,
+      data: 'data' in frame ? frame.data : undefined,
+    })),
+    [
+      {
+        requestId: 'req_stream',
+        command: 'fixture.stream',
+        data: { value: 'feedback' },
+      },
+      {
+        requestId: 'req_stream',
+        command: 'fixture.stream',
+        data: { value: 'feedback-next' },
+      },
+    ],
+  );
+
+  const oneShot = await engine.call({
+    command: 'fixture.stream',
+    input: { value: 'feedback' },
+  });
+  assert.equal('error' in oneShot ? oneShot.error.code : 'success', 'INVALID_ARGUMENT');
+  assert.deepEqual(observed, ['auth', 'stream:feedback']);
+});
+
+test('engine ends a stream silently when its cancellation signal is aborted', async () => {
+  let started!: () => void;
+  const startedStream = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const engine = createAgentExecutionEngine([
+    defineAgentStreamCommand({
+      path: 'fixture.stream',
+      description: 'Wait for cancellation.',
+      policy: {
+        risk: 'read',
+        auth: 'none',
+        interaction: 'never',
+        confirmation: 'none',
+        idempotency: 'not_applicable',
+        streaming: true,
+      },
+      input: z.object({}).strict(),
+      output: z.object({ value: z.string() }).strict(),
+      stream: async function* (_input, context) {
+        started();
+        await new Promise<void>((resolve) => {
+          context.signal.addEventListener('abort', resolve, { once: true });
+        });
+        throw new Error('the cancelled stream must not emit an error frame');
+      },
+    }),
+  ]);
+  const controller = new AbortController();
+  const iterator = engine.stream(
+    { command: 'fixture.stream', input: {} },
+    { signal: controller.signal },
+  )[Symbol.asyncIterator]();
+
+  const pending = iterator.next();
+  await startedStream;
+  controller.abort();
+
+  assert.deepEqual(await pending, { done: true, value: undefined });
 });
 
 test('engine fails closed for unsafe input, unknown commands, and output drift', async () => {
@@ -264,6 +375,29 @@ test('native definitions keep safety metadata aligned with the compatibility pro
       count: 0,
       prerequisites: [],
     }),
+    feedbackList: async () => ({
+      project_id: 1,
+      unit_id: 2,
+      unit_code: 'FIT0001',
+      task_definition_id: 3,
+      task_instance_id: null,
+      abbreviation: 'P1',
+      instantiated: false,
+      count: 0,
+      feedback: [],
+    }),
+    feedbackWatch: async function* () {
+      yield {
+        type: 'baseline' as const,
+        at: '2030-01-01T00:00:00.000Z',
+        project_id: 1,
+        task_definition_id: 3,
+        abbreviation: 'P1',
+        interval_seconds: 15,
+        total_feedback: 0,
+        feedback: [],
+      };
+    },
     taskResources: async () => ({
       project_id: 1,
       selected_count: 0,

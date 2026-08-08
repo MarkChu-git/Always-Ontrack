@@ -12,6 +12,7 @@ export interface AgentCallInvocation {
 interface AgentCallInputDependencies {
   readonly stdinIsTTY?: boolean;
   readonly readStdin?: () => Promise<string>;
+  readonly invocationLabel?: string;
 }
 
 function invalidArgument(summary: string, cause?: unknown): AgentProtocolError {
@@ -55,22 +56,23 @@ export async function parseAgentCallInvocation(
   args: readonly string[],
   dependencies: AgentCallInputDependencies = {},
 ): Promise<AgentCallInvocation> {
+  const invocationLabel = dependencies.invocationLabel ?? 'agent call';
   const command = args[0];
   if (!command || command.startsWith('--')) {
-    throw invalidArgument('agent call requires a stable command path.');
+    throw invalidArgument(`${invocationLabel} requires a stable command path.`);
   }
   if (
     command.length > MAX_AGENT_COMMAND_PATH_LENGTH ||
     !AGENT_COMMAND_PATH.test(command)
   ) {
-    throw invalidArgument('agent call requires a stable command path.');
+    throw invalidArgument(`${invocationLabel} requires a stable command path.`);
   }
 
   let rawInput: string | undefined;
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index];
     if (flag !== '--input-json' && flag !== '--input') {
-      throw invalidArgument(`Unknown agent call flag: ${flag}.`);
+      throw invalidArgument(`Unknown ${invocationLabel} flag: ${flag}.`);
     }
     if (rawInput !== undefined) {
       throw invalidArgument('Use either --input-json or --input -, not both.');

@@ -1,33 +1,33 @@
-# Graph Report - native-pdf-submission  (2026-08-08)
+# Graph Report - native-feedback-watch  (2026-08-08)
 
 ## Corpus Check
-- 110 files · ~137,567 words
+- 110 files · ~140,366 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1791 nodes · 4350 edges · 106 communities (102 shown, 4 thin omitted)
-- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 38 edges (avg confidence: 0.58)
+- 1817 nodes · 4422 edges · 113 communities (109 shown, 4 thin omitted)
+- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 41 edges (avg confidence: 0.58)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d9463d83`
+- Built from commit: `0d3bb97e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- agent-project-unit-canonical.ts
+- remoteContractFailure
 - SessionData
 - utils.ts
-- pollUntilInterrupted
+- handleSubmissionUpload
 - lightpanda-provider.ts
 - agent-commands.ts
 - auto-login.ts
 - contracts.ts
-- createAuthenticatedApi
+- main
 - command-spec.ts
 - submission-lifecycle.ts
 - AgentProtocolError
-- remoteContractFailure
+- agent-tasks.ts
 - auth-broker.ts
 - scripts
 - discovery.ts
@@ -53,7 +53,7 @@
 - session.ts
 - captureSsoCredentialsInternal
 - isBrowserStorageState
-- handleSubmissionUpload
+- contracts.test.ts
 - check-skill-lock.ts
 - createNativeAgentCommands
 - extractCredentialsFromStorageEntries
@@ -69,8 +69,8 @@
 - check-skill-lock.test.ts
 - OnTrackAuthBroker
 - agent-contract.ts
-- repository
-- runWelcomeAction
+- createAuthenticatedApi
+- api.ts
 - workflow-security.test.ts
 - Always Ontrack (ontrack-cli)
 - 快速开始
@@ -107,20 +107,27 @@
 - 安装
 - 1. 目标、术语与约束
 - 9. 跨 Module 测试、真实环境验证与回滚
-- extractMfaNumberChallengeFromText
+- api.test.ts
 - types.ts
 - overrides
-- watch-snapshots.ts
-- agent-units.ts
-- bin
-- collectUnsafePayload
+- handleDoctor
+- handleNativeAgentCommand
+- downloadTaskResourceArtifacts
+- agent-call-input.ts
+- normalizeReadOnlyRoute
 - agent-plan.ts
+- presentFeedbackRows
+- extractMfaNumberChallengeFromText
+- FeedbackItem
+- createSessionFromAccessToken
+- bin
+- repository
 
 ## God Nodes (most connected - your core abstractions)
 1. `SessionData` - 58 edges
-2. `remoteContractFailure()` - 46 edges
+2. `remoteContractFailure()` - 48 edges
 3. `OnTrackApiClient` - 42 edges
-4. `createAuthenticatedApi()` - 38 edges
+4. `createAuthenticatedApi()` - 39 edges
 5. `loadProjectsWithTaskMetadata()` - 34 edges
 6. `handleSubmissionUpload()` - 34 edges
 7. `main()` - 33 edges
@@ -143,19 +150,23 @@
 ## Import Cycles
 - None detected.
 
-## Communities (106 total, 4 thin omitted)
+## Communities (113 total, 4 thin omitted)
 
-### Community 0 - "agent-project-unit-canonical.ts"
-Cohesion: 0.19
-Nodes (25): contractAliasedValue(), contractRecord(), contractSafeText(), booleanValue(), feedbackId(), feedbackItem(), feedbackText(), nonNegativeInteger() (+17 more)
+### Community 0 - "remoteContractFailure"
+Cohesion: 0.15
+Nodes (40): contractAliasedArray(), contractAliasedValue(), contractNonNegativeInteger(), contractPositiveInteger(), contractProjectUnit, contractRecord(), contractSafeText(), remoteContractFailure() (+32 more)
 
 ### Community 1 - "SessionData"
-Cohesion: 0.06
-Nodes (59): buildWatchSnapshot(), createNativeAgentExecutionEngine(), handleDoctor(), loadProjectsWithTaskMetadata(), projectMatchesScope(), projectUnitId(), readAgentFeedbackList(), readAgentPlanShow() (+51 more)
+Cohesion: 0.28
+Nodes (5): authHeaders(), OnTrackApiClient, withApiPath(), ProjectSummary, SessionData
 
 ### Community 2 - "utils.ts"
 Cohesion: 0.07
-Nodes (51): StudentTaskRow, TaskSelector, buildPdfFilename(), buildTaskResourceFilename(), colorize(), COLORS_ENABLED, DEFAULT_DOWNLOAD_DIR, diffWatchStates() (+43 more)
+Nodes (51): TaskBatchSelector, WatchEvent, buildTaskResourceFilename(), colorize(), COLORS_ENABLED, DEFAULT_DOWNLOAD_DIR, diffWatchStates(), ExternalOpenCommand (+43 more)
+
+### Community 3 - "handleSubmissionUpload"
+Cohesion: 0.21
+Nodes (17): claimConfirmedWrite(), deriveDefaultSubmissionTrigger(), handlePlanCommand(), handlePlanReset(), handlePlanSetDates(), handleSubmissionUpload(), isDefinitiveWriteRejection(), loadPlannerContext() (+9 more)
 
 ### Community 4 - "lightpanda-provider.ts"
 Cohesion: 0.07
@@ -163,39 +174,39 @@ Nodes (35): main(), readPublicOktaUrl(), requiredLightpandaPath(), cleanupFailur
 
 ### Community 5 - "agent-commands.ts"
 Cohesion: 0.03
-Nodes (61): AgentAuthStatus, agentFeedbackItemSchema, AgentFeedbackListInput, agentFeedbackListInputSchema, AgentFeedbackListOutput, agentFeedbackMultilineTextSchema, agentFeedbackTextSchema, agentPlanCalendarDateSchema (+53 more)
+Nodes (62): AgentAuthStatus, agentFeedbackItemSchema, AgentFeedbackListInput, agentFeedbackListInputSchema, AgentFeedbackListOutput, agentFeedbackMultilineTextSchema, agentFeedbackTextSchema, AgentFeedbackWatchInput (+54 more)
 
 ### Community 6 - "auto-login.ts"
 Cohesion: 0.06
 Nodes (46): asErrorMessage(), browserInstallHint(), BrowserLaunchPlan, BrowserStorageEntry, BrowserStorageState, candidateBrowserPaths(), ClaimedBrowserSessionState, clickDetectedMfaOption() (+38 more)
 
 ### Community 7 - "contracts.ts"
-Cohesion: 0.10
-Nodes (32): canonicalRoute(), collectShapeDrift(), collectUnexpectedKeys(), collectUnsafeShapeEnums(), ContractDrift, ContractFixture, ContractFixtureMetadata, ContractProvenance (+24 more)
+Cohesion: 0.14
+Nodes (25): collectUnexpectedKeys(), collectUnsafePayload(), collectUnsafeShapeEnums(), ContractDrift, ContractFixture, ContractFixtureMetadata, ContractProvenance, ContractRisk (+17 more)
 
-### Community 8 - "createAuthenticatedApi"
+### Community 8 - "main"
 Cohesion: 0.15
-Nodes (47): agentFeedbackListInputFromSelector(), createAuthenticatedApi(), describeWatchEvent(), handleAuthEnsure(), handleAuthMethod(), handleAuthStatus(), handleDiscover(), handleFeedbackCommand() (+39 more)
+Nodes (47): agentFeedbackListInputFromSelector(), agentSubmissionStatusInputFromSelector(), getUnitRole(), handleAuthEnsure(), handleAuthMethod(), handleAuthStatus(), handleDiscover(), handleFeedbackCommand() (+39 more)
 
 ### Community 9 - "command-spec.ts"
 Cohesion: 0.07
-Nodes (37): AGENT_TASKS_LIST_MAX_STATUS_LENGTH, agentFeedbackListOutputSchema, agentFeedbackWatchFrameSchema, agentPlanShowInputSchema, agentPlanShowOutputSchema, agentProjectsListInputSchema, agentProjectsListOutputSchema, agentSubmissionStatusOutputSchema (+29 more)
+Nodes (36): AGENT_TASKS_LIST_MAX_STATUS_LENGTH, agentFeedbackListOutputSchema, agentFeedbackWatchFrameSchema, agentPlanShowInputSchema, agentPlanShowOutputSchema, agentProjectsListInputSchema, agentProjectsListOutputSchema, agentSubmissionStatusOutputSchema (+28 more)
 
 ### Community 10 - "submission-lifecycle.ts"
 Cohesion: 0.11
-Nodes (31): buildAgentSubmissionStatusOutput(), booleanValue(), createSubmissionAttempt(), hasOwnField(), InvalidSubmissionDetailsError, isSubmissionObserved(), journalEntry(), parseStrictSubmissionDetails() (+23 more)
+Nodes (29): booleanValue(), createSubmissionAttempt(), hasOwnField(), InvalidSubmissionDetailsError, isSubmissionObserved(), journalEntry(), parseStrictSubmissionDetails(), PreparedSubmissionFile (+21 more)
 
 ### Community 11 - "AgentProtocolError"
-Cohesion: 0.27
-Nodes (9): contractProjectUnit, AgentProjectCapabilities, AgentProjectDirectoryItem, booleanValue(), buildAgentProjectsListOutput(), completeAgentEnvelopeBytes(), projectCapabilities(), projectDirectoryItem() (+1 more)
+Cohesion: 0.26
+Nodes (9): nonNegativeInteger(), AgentProjectCapabilities, AgentProjectDirectoryItem, booleanValue(), buildAgentProjectsListOutput(), completeAgentEnvelopeBytes(), projectCapabilities(), projectDirectoryItem() (+1 more)
 
-### Community 12 - "remoteContractFailure"
-Cohesion: 0.25
-Nodes (15): remoteContractFailure(), booleanValue(), canonicalTutorialStatusUnit(), AgentTaskCatalogueItem, AgentTasksListSource, assertAuthoritativeTaskDefinitions(), buildOutput(), buildVisibleStudentTaskViews() (+7 more)
+### Community 12 - "agent-tasks.ts"
+Cohesion: 0.12
+Nodes (23): AgentTasksListInput, AgentTasksListOutput, AgentTutorialsStatusInput, AgentTutorialsStatusOutput, agentTutorialsStatusOutputSchema, AgentProjectUnitSource, booleanValue(), canonicalTutorialStatusUnit() (+15 more)
 
 ### Community 13 - "auth-broker.ts"
-Cohesion: 0.20
-Nodes (10): AuthStatusView, createOnTrackAuthBroker(), defaultDependencies(), OnTrackAuthBrokerDependencies, OnTrackAuthBrokerOptions, sessionFromCapture(), AutoLoginOptions, LoginCredentials (+2 more)
+Cohesion: 0.19
+Nodes (10): AuthStatusView, createOnTrackAuthBroker(), defaultDependencies(), OnTrackAuthBrokerDependencies, OnTrackAuthBrokerOptions, sessionFromCapture(), AuthRuntime, AutoLoginOptions (+2 more)
 
 ### Community 14 - "scripts"
 Cohesion: 0.08
@@ -206,8 +217,8 @@ Cohesion: 0.10
 Nodes (33): ProbeResult, API_HINTS, classifyDiscoveredPaths(), contextKeyForParameter(), DEFAULT_DISCOVERY_PROBE_REQUEST_BUDGET, discoverOnTrackSurface(), DiscoveryAsset, DiscoveryResult (+25 more)
 
 ### Community 16 - "agent-watch.ts"
-Cohesion: 0.11
-Nodes (30): agentPlanDateSchema(), hasOwnField(), validateAgentFeedbackWatchFrame(), assertAgentEnvelopeByteLimit(), AgentWatchDate, AgentWatchDateKind, agentWatchDateSchema, AgentWatchDateSource (+22 more)
+Cohesion: 0.12
+Nodes (28): agentPlanDateSchema(), hasOwnField(), AgentWatchDate, AgentWatchDateKind, agentWatchDateSchema, AgentWatchDateSource, AgentWatchEvent, agentWatchEventBaseSchema (+20 more)
 
 ### Community 17 - "verify-package.ts"
 Cohesion: 0.13
@@ -218,8 +229,8 @@ Cohesion: 0.05
 Nodes (41): 10. 仍需进一步验证的未知项, 11. 与本地代码的直接对应, 12. 本轮实施状态与架构决策入口, 13. 最终实施结果, 1. 审计范围, 2.1 保留的核心合同, 2.2 已经失效或明显不足的核心假设, 2. 总体判断 (+33 more)
 
 ### Community 19 - "auth-runtime.ts"
-Cohesion: 0.17
-Nodes (12): AuthInteractionMode, authRequired(), AuthRuntime, AuthRuntimeAdapter, createAuthRuntime(), credentialVersionChanged(), inFlightKey(), isFreshEnough() (+4 more)
+Cohesion: 0.15
+Nodes (13): AuthInteractionMode, authRequired(), AuthRuntimeAdapter, createAuthRuntime(), credentialVersionChanged(), inFlightKey(), isFreshEnough(), isRefreshLockTimeout() (+5 more)
 
 ### Community 20 - "artifact-safety.ts"
 Cohesion: 0.22
@@ -230,8 +241,8 @@ Cohesion: 0.06
 Nodes (33): 10. 已决策与管理面 Gates, 11. 官方来源, 1. 结论与范围, 2. 已核对的事实与约束, 3. 目标流水线, 4.1 `.github/workflows/ci.yml`, 4.2 `.github/workflows/dependency-review.yml`, 4.3 `.github/workflows/release.yml` (+25 more)
 
 ### Community 22 - "student-task-view.ts"
-Cohesion: 0.14
-Nodes (28): resolveSelectedStudentTask(), buildStudentTaskRows(), BuildStudentTaskViewOptions, buildStudentTaskViews(), definitionsForProject(), definitionTargetGrade(), definitionTutorialStream(), embeddedDefinition() (+20 more)
+Cohesion: 0.15
+Nodes (26): buildStudentTaskRows(), BuildStudentTaskViewOptions, buildStudentTaskViews(), definitionsForProject(), definitionTargetGrade(), definitionTutorialStream(), embeddedDefinition(), enrolledTutorialStreams() (+18 more)
 
 ### Community 23 - "command-input.ts"
 Cohesion: 0.14
@@ -242,8 +253,8 @@ Cohesion: 0.16
 Nodes (15): AuthMcpDependencies, configuredBaseUrl(), createAuthMcpServer(), defaultDependencies(), nextActionSchema, serveAuthMcp(), toolResponse(), ToolResult (+7 more)
 
 ### Community 25 - "agent-protocol.ts"
-Cohesion: 0.13
-Nodes (27): handleNativeAgentCommand(), normalizeAgentCliError(), exitCodeForAgentEnvelope(), AGENT_SCHEMA_VERSION, AgentArtifact, AgentErrorCode, agentErrorEnvelope(), AgentNextAction (+19 more)
+Cohesion: 0.16
+Nodes (22): AGENT_SCHEMA_VERSION, AgentArtifact, AgentErrorCode, agentErrorEnvelope(), AgentNextAction, AgentOutputContext, AgentProtocolErrorOptions, AgentStatus (+14 more)
 
 ### Community 26 - "advanceGuidedSsoOnPage"
 Cohesion: 0.19
@@ -258,8 +269,8 @@ Cohesion: 0.22
 Nodes (15): assertThreshold(), checkCoverage(), CoverageEvaluation, CoverageMetric, CoverageSummary, CoverageThresholds, evaluateCoverage(), formatMetric() (+7 more)
 
 ### Community 29 - "agent-feedback.ts"
-Cohesion: 0.13
-Nodes (19): AgentTasksListOutput, AgentFeedbackItem, AgentFeedbackListSource, AgentFeedbackTarget, AgentFeedbackTask, AgentFeedbackWatchFrame, completeAgentEnvelopeBytes(), conflict() (+11 more)
+Cohesion: 0.12
+Nodes (26): AgentFeedbackItem, AgentFeedbackListSource, AgentFeedbackReadContext, AgentFeedbackTarget, AgentFeedbackTask, AgentFeedbackWatchContext, AgentFeedbackWatchFrame, AgentFeedbackWatchItem (+18 more)
 
 ### Community 30 - "package.json"
 Cohesion: 0.12
@@ -282,8 +293,8 @@ Cohesion: 0.22
 Nodes (5): BrowserLaunchAdapter, captureSsoCredentials(), captureSsoCredentialsWithGuidedLogin(), FakeBrowserOptions, Handler
 
 ### Community 35 - "session.ts"
-Cohesion: 0.15
-Nodes (18): AcquiredSessionRefreshLock, acquireSessionRefreshLock(), AUTH_REFRESH_LOCK_TIMEOUT, clearSession(), getConfigRoot(), getSessionPath(), isNodeError(), recoverStaleRefreshLock() (+10 more)
+Cohesion: 0.20
+Nodes (15): AcquiredSessionRefreshLock, acquireSessionRefreshLock(), clearSession(), getConfigRoot(), getSessionPath(), isNodeError(), recoverStaleRefreshLock(), resolveSessionPath() (+7 more)
 
 ### Community 36 - "captureSsoCredentialsInternal"
 Cohesion: 0.19
@@ -293,9 +304,9 @@ Nodes (13): captureCredentialsFromPersistedStateFile(), captureCredentialsFromSt
 Cohesion: 0.29
 Nodes (14): assertTrustedBrowserSessionStateDirectory(), claimBrowserSessionState(), filterBrowserSessionState(), hasReusableBrowserSessionState(), isBrowserStorageCookie(), isBrowserStorageOrigin(), isBrowserStorageState(), isRecord() (+6 more)
 
-### Community 38 - "handleSubmissionUpload"
+### Community 38 - "contracts.test.ts"
 Cohesion: 0.20
-Nodes (18): claimConfirmedWrite(), deriveDefaultSubmissionTrigger(), handlePlanCommand(), handlePlanReset(), handlePlanSetDates(), handleSubmissionUpload(), isDefinitiveWriteRejection(), loadPlannerContext() (+10 more)
+Nodes (10): collectShapeDrift(), diffContractShapes(), enumText(), loadContractFixture(), normalizeProductionPayload(), normalizeValue(), SAFE_ENUM_FIELDS, sanitizeProductionPayload() (+2 more)
 
 ### Community 39 - "check-skill-lock.ts"
 Cohesion: 0.31
@@ -326,8 +337,8 @@ Cohesion: 0.33
 Nodes (6): keywords, agent, cli, doubtfire, mcp, ontrack
 
 ### Community 47 - "cli.ts"
-Cohesion: 0.06
-Nodes (62): agentSubmissionStatusInputFromSelector(), applyLimit(), arrayLength(), buildAgentSubmissionPdfOutput(), buildAgentTaskPdfOutput(), deriveUnitsFromProjects(), DIGITAL_LOGO_LINES, DoctorCheck (+54 more)
+Cohesion: 0.05
+Nodes (72): applyLimit(), arrayLength(), buildTaskSelectorArgs(), buildWatchSnapshot(), deriveUnitsFromProjects(), DIGITAL_LOGO_LINES, DoctorCheck, expandHomePath() (+64 more)
 
 ### Community 49 - "check-gitnexus-skill-sync.ts"
 Cohesion: 0.50
@@ -346,16 +357,16 @@ Cohesion: 0.33
 Nodes (3): OnTrackAuthBroker, AuthEnsureOptions, AuthRuntimeResult
 
 ### Community 54 - "agent-contract.ts"
-Cohesion: 0.31
-Nodes (8): RFC-3339, AGENT_MULTILINE_SAFE_TEXT_PATTERN, AGENT_RFC3339_TIMESTAMP_PATTERN, AGENT_SAFE_TEXT_PATTERN, contractNonNegativeInteger(), contractRfc3339Timestamp(), contractSafeMultilineText(), isAgentRfc3339Timestamp()
+Cohesion: 0.36
+Nodes (7): RFC-3339, AGENT_MULTILINE_SAFE_TEXT_PATTERN, AGENT_RFC3339_TIMESTAMP_PATTERN, AGENT_SAFE_TEXT_PATTERN, contractRfc3339Timestamp(), contractSafeMultilineText(), isAgentRfc3339Timestamp()
 
-### Community 55 - "repository"
-Cohesion: 0.67
-Nodes (3): repository, type, url
+### Community 55 - "createAuthenticatedApi"
+Cohesion: 0.14
+Nodes (29): buildAgentSubmissionStatusOutput(), createAuthenticatedApi(), createNativeAgentExecutionEngine(), getUnitTaskDefinitions(), hasOwnField(), loadProjectsWithTaskMetadata(), nonEmptyStringValue(), normalizeAgentCliError() (+21 more)
 
-### Community 56 - "runWelcomeAction"
-Cohesion: 0.16
-Nodes (22): buildTaskSelectorArgs(), expandHomePath(), handleWelcome(), help(), optionalFlagArgs(), parseTaskSelectorTokens(), promptExternalArtifactAuthorization(), promptGuidedOutputDirectory() (+14 more)
+### Community 56 - "api.ts"
+Cohesion: 0.15
+Nodes (24): AuthSessionRefresh, buildErrorMessage(), DownloadResult, fetchOnTrack(), InvalidDownloadFormatError, isReplaySafe(), JsonBody, methodOf() (+16 more)
 
 ### Community 60 - "Always Ontrack (ontrack-cli)"
 Cohesion: 0.22
@@ -366,8 +377,8 @@ Cohesion: 0.22
 Nodes (9): 1. 检查认证方式, 2. 登录, 3. 查看当前账号, 4. 列出你的课程和任务, 5. 查看某个具体任务, 6. 查看反馈与实时消息, 7. 下载 PDF, 8. 先预检，再确认上传 submission 或补充文件 (+1 more)
 
 ### Community 62 - "handleInbox"
-Cohesion: 0.20
-Nodes (28): buildInboxFallbackTasksFromProjectDetails(), countTasksByStatus(), dedupeInboxTasks(), extractInboxProjectId(), flattenTasks(), handleInbox(), handleTasks(), handleTaskShow() (+20 more)
+Cohesion: 0.18
+Nodes (29): buildInboxFallbackTasksFromProjectDetails(), countTasksByStatus(), dedupeInboxTasks(), describeWatchEvent(), extractInboxProjectId(), flattenTasks(), handleInbox(), handleTasks() (+21 more)
 
 ### Community 63 - "4. Module 1：Auth lifecycle / security identity"
 Cohesion: 0.25
@@ -415,7 +426,7 @@ Nodes (8): submission upload 和 submission upload-new-files 的区别, 上传�
 
 ### Community 74 - "agent-execution-engine.ts"
 Cohesion: 0.10
-Nodes (22): AgentBasePolicy, AgentCallRequest, AgentCommandDefinition, AgentCommandManifest, AgentCommandPolicy, AgentExecutionEngine, AgentExecutionEngineOptions, AgentExecutionEnvelope (+14 more)
+Nodes (25): AgentBasePolicy, AgentCallRequest, AgentCommandDefinition, AgentCommandManifest, AgentCommandPolicy, AgentExecutionEngineOptions, AgentExecutionEnvelope, AgentNonWritePolicy (+17 more)
 
 ### Community 75 - "OnTrack CLI domain context"
 Cohesion: 0.29
@@ -434,8 +445,8 @@ Cohesion: 0.29
 Nodes (7): 手动 redirect 导入（备用）, 推荐方式: `ontrack login`, 浏览器捕获模式: `ontrack login --auto`, 登录与会话, 登录后会发生什么, 直接传入 token, 退出登录
 
 ### Community 79 - "execution-journal.ts"
-Cohesion: 0.15
-Nodes (23): AgentCallInputDependencies, AgentCallInvocation, invalidArgument(), parseAgentCallInvocation(), parseInputObject(), readProcessStdin(), atomicWrite(), claimExecution() (+15 more)
+Cohesion: 0.25
+Nodes (17): atomicWrite(), claimExecution(), configRoot(), digest(), ExecutionClaim, executionFingerprint(), ExecutionJournalOptions, ExecutionRecord (+9 more)
 
 ### Community 80 - "Command reference"
 Cohesion: 0.33
@@ -497,40 +508,64 @@ Nodes (4): 1.1 重构目标, 1.2 强制术语, 1.3 不变量, 1. 目标、术语
 Cohesion: 0.50
 Nodes (4): 9.1 测试金字塔, 9.2 真实环境操作等级, 9.3 回滚原则, 9. 跨 Module 测试、真实环境验证与回滚
 
-### Community 95 - "extractMfaNumberChallengeFromText"
-Cohesion: 0.50
-Nodes (5): extractMfaNumberChallenge(), extractMfaNumberChallengeFromText(), extractNumberTokens(), hasMfaChallengeSignal(), uniqueInOrder()
+### Community 95 - "api.test.ts"
+Cohesion: 0.11
+Nodes (7): InvalidJsonResponseError, InvalidPdfDownloadError, OversizedBinaryResponseError, OversizedJsonResponseError, UnavailableDownloadError, MAX_DOWNLOAD_BYTES, session
 
 ### Community 96 - "types.ts"
-Cohesion: 0.15
-Nodes (15): AuthFailureKind, classifyAuthFailure(), createSessionFromAccessToken(), migrateLegacySession(), OnTrackHttpError, AccessTokenResponse, AuthMethodResponse, CredentialSource (+7 more)
+Cohesion: 0.13
+Nodes (12): AuthFailureKind, classifyAuthFailure(), OnTrackHttpError, OnTrackTransportError, AccessTokenResponse, CredentialSource, InboxTask, OnTrackUser (+4 more)
 
 ### Community 97 - "overrides"
 Cohesion: 0.50
 Nodes (4): overrides, adm-zip, js-yaml, sharp
 
-### Community 98 - "watch-snapshots.ts"
-Cohesion: 0.18
-Nodes (17): settleMetadataReads(), AgentPlanShowOutput, AgentWatchState, AGENT_REMOTE_READ_CONCURRENCY, mapWithConcurrency(), settleWithConcurrency(), getLatestFeedbackTimestamp(), makeWatchTaskKey() (+9 more)
+### Community 98 - "handleDoctor"
+Cohesion: 0.28
+Nodes (5): handleDoctor(), requireAvailableDownload(), requirePdfDownload(), AuthMethodResponse, UnitSummary
 
-### Community 100 - "agent-units.ts"
-Cohesion: 0.24
-Nodes (13): contractAliasedArray(), contractPositiveInteger(), requiredContractPositiveInteger(), AgentUnitShowSource, assertUnitMetadataMatchesProject(), authoritativeProject(), booleanValue(), completeAgentEnvelopeBytes() (+5 more)
+### Community 100 - "handleNativeAgentCommand"
+Cohesion: 0.29
+Nodes (6): handleNativeAgentCommand(), writeNativeAgentStream(), AgentExecutionEngine, defineAgentStreamCommand(), exitCodeForAgentEnvelope(), exitCodeForAgentErrorCode()
 
-### Community 101 - "bin"
+### Community 101 - "downloadTaskResourceArtifacts"
+Cohesion: 0.33
+Nodes (7): buildAgentSubmissionPdfOutput(), buildAgentTaskPdfOutput(), downloadTaskResourceArtifacts(), taskIdentityJson(), taskResourceIdentity(), exceedsByteBudget(), safeTextForHumanDisplay()
+
+### Community 104 - "agent-call-input.ts"
+Cohesion: 0.43
+Nodes (6): AgentCallInputDependencies, AgentCallInvocation, invalidArgument(), parseAgentCallInvocation(), parseInputObject(), readProcessStdin()
+
+### Community 105 - "normalizeReadOnlyRoute"
+Cohesion: 0.50
+Nodes (4): canonicalRoute(), normalizeReadOnlyRoute(), READ_ONLY_METHODS, ROUTE_CATALOG
+
+### Community 106 - "agent-plan.ts"
+Cohesion: 0.13
+Nodes (33): AgentPlanShowInput, AgentPlanShowOutput, aliasValues(), buildAgentPlanShowOutput(), calendarDate(), normalizePrerequisites(), own(), pairedArray() (+25 more)
+
+### Community 107 - "presentFeedbackRows"
+Cohesion: 0.33
+Nodes (7): feedbackAuthor(), feedbackKind(), feedbackMessage(), firstString(), formatDateTime(), presentFeedbackRows(), getFeedbackText()
+
+### Community 108 - "extractMfaNumberChallengeFromText"
+Cohesion: 0.50
+Nodes (5): extractMfaNumberChallenge(), extractMfaNumberChallengeFromText(), extractNumberTokens(), hasMfaChallengeSignal(), uniqueInOrder()
+
+### Community 110 - "createSessionFromAccessToken"
+Cohesion: 0.50
+Nodes (3): createSessionFromAccessToken(), migrateLegacySession(), legacy
+
+### Community 111 - "bin"
 Cohesion: 0.67
 Nodes (3): bin, ontrack, ontrack-auth-mcp
 
-### Community 104 - "collectUnsafePayload"
-Cohesion: 0.52
-Nodes (7): collectUnsafePayload(), isRecord(), isSensitiveKey(), JsonValue, normalizeKey(), PERSON_IDENTITY_CONTAINERS, sanitizeValue()
-
-### Community 106 - "agent-plan.ts"
-Cohesion: 0.30
-Nodes (18): AgentPlanShowInput, aliasValues(), buildAgentPlanShowOutput(), calendarDate(), normalizePrerequisites(), own(), pairedArray(), pairedBoolean() (+10 more)
+### Community 112 - "repository"
+Cohesion: 0.67
+Nodes (3): repository, type, url
 
 ## Knowledge Gaps
-- **570 isolated node(s):** `name`, `version`, `description`, `license`, `type` (+565 more)
+- **578 isolated node(s):** `name`, `version`, `description`, `license`, `type` (+573 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -538,16 +573,16 @@ Nodes (18): AgentPlanShowInput, aliasValues(), buildAgentPlanShowOutput(), calen
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `client` connect `verify-package.ts` to `auth-mcp-server.ts`?**
-  _High betweenness centrality (0.079) - this node is a cross-community bridge._
+  _High betweenness centrality (0.082) - this node is a cross-community bridge._
 - **Why does `withClient()` connect `auth-mcp-server.ts` to `verify-package.ts`?**
-  _High betweenness centrality (0.079) - this node is a cross-community bridge._
+  _High betweenness centrality (0.082) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _570 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `SessionData` be split into smaller, more focused modules?**
-  _Cohesion score 0.05738115095913261 - nodes in this community are weakly interconnected._
+  _578 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `remoteContractFailure` be split into smaller, more focused modules?**
+  _Cohesion score 0.1494949494949495 - nodes in this community are weakly interconnected._
 - **Should `utils.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.07142857142857142 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06818181818181818 - nodes in this community are weakly interconnected._
 - **Should `lightpanda-provider.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.06988120195667366 - nodes in this community are weakly interconnected._
 - **Should `agent-commands.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.031746031746031744 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.03125 - nodes in this community are weakly interconnected._

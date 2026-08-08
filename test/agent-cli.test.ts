@@ -2496,6 +2496,7 @@ test("agent list and describe are offline projections of the executable commands
         "task.show",
         "task.prerequisites",
         "feedback.list",
+        "feedback.watch",
         "task.resources",
         "pdf.task",
         "pdf.submission",
@@ -2549,6 +2550,57 @@ test("agent list and describe are offline projections of the executable commands
     assert.equal(Object.hasOwn(tutorialProperties, "tutor"), false);
     assert.equal(Object.hasOwn(tutorialProperties, "room"), false);
     assert.equal(Object.hasOwn(tutorialProperties, "students"), false);
+
+    const feedbackWatch = await runCli(
+      ["agent", "describe", "feedback.watch"],
+      configRoot,
+    );
+    assert.equal(feedbackWatch.exitCode, 0, feedbackWatch.stderr);
+    const feedbackWatchData = JSON.parse(feedbackWatch.stdout).data as Record<string, unknown>;
+    assert.equal((feedbackWatchData.policy as Record<string, unknown>).streaming, true);
+    const feedbackWatchInput = feedbackWatchData.input_schema as Record<string, unknown>;
+    const feedbackWatchVariants = feedbackWatchInput.anyOf as Array<
+      { readonly properties: Record<string, Record<string, unknown>> }
+    >;
+    assert.equal(feedbackWatchVariants.length, 2);
+    assert.equal(
+      feedbackWatchVariants.every(
+        (variant) => variant.properties.interval_seconds?.default === 15,
+      ),
+      true,
+    );
+    const feedbackWatchOutput = feedbackWatchData.output_schema as Record<string, unknown>;
+    const feedbackWatchOutputVariants = (
+      feedbackWatchOutput.anyOf ?? feedbackWatchOutput.oneOf
+    ) as Array<
+      { readonly properties: Record<string, Record<string, unknown>> }
+    >;
+    const baselineVariant = feedbackWatchOutputVariants.find(
+      (variant) => variant.properties.type?.const === 'baseline',
+    );
+    const baselineFeedback = baselineVariant?.properties.feedback as Record<string, unknown>;
+    const baselineItems = baselineFeedback.items as {
+      readonly properties: Record<string, Record<string, unknown>>;
+    };
+    assert.equal(baselineItems.properties.feedback_id?.type, 'integer');
+
+    const streamAsCall = await runCli(
+      [
+        "agent",
+        "call",
+        "feedback.watch",
+        "--input-json",
+        '{"project_id":1001,"task_definition_id":3001}',
+      ],
+      configRoot,
+    );
+    assert.equal(streamAsCall.exitCode, 2);
+    const streamAsCallEnvelope = JSON.parse(streamAsCall.stdout) as Record<string, unknown>;
+    assert.equal(streamAsCallEnvelope.command, "feedback.watch");
+    assert.equal(
+      (streamAsCallEnvelope.error as Record<string, unknown>).code,
+      "INVALID_ARGUMENT",
+    );
 
     const taskDirectory = await runCli(
       ["agent", "describe", "tasks.list"],
@@ -3230,6 +3282,44 @@ test("Agent streaming watch frames preserve Plan Date kinds and remove feedback 
       ],
     );
 
+    const nativeFeedback = await runStreamingCliUntilFirstFrame(
+      [
+        "agent",
+        "stream",
+        "feedback.watch",
+        "--input-json",
+        JSON.stringify({
+          project_id: 1001,
+          task_definition_id: 3001,
+          history: 1,
+          interval_seconds: 1,
+        }),
+      ],
+      configRoot,
+    );
+    assert.equal(nativeFeedback.exitCode, 0, nativeFeedback.stderr);
+    assert.equal(nativeFeedback.stderr, "");
+    assert.equal(nativeFeedback.stdout.trim().split("\n").length, 1);
+    assert.equal(nativeFeedback.stdout.includes(privateMarker), false);
+    const nativeFeedbackEnvelope = JSON.parse(
+      nativeFeedback.stdout.split("\n")[0] ?? "",
+    ) as Record<string, unknown>;
+    assert.equal(nativeFeedbackEnvelope.command, "feedback.watch");
+    assert.equal(nativeFeedbackEnvelope.status, "success");
+    assert.deepEqual(
+      (nativeFeedbackEnvelope.data as Record<string, unknown>).feedback,
+      [
+        {
+          feedback_id: 7001,
+          kind: "comment",
+          text: "Review the evidence in section two.",
+          created_at: "2026-08-01T10:00:00.000Z",
+          updated_at: null,
+          is_new: null,
+        },
+      ],
+    );
+
     const legacyFeedback = await runStreamingCliUntilFirstFrame(
       [
         "feedback",
@@ -3287,6 +3377,16 @@ test("streaming Agent commands reject malformed input before authentication", as
           ",",
           "--output",
           "agent-json",
+        ],
+        command: "feedback.watch",
+      },
+      {
+        args: [
+          "agent",
+          "stream",
+          "feedback.watch",
+          "--input-json",
+          '{"project_id":1001,"task_definition_id":3001,"interval_seconds":0}',
         ],
         command: "feedback.watch",
       },

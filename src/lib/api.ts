@@ -92,8 +92,23 @@ function retryDelayMs(attempt: number): number {
 }
 
 /** Async delay primitive used by retry backoff logic. */
-async function wait(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (signal?.aborted) {
+    throw new DOMException('The OnTrack request was aborted.', 'AbortError');
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(finish, ms);
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(new DOMException('The OnTrack request was aborted.', 'AbortError'));
+    };
+    function finish(): void {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }
+    signal?.addEventListener('abort', abort, { once: true });
+  });
 }
 
 /** Build a status-only error; arbitrary remote bodies are never terminal-safe. */
@@ -123,7 +138,7 @@ async function requestJson<T>(
   const response = await fetchOnTrack(url, init);
 
   if (!response.ok && shouldRetry(response, init, attempt, maxRetries)) {
-    await wait(retryDelayMs(attempt));
+    await wait(retryDelayMs(attempt), init.signal);
     return requestJson<T>(
       url,
       init,
@@ -520,6 +535,7 @@ export class OnTrackApiClient {
     session: SessionData,
     projectId: number,
     maxResponseBytes?: number,
+    signal?: AbortSignal,
   ): Promise<ProjectSummary> {
     return requestJson<ProjectSummary>(
       withApiPath(this.baseUrl, `projects/${projectId}`),
@@ -529,6 +545,7 @@ export class OnTrackApiClient {
           Accept: 'application/json',
           ...authHeaders(this.activeSession(session)),
         },
+        signal,
       },
       0,
       DEFAULT_RETRY_ATTEMPTS,
@@ -544,8 +561,17 @@ export class OnTrackApiClient {
   }
 
   /** Fetch one project through the bounded Student Task View transport. */
-  getProjectForAgent(session: SessionData, projectId: number): Promise<ProjectSummary> {
-    return this.getProjectWithLimit(session, projectId, MAX_AGENT_PROJECT_RESPONSE_BYTES);
+  getProjectForAgent(
+    session: SessionData,
+    projectId: number,
+    signal?: AbortSignal,
+  ): Promise<ProjectSummary> {
+    return this.getProjectWithLimit(
+      session,
+      projectId,
+      MAX_AGENT_PROJECT_RESPONSE_BYTES,
+      signal,
+    );
   }
 
   /** List units; some roles may receive 403 (handled by caller fallback). */
@@ -569,6 +595,7 @@ export class OnTrackApiClient {
     session: SessionData,
     unitId: number,
     maxResponseBytes?: number,
+    signal?: AbortSignal,
   ): Promise<UnitSummary> {
     return requestJson<UnitSummary>(
       withApiPath(this.baseUrl, `units/${unitId}`),
@@ -578,6 +605,7 @@ export class OnTrackApiClient {
           Accept: 'application/json',
           ...authHeaders(this.activeSession(session)),
         },
+        signal,
       },
       0,
       DEFAULT_RETRY_ATTEMPTS,
@@ -594,8 +622,17 @@ export class OnTrackApiClient {
   }
 
   /** Fetch one unit through the bounded Student Task View transport. */
-  getUnitForAgent(session: SessionData, unitId: number): Promise<UnitSummary> {
-    return this.getUnitWithLimit(session, unitId, MAX_AGENT_UNIT_RESPONSE_BYTES);
+  getUnitForAgent(
+    session: SessionData,
+    unitId: number,
+    signal?: AbortSignal,
+  ): Promise<UnitSummary> {
+    return this.getUnitWithLimit(
+      session,
+      unitId,
+      MAX_AGENT_UNIT_RESPONSE_BYTES,
+      signal,
+    );
   }
 
   /** Inbox endpoint for a specific unit. */
@@ -658,6 +695,7 @@ export class OnTrackApiClient {
     projectId: number,
     taskDefId: number,
     maxResponseBytes?: number,
+    signal?: AbortSignal,
   ): Promise<FeedbackItem[]> {
     return requestJson<FeedbackItem[]>(
       withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/comments`),
@@ -667,6 +705,7 @@ export class OnTrackApiClient {
           Accept: 'application/json',
           ...authHeaders(this.activeSession(session)),
         },
+        signal,
       },
       0,
       DEFAULT_RETRY_ATTEMPTS,
@@ -682,12 +721,18 @@ export class OnTrackApiClient {
   }
 
   /** Read comments through the bounded Agent feedback transport. */
-  listTaskCommentsForAgent(session: SessionData, projectId: number, taskDefId: number): Promise<FeedbackItem[]> {
+  listTaskCommentsForAgent(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    signal?: AbortSignal,
+  ): Promise<FeedbackItem[]> {
     return this.listTaskCommentsWithLimit(
       session,
       projectId,
       taskDefId,
       MAX_AGENT_FEEDBACK_RESPONSE_BYTES,
+      signal,
     );
   }
 
