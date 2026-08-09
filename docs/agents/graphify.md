@@ -43,9 +43,11 @@ bun run graphify:check
 ```
 
 Only run the incremental update when a graph already exists. The committed
-portable files are `graph.json`, `graph.html`, `GRAPH_REPORT.md`,
-`.graphify_labels.json`, and its signature. The stat/mtime-based
-`manifest.json` stays local because checkout timestamps are machine-specific.
+portable files are `graph.json`, `GRAPH_REPORT.md`,
+`.graphify_labels.json`, and its signature. The generated `graph.html`
+report stays local and is gitignored — no HTML is committed to this
+repository. The stat/mtime-based `manifest.json` stays local because
+checkout timestamps are machine-specific.
 
 ## Updating Graphify
 

@@ -43,3 +43,7 @@ npm-debug.log*
 
 # Local lightpanda binary (experimental browser provider, downloaded per machine).
 /bin/lightpanda
+
+# No HTML is committed to this repository. Generated HTML reports
+# (e.g. graphify-out/graph.html) stay local and are rebuilt on demand.
+*.html
