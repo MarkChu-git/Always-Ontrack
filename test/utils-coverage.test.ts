@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { FeedbackItem, ProjectSummary, TaskSummary } from '../src/lib/types.js';
 import {
   buildPdfFilename,
+  buildTaskResourceFilename,
   filterTasksByStatus,
   formatDate,
   getFeedbackText,
@@ -143,6 +144,9 @@ test('status, role, filename, upload and feedback helpers cover fallbacks', asyn
   assert.equal(sanitizeFilenamePart(' ../weird name! ', 'fallback'), '.._weird_name');
   assert.equal(sanitizeFilenamePart('   ', 'fallback'), 'fallback');
   assert.equal(buildPdfFilename(undefined, undefined, 'submission'), 'unit_task_submission.pdf');
+  assert.equal(buildTaskResourceFilename('FIT1045', 'P1'), 'FIT1045_P1_resources.zip');
+  assert.equal(buildTaskResourceFilename('FIT1045', 'P1', '.ipynb'), 'FIT1045_P1_resources.ipynb');
+  assert.equal(buildTaskResourceFilename('FIT1045', 'P1', 'not-an-ext'), 'FIT1045_P1_resources.zip');
   assert.deepEqual(parseUploadFileSpecs(['--file', 'bad=./x', '--file', 'file2= ./two.pdf ']), [
     { path: 'bad=./x' },
     { key: 'file2', path: './two.pdf' },

@@ -226,6 +226,10 @@ async function main() {
     ['pdf', 'submission', '--project-id', String(projectId), '--abbr', abbr, '--out-dir', outDir],
     'pdf submission',
   );
+  run(
+    ['task', 'resources', '--project-id', String(projectId), '--abbr', abbr, '--out-dir', outDir],
+    'task resources',
+  );
 
   await runWatch(projectId, intervalSec);
   await runFeedbackWatch(projectId, abbr, intervalSec);

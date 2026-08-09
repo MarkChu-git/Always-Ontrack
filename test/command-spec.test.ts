@@ -12,6 +12,7 @@ test('command registry has unique stable paths and explicit safety metadata', ()
   assert.equal(new Set(paths).size, paths.length);
   assert.ok(paths.includes('auth.ensure'));
   assert.ok(paths.includes('projects.list'));
+  assert.ok(paths.includes('task.resources'));
   assert.ok(paths.includes('submission.upload'));
 
   for (const spec of AGENT_COMMAND_SPECS) {
@@ -36,6 +37,7 @@ test('capabilities are offline projections and do not expose implementation secr
 test('command path resolution handles grouped and top-level commands', () => {
   assert.equal(resolveCommandPath(['projects']), 'projects.list');
   assert.equal(resolveCommandPath(['project', 'show']), 'project.show');
+  assert.equal(resolveCommandPath(['task', 'resources']), 'task.resources');
   assert.equal(resolveCommandPath(['task', 'show']), 'task.show');
   assert.equal(resolveCommandPath(['auth', 'ensure']), 'auth.ensure');
   assert.equal(resolveCommandPath(['not-a-command']), 'not-a-command');

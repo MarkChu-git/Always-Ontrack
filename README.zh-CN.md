@@ -65,6 +65,7 @@ ontrack <command>
 - 文件能力
   - `pdf task`
   - `pdf submission`
+  - `task resources`
   - `submission upload`
   - `submission upload-new-files`
 - 工程与排障
@@ -337,7 +338,7 @@ ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.
 
 ### 批量任务选择器
 
-支持批量选择的命令（`task show`、`feedback list`、`pdf task`、`pdf submission`）可使用：
+支持批量选择的命令（`task show`、`feedback list`、`pdf task`、`pdf submission`、`task resources`）可使用：
 
 - 重复参数：`--abbr P1 --abbr D4`
 - 逗号参数：`--abbr P1,D4`
@@ -486,6 +487,7 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
 | `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
+| `ontrack task resources --project-id <id> --abbr <abbr>` | 下载一个或多个 task 资源文件 | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads` |
 | `ontrack submission upload ...` | 预检或上传 submission | 默认 dry-run；`--confirm` 才单次 dispatch；可选 `--trigger`、`--comment` |
 | `ontrack submission upload-new-files ...` | 预检或追加 evidence 文件 | 必须先观察到 existing submission；默认 dry-run；`--confirm` 才单次 dispatch |
 
@@ -831,6 +833,7 @@ bun run smoke:real -- --project-id 87 --abbr D4
 - `feedback list`
 - `pdf task`
 - `pdf submission`
+- `task resources`
 - `watch`
 - `feedback watch`
 

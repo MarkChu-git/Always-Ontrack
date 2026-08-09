@@ -1040,6 +1040,22 @@ export function buildPdfFilename(
   return `${safeUnit}_${safeTask}_${type}.pdf`;
 }
 
+/**
+ * Build a stable task-resource download filename.
+ * Uploaded resources arrive as a ZIP, but linked content resources keep their
+ * original file type, so the extension comes from the server response.
+ */
+export function buildTaskResourceFilename(
+  unitCode: string | undefined,
+  abbr: string | undefined,
+  extension: string = '.zip',
+): string {
+  const safeUnit = sanitizeFilenamePart(unitCode, 'unit');
+  const safeTask = sanitizeFilenamePart(abbr, 'task');
+  const safeExt = /^\.[A-Za-z0-9]{1,10}$/.test(extension) ? extension : '.zip';
+  return `${safeUnit}_${safeTask}_resources${safeExt}`;
+}
+
 /** Resolve download directory from user override or default location. */
 export function resolveDownloadDir(outDir?: string, cwd: string = process.cwd()): string {
   const target = outDir?.trim() ? outDir : DEFAULT_DOWNLOAD_DIR;

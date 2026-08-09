@@ -136,6 +136,14 @@ export interface DownloadResult {
   contentDisposition?: string;
 }
 
+/** Raised when OnTrack returns a successful HTTP response without the requested file. */
+export class UnavailableDownloadError extends Error {
+  constructor() {
+    super('Requested download is not available.');
+    this.name = 'UnavailableDownloadError';
+  }
+}
+
 /** Probe response payload used by `discover --probe`. */
 export interface ProbeResult {
   endpoint: string;
@@ -203,12 +211,83 @@ async function requestBinary(
     throw new OnTrackHttpError(response.status, buildErrorMessage(response));
   }
 
+  // OnTrack's stream_file caps responses at 10 MB and answers large files with
+  // 206 chunks; saving the first chunk alone would silently truncate the file.
+  if (response.status === 206) {
+    return readRangedDownload(url, init, response);
+  }
+
   const arrayBuffer = await response.arrayBuffer();
   return {
     buffer: Buffer.from(arrayBuffer),
     contentType: response.headers.get('content-type') || 'application/octet-stream',
     contentDisposition: response.headers.get('content-disposition') || undefined,
   };
+}
+
+/** Parse a `Content-Range: bytes start-end/total` header from a 206 response. */
+function parseContentRange(
+  value: string | null,
+): { start: number; end: number; total: number } | null {
+  const match = value?.match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+  if (!match) {
+    return null;
+  }
+  return { start: Number(match[1]), end: Number(match[2]), total: Number(match[3]) };
+}
+
+/** Reassemble a full download from OnTrack's 10 MB-capped 206 range responses. */
+async function readRangedDownload(
+  url: string,
+  init: RequestInit,
+  firstResponse: Response,
+): Promise<DownloadResult> {
+  const firstRange = parseContentRange(firstResponse.headers.get('content-range'));
+  if (!firstRange || firstRange.start !== 0) {
+    throw new Error('Remote returned a partial download without a valid Content-Range header.');
+  }
+
+  const chunks: Buffer[] = [Buffer.from(await firstResponse.arrayBuffer())];
+  let received = firstRange.end + 1;
+  while (received < firstRange.total) {
+    const headers = new Headers(init.headers);
+    headers.set('Range', `bytes=${received}-`);
+    const next = await fetch(url, { ...init, headers });
+    if (!next.ok) {
+      throw new OnTrackHttpError(next.status, buildErrorMessage(next));
+    }
+    const range = parseContentRange(next.headers.get('content-range'));
+    if (!range || range.start !== received || range.total !== firstRange.total || range.end < received) {
+      throw new Error('Remote returned an inconsistent range during a large download.');
+    }
+    chunks.push(Buffer.from(await next.arrayBuffer()));
+    received = range.end + 1;
+  }
+
+  return {
+    buffer: Buffer.concat(chunks),
+    contentType: firstResponse.headers.get('content-type') || 'application/octet-stream',
+    contentDisposition: firstResponse.headers.get('content-disposition') || undefined,
+  };
+}
+
+/** Extract the filename token from a Content-Disposition header (quoted or plain). */
+export function contentDispositionFilename(disposition?: string): string | undefined {
+  const match = disposition?.match(/(?:^|;)\s*filename\s*=\s*(?:"([^"]+)"|([^\s;]+))/i);
+  return match?.[1] ?? match?.[2] ?? undefined;
+}
+
+/** Reject OnTrack's HTTP-200 placeholders when the requested file is missing or still processing. */
+function requireAvailableDownload(download: DownloadResult): DownloadResult {
+  const disposition = download.contentDisposition ?? '';
+  // The server only ever serves FileNotFound.pdf / AwaitingProcessing.pdf placeholders,
+  // even from the ZIP-oriented task_resources endpoint.
+  const placeholder =
+    /(?:^|;)\s*filename\*?\s*=\s*(?:UTF-8'[^']*')?["']?(?:FileNotFound|AwaitingProcessing)\.pdf["']?(?:\s*;|$)/i;
+  if (placeholder.test(disposition)) {
+    throw new UnavailableDownloadError();
+  }
+  return download;
 }
 
 /** Join path with API base URL while avoiding duplicate slashes. */
@@ -561,12 +640,12 @@ export class OnTrackApiClient {
     });
   }
 
-  /** Persist planner extension values without inferring their schema. */
+  /** Request a planner extension; the server contract is an integer week count. */
   updateTaskPlan(
     session: SessionData,
     projectId: number,
     taskDefId: number,
-    extensions: Record<string, unknown>,
+    extensionWeeks: number,
   ): Promise<unknown> {
     return requestJson(
       withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/plan`),
@@ -577,7 +656,7 @@ export class OnTrackApiClient {
           'Content-Type': 'application/json',
           ...authHeaders(this.activeSession(session)),
         },
-        body: JSON.stringify({ extensions }),
+        body: JSON.stringify({ extensions: extensionWeeks }),
       },
     );
   }
@@ -599,7 +678,36 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
-    );
+    ).then(requireAvailableDownload);
+  }
+
+  /**
+   * Download the resources attached to a task definition.
+   * Uploaded resources arrive as a ZIP archive; linked content resources keep
+   * their original file type. The endpoint always responds as an attachment,
+   * so no as_attachment parameter exists for it.
+   */
+  downloadTaskResources(
+    session: SessionData,
+    unitId: number,
+    taskDefId: number,
+  ): Promise<DownloadResult> {
+    return requestBinary(
+      withApiPath(
+        this.baseUrl,
+        `units/${unitId}/task_definitions/${taskDefId}/task_resources.json`,
+      ),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/zip, application/octet-stream, */*',
+          ...authHeaders(this.activeSession(session)),
+        },
+      },
+      0,
+      DEFAULT_RETRY_ATTEMPTS,
+      this.authRefresh(session),
+    ).then(requireAvailableDownload);
   }
 
   /** Download submission snapshot PDF. */
@@ -623,7 +731,7 @@ export class OnTrackApiClient {
       0,
       DEFAULT_RETRY_ATTEMPTS,
       this.authRefresh(session),
-    );
+    ).then(requireAvailableDownload);
   }
 
   /** Lightweight GET probe used by discovery tooling to validate endpoint access. */

@@ -1,6 +1,6 @@
 import { afterEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { OnTrackApiClient } from '../src/lib/api.js';
+import { contentDispositionFilename, OnTrackApiClient } from '../src/lib/api.js';
 import { OnTrackHttpError } from '../src/lib/auth.js';
 import type { SessionData } from '../src/lib/types.js';
 
@@ -208,6 +208,161 @@ test('downloadTaskPdf returns binary payload', async () => {
   assert.deepEqual([...result.buffer], [0x25, 0x50, 0x44, 0x46]);
 });
 
+test('downloadTaskPdf rejects OnTrack file-not-found placeholder downloads', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => {
+    return new Response(Uint8Array.from([0x25, 0x50, 0x44, 0x46]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': 'attachment; filename=FileNotFound.pdf',
+      },
+    });
+  });
+
+  await assert.rejects(
+    () => client.downloadTaskPdf(session, 55, 501),
+    /Requested download is not available/,
+  );
+});
+
+test('downloadSubmissionPdf rejects OnTrack file-not-found placeholder downloads', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => {
+    return new Response(Uint8Array.from([0x25, 0x50, 0x44, 0x46]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        "content-disposition": "attachment; filename*=UTF-8'en'FileNotFound.pdf",
+      },
+    });
+  });
+
+  await assert.rejects(
+    () => client.downloadSubmissionPdf(session, 101, 501),
+    /Requested download is not available/,
+  );
+});
+
+test('downloadTaskResources returns the task resource archive', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let requestedUrl = '';
+  mockFetch(async (input) => {
+    requestedUrl = String(input);
+    return new Response(Uint8Array.from([0x50, 0x4b, 0x03, 0x04]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/zip',
+        'content-disposition': 'attachment; filename=P1-resources.zip',
+      },
+    });
+  });
+
+  const result = await client.downloadTaskResources(session, 55, 501);
+  assert.ok(requestedUrl.endsWith('/units/55/task_definitions/501/task_resources.json'));
+  assert.equal(result.contentType, 'application/zip');
+  assert.deepEqual([...result.buffer], [0x50, 0x4b, 0x03, 0x04]);
+});
+
+test('downloadSubmissionPdf rejects the awaiting-processing placeholder', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => {
+    return new Response(Uint8Array.from([0x25, 0x50, 0x44, 0x46]), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': 'attachment; filename=AwaitingProcessing.pdf',
+      },
+    });
+  });
+
+  await assert.rejects(
+    () => client.downloadSubmissionPdf(session, 101, 501),
+    /Requested download is not available/,
+  );
+});
+
+test('binary downloads reassemble large files from 206 range chunks', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const total = Uint8Array.from({ length: 30 }, (_, index) => index);
+  const rangeRequests: string[] = [];
+  mockFetch(async (input, init) => {
+    void input;
+    const rangeHeader = new Headers(init?.headers).get('range');
+    if (!rangeHeader) {
+      return new Response(total.slice(0, 10), {
+        status: 206,
+        headers: {
+          'content-type': 'application/pdf',
+          'content-range': 'bytes 0-9/30',
+          'content-disposition': 'attachment; filename=big.pdf',
+        },
+      });
+    }
+    rangeRequests.push(rangeHeader);
+    const start = Number(rangeHeader.replace('bytes=', '').split('-')[0]);
+    const end = Math.min(start + 9, 29);
+    return new Response(total.slice(start, end + 1), {
+      status: 206,
+      headers: {
+        'content-type': 'application/pdf',
+        'content-range': `bytes ${start}-${end}/30`,
+      },
+    });
+  });
+
+  const result = await client.downloadTaskPdf(session, 55, 501);
+  assert.deepEqual([...result.buffer], [...total]);
+  assert.deepEqual(rangeRequests, ['bytes=10-', 'bytes=20-']);
+  assert.equal(result.contentDisposition, 'attachment; filename=big.pdf');
+});
+
+test('binary downloads reject inconsistent range continuations', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let call = 0;
+  mockFetch(async () => {
+    call += 1;
+    if (call === 1) {
+      return new Response(Uint8Array.from([1, 2, 3]), {
+        status: 206,
+        headers: { 'content-range': 'bytes 0-2/10' },
+      });
+    }
+    return new Response(Uint8Array.from([4, 5, 6]), {
+      status: 206,
+      headers: { 'content-range': 'bytes 0-2/10' },
+    });
+  });
+
+  await assert.rejects(
+    () => client.downloadTaskPdf(session, 55, 501),
+    /inconsistent range/,
+  );
+});
+
+test('binary downloads reject partial responses without a content range', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => new Response(Uint8Array.from([1, 2, 3]), { status: 206 }));
+
+  await assert.rejects(
+    () => client.downloadTaskPdf(session, 55, 501),
+    /Content-Range/,
+  );
+});
+
+test('contentDispositionFilename parses quoted and plain filename tokens', () => {
+  assert.equal(
+    contentDispositionFilename('attachment; filename="chapter 1.pdf"'),
+    'chapter 1.pdf',
+  );
+  assert.equal(
+    contentDispositionFilename('attachment; filename=P1-resources.zip'),
+    'P1-resources.zip',
+  );
+  assert.equal(contentDispositionFilename('attachment'), undefined);
+  assert.equal(contentDispositionFilename(undefined), undefined);
+});
+
 test('downloadSubmissionPdf surfaces non-200 responses', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   mockFetch(async () => {
@@ -359,13 +514,13 @@ test('reset and plan mutation Interfaces preserve exact bodies', async () => {
   });
 
   await client.resetProjectTargetDates(session, 101);
-  await client.updateTaskPlan(session, 101, 501, { time_extension_days: 3 });
+  await client.updateTaskPlan(session, 101, 501, 3);
   assert.ok(calls[0].url.endsWith('/projects/101/reset_target_dates'));
   assert.equal(calls[0].method, 'PUT');
   assert.equal(calls[0].body, undefined);
   assert.ok(calls[1].url.endsWith('/projects/101/task_def_id/501/plan'));
   assert.equal(calls[1].method, 'PUT');
-  assert.equal(calls[1].body, JSON.stringify({ extensions: { time_extension_days: 3 } }));
+  assert.equal(calls[1].body, JSON.stringify({ extensions: 3 }));
 });
 
 test('signOut uses the observed remember=false query contract', async () => {

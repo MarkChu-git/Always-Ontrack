@@ -67,6 +67,7 @@ engine.
 - File operations
   - `pdf task`
   - `pdf submission`
+  - `task resources`
   - `submission upload`
   - `submission upload-new-files`
 - Engineering and diagnostics
@@ -357,7 +358,7 @@ or task-definition id, warns on stderr, and rejects identity collisions.
 
 ### Batch task selectors
 
-Batch-capable commands (`task show`, `feedback list`, `pdf task`, `pdf submission`) support:
+Batch-capable commands (`task show`, `feedback list`, `pdf task`, `pdf submission`, `task resources`) support:
 
 - repeated selectors: `--abbr P1 --abbr D4`
 - comma selectors: `--abbr P1,D4`
@@ -508,6 +509,7 @@ ontrack logout
 | --- | --- | --- |
 | `ontrack pdf task --project-id <id> --abbr <abbr>` | Download task PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
 | `ontrack pdf submission --project-id <id> --abbr <abbr>` | Download submission PDF(s) | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
+| `ontrack task resources --project-id <id> --abbr <abbr>` | Download task resource files | Supports repeated/comma selectors and `--all-tasks`; saves to `./downloads` by default |
 | `ontrack submission upload ...` | Preview or upload a submission | Dry-run by default; `--confirm` dispatches once; supports `--trigger` and `--comment` |
 | `ontrack submission upload-new-files ...` | Preview or upload extra evidence files | Requires an observed existing submission; dry-run by default; `--confirm` dispatches once |
 
@@ -888,6 +890,7 @@ This script verifies:
 - `feedback list`
 - `pdf task`
 - `pdf submission`
+- `task resources`
 - `watch`
 - `feedback watch`
 

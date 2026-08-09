@@ -3,9 +3,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, extname, join, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
-import { OnTrackApiClient } from './lib/api.js';
+import {
+  contentDispositionFilename,
+  OnTrackApiClient,
+  UnavailableDownloadError,
+} from './lib/api.js';
 import {
   createSessionFromAccessToken,
   OnTrackHttpError,
@@ -46,6 +50,7 @@ import {
 } from './lib/submission-lifecycle.js';
 import {
   buildPdfFilename,
+  buildTaskResourceFilename,
   diffWatchStates,
   filterTasksByStatus,
   feedbackIdentity,
@@ -187,6 +192,7 @@ Usage:
   ontrack inbox [--unit-id ID] [--status STATUS] [--json]
   ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
+  ontrack task resources --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--json]
   ontrack plan show --project-id ID [--include-beyond-target] [--json]
   ontrack plan set-dates --project-id ID (--task-definition-id ID | --abbr ABBR) --start YYYY-MM-DD --target YYYY-MM-DD [--confirm] [--idempotency-key KEY] [--json]
   ontrack plan reset --project-id ID [--confirm] [--idempotency-key KEY] [--json]
@@ -210,7 +216,7 @@ Notes:
   - Use --show-browser to force visible browser mode for debugging; --hide-browser keeps explicit headless mode.
   - If Chromium runtime is missing, install it manually through a reviewed dependency-management workflow.
   - Manual redirect URL paste is backup-only, used when guided SSO falls back or when --redirect-url is provided.
-  - PDF commands save files into ./downloads by default.
+  - PDF and task-resource downloads save files into ./downloads by default.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
   - Planner and submission writes are dry-runs unless --confirm is supplied.
@@ -997,7 +1003,7 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         { allowBatch: true, allowAllTasks: true },
       );
       const outDir = await promptGuidedOutputDirectory();
-      await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
+      await handleFileDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'task');
       return;
     }
     case 12: {
@@ -1007,7 +1013,7 @@ async function runWelcomeAction(actionId: number): Promise<void> {
         { allowBatch: true, allowAllTasks: true },
       );
       const outDir = await promptGuidedOutputDirectory();
-      await handlePdfDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
+      await handleFileDownload([...selector, ...optionalFlagArgs('--out-dir', outDir)], 'submission');
       return;
     }
     case 13: {
@@ -3605,8 +3611,11 @@ async function handleFeedbackWatch(args: string[]): Promise<void> {
   }
 }
 
-/** Download task/submission PDF for one or many selected tasks. */
-async function handlePdfDownload(args: string[], type: 'task' | 'submission'): Promise<void> {
+/** Download task PDFs, submission PDFs, or task-resource archives for one or many selected tasks. */
+async function handleFileDownload(
+  args: string[],
+  type: 'task' | 'submission' | 'resources',
+): Promise<void> {
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
   const selector = parseTaskBatchSelectorArgs(args);
@@ -3627,53 +3636,79 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
     taskDefId: number;
     filePath: string;
   }> = [];
+  const unavailable: Array<{
+    task: string;
+    unit: string;
+    projectId: number;
+    taskDefinitionId: number;
+    taskInstanceId?: number;
+    taskId: number;
+    taskDefId: number;
+  }> = [];
 
   for (const resolved of resolvedItems) {
-    if (type === 'submission') {
-      const details = parseSubmissionDetails(
-        await api.getSubmissionDetails(
-          session,
-          resolved.project.id,
-          resolved.taskDefId,
-        ),
-      );
-      if (details.pdfState === 'processing') {
-        throw new Error(
-          `Submission PDF for ${resolved.abbr} is still processing. Retry after OnTrack finishes generating it.`,
-        );
-      }
-      if (details.pdfState === 'unavailable') {
-        throw new Error(`Submission PDF for ${resolved.abbr} is not available.`);
-      }
-    }
-
-    // Call type-specific endpoint but normalize naming/output behavior downstream.
-    const download =
-      type === 'task'
-        ? await api.downloadTaskPdf(
+    try {
+      if (type === 'submission') {
+        const details = parseSubmissionDetails(
+          await api.getSubmissionDetails(
             session,
-            resolved.unitId ??
-              (() => {
-                throw new Error('Unit id not found for task PDF download.');
-              })(),
+            resolved.project.id,
             resolved.taskDefId,
-          )
-        : await api.downloadSubmissionPdf(session, resolved.project.id, resolved.taskDefId);
+          ),
+        );
+        if (details.pdfState === 'processing') {
+          throw new Error(
+            `Submission PDF for ${resolved.abbr} is still processing. Retry after OnTrack finishes generating it.`,
+          );
+        }
+        if (details.pdfState === 'unavailable') {
+          throw new Error(`Submission PDF for ${resolved.abbr} is not available.`);
+        }
+      }
 
-    // Persist with deterministic filename format for easy scripting and lookup.
-    const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, type);
-    const filePath = await writePdfFile(download.buffer, filename, outDir);
-    downloads.push({
-      task: resolved.abbr,
-      unit: resolved.unitCode ?? '-',
-      projectId: resolved.project.id,
-      ...taskIdentityJson(resolved),
-      filePath,
-    });
+      const unitId =
+        resolved.unitId ??
+        (() => {
+          throw new Error('Unit id not found for task download.');
+        })();
+      const download =
+        type === 'task'
+          ? await api.downloadTaskPdf(session, unitId, resolved.taskDefId)
+          : type === 'resources'
+            ? await api.downloadTaskResources(session, unitId, resolved.taskDefId)
+            : await api.downloadSubmissionPdf(session, resolved.project.id, resolved.taskDefId);
+
+      const filename =
+        type === 'resources'
+          ? buildTaskResourceFilename(
+              resolved.unitCode,
+              resolved.abbr,
+              extname(contentDispositionFilename(download.contentDisposition) ?? '') || '.zip',
+            )
+          : buildPdfFilename(resolved.unitCode, resolved.abbr, type);
+      const filePath = await writePdfFile(download.buffer, filename, outDir);
+      downloads.push({
+        task: resolved.abbr,
+        unit: resolved.unitCode ?? '-',
+        projectId: resolved.project.id,
+        ...taskIdentityJson(resolved),
+        filePath,
+      });
+    } catch (error) {
+      if (!(error instanceof UnavailableDownloadError)) {
+        throw error;
+      }
+      unavailable.push({
+        task: resolved.abbr,
+        unit: resolved.unitCode ?? '-',
+        projectId: resolved.project.id,
+        ...taskIdentityJson(resolved),
+      });
+    }
   }
 
   if (asJson) {
-    if (downloads.length === 1) {
+    if (downloads.length === 1 && unavailable.length === 0) {
       printJson(downloads[0]);
       return;
     }
@@ -3681,26 +3716,40 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
       type,
       count: downloads.length,
       downloads,
+      unavailable,
     });
     return;
   }
 
+  const label = type === 'resources' ? 'task resource archive' : `${type} PDF`;
   if (downloads.length === 1) {
-    console.log(`Saved ${type} PDF to ${downloads[0].filePath}`);
-    return;
+    console.log(`Saved ${label} to ${downloads[0].filePath}`);
+  } else if (downloads.length > 1) {
+    console.log(`Saved ${downloads.length} ${label} file(s).`);
+    printTable(
+      downloads.map((item) => ({
+        unit: item.unit,
+        task: item.task,
+        projectId: item.projectId,
+        taskDefinitionId: item.taskDefinitionId,
+        taskInstanceId: item.taskInstanceId ?? '-',
+        file: item.filePath,
+      })),
+    );
   }
 
-  console.log(`Saved ${downloads.length} ${type} PDF file(s).`);
-  printTable(
-    downloads.map((item) => ({
-      unit: item.unit,
-      task: item.task,
-      projectId: item.projectId,
-      taskDefinitionId: item.taskDefinitionId,
-      taskInstanceId: item.taskInstanceId ?? '-',
-      file: item.filePath,
-    })),
-  );
+  if (unavailable.length > 0) {
+    console.log(`Skipped ${unavailable.length} unavailable ${label} file(s).`);
+    printTable(
+      unavailable.map((item) => ({
+        unit: item.unit,
+        task: item.task,
+        projectId: item.projectId,
+        taskDefinitionId: item.taskDefinitionId,
+        taskInstanceId: item.taskInstanceId ?? '-',
+      })),
+    );
+  }
 }
 
 /** Preview or dispatch a submission with requirement-aware file key mapping. */
@@ -4223,6 +4272,10 @@ async function handleTaskCommand(args: string[]): Promise<void> {
     await handleTaskPrerequisites(rest);
     return;
   }
+  if (subcommand === 'resources') {
+    await handleFileDownload(rest, 'resources');
+    return;
+  }
   throw new Error(`Unknown task subcommand: ${subcommand || '(missing)'}`);
 }
 
@@ -4246,11 +4299,11 @@ async function handlePdfCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
   const rest = args.slice(1);
   if (subcommand === 'task') {
-    await handlePdfDownload(rest, 'task');
+    await handleFileDownload(rest, 'task');
     return;
   }
   if (subcommand === 'submission') {
-    await handlePdfDownload(rest, 'submission');
+    await handleFileDownload(rest, 'submission');
     return;
   }
   throw new Error(`Unknown pdf subcommand: ${subcommand || '(missing)'}`);
