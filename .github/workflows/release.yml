@@ -201,7 +201,7 @@ jobs:
             exit 1
           fi
           npm --version
-          npm publish "artifacts/$TARBALL" --provenance
+          npm publish "./artifacts/$TARBALL" --provenance
 
   verify-registry-and-publish-release:
     name: Verify registry and publish approved GitHub Release
