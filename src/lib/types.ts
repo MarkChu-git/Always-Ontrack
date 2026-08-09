@@ -45,6 +45,16 @@ export interface SignInResponse {
   user: OnTrackUser;
 }
 
+/** Refresh-cookie material captured from a verified sign-in response. */
+export interface RefreshCookieMaterial {
+  // Cookie-bearing account username.
+  username: string;
+  // Refresh token cookie value (credential material, never logged).
+  refreshToken: string;
+  // Absolute cookie expiry when the server advertised one.
+  expiresAt?: string;
+}
+
 /** Verified `/auth/access-token` response shape captured from production. */
 export interface AccessTokenResponse {
   auth_token: string;

@@ -31,6 +31,7 @@ import {
   clearAllBrowserSessionState,
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
+  persistRefreshCookie,
 } from "./lib/auto-login.js";
 import type { MfaMethodOption } from "./lib/auto-login.js";
 import type { LoginCredentials } from './lib/auto-login.js';
@@ -151,6 +152,7 @@ import type {
   InboxTask,
   ProjectSummary,
   SessionData,
+  SignInResponse,
   SubmissionTrigger,
   TaskDefinitionSummary,
   TaskSelector,
@@ -260,6 +262,27 @@ function sessionFromAccessTokenCapture(
     },
     savedAt,
   );
+}
+
+/**
+ * Exchange a legacy captured credential through the observed `/auth` contract
+ * and persist any refresh cookie the server issues for the persistent session.
+ */
+async function signInAndPersistRefreshCookie(
+  api: OnTrackApiClient,
+  payload: { auth_token: string; username: string; remember: boolean },
+): Promise<SignInResponse> {
+  const result = await api.signInWithCookieCapture(payload);
+  if (result.refreshCookie) {
+    try {
+      persistRefreshCookie(result.refreshCookie, {
+        targetOrigin: new URL(api.base).origin,
+      });
+    } catch {
+      // Refresh-cookie persistence is best effort; the session itself is valid.
+    }
+  }
+  return result.response;
 }
 
 /** Print command help and high-level behavioral notes. */
@@ -2031,7 +2054,7 @@ async function handleLogin(args: string[]): Promise<void> {
                   : await (async (): Promise<SessionData> => {
                       // Legacy URL/request captures still require the observed
                       // `/auth` exchange before they become an API session.
-                      const response = await api.signIn({
+                      const response = await signInAndPersistRefreshCookie(api, {
                         auth_token: reused.authToken,
                         username: reused.username,
                         remember: true,
@@ -2318,7 +2341,7 @@ async function handleLogin(args: string[]): Promise<void> {
       : await (async (): Promise<SessionData> => {
           // Manual/legacy captures use the older exchange contract. Browser
           // access-token responses are already API credentials and never come here.
-          const response = await api.signIn({
+          const response = await signInAndPersistRefreshCookie(api, {
             auth_token: authToken,
             username,
             remember: true,

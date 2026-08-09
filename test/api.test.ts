@@ -981,3 +981,108 @@ test('signOut uses the observed remember=false query contract', async () => {
 
   await client.signOut(session);
 });
+
+test('signInWithCookieCapture retains the issued refresh cookie pair', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let capturedBody = '';
+  mockFetch(async (input, init) => {
+    assert.equal(String(input), 'https://ontrack.infotech.monash.edu/api/auth');
+    capturedBody = String(init?.body ?? '');
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.append(
+      'set-cookie',
+      'refresh_token=refresh-secret; Path=/api/auth; Expires=Wed, 19 Aug 2026 10:00:00 GMT; Secure; HttpOnly; SameSite=Lax',
+    );
+    headers.append(
+      'set-cookie',
+      'username=student1; Path=/api/auth; Expires=Wed, 19 Aug 2026 10:00:00 GMT; Secure; HttpOnly; SameSite=Lax',
+    );
+    return new Response(
+      JSON.stringify({
+        auth_token: 'fresh-secret',
+        auth_token_expiry: '2026-08-12T10:10:00.000Z',
+        user: { username: 'student1' },
+      }),
+      { status: 201, headers },
+    );
+  });
+
+  const result = await client.signInWithCookieCapture({
+    auth_token: 'login-token',
+    username: 'student1',
+    remember: true,
+  });
+  assert.equal(JSON.parse(capturedBody).remember, true);
+  assert.equal(result.response.auth_token, 'fresh-secret');
+  assert.deepEqual(result.refreshCookie, {
+    username: 'student1',
+    refreshToken: 'refresh-secret',
+    expiresAt: '2026-08-19T10:00:00.000Z',
+  });
+});
+
+test('signIn still resolves the plain response body', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(async () => {
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.append('set-cookie', 'refresh_token=refresh-secret; Path=/api/auth; HttpOnly');
+    headers.append('set-cookie', 'username=student1; Path=/api/auth; HttpOnly');
+    return new Response(
+      JSON.stringify({ auth_token: 'fresh-secret', user: { username: 'student1' } }),
+      { status: 201, headers },
+    );
+  });
+
+  const response = await client.signIn({ auth_token: 't', username: 'student1' });
+  assert.equal(response.auth_token, 'fresh-secret');
+  assert.equal('refreshCookie' in response, false);
+});
+
+test('refreshAccessToken sends the stored cookie pair and parses the new token', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let cookieHeader = '';
+  mockFetch(async (input, init) => {
+    assert.equal(String(input), 'https://ontrack.infotech.monash.edu/api/auth/access-token');
+    assert.equal(init?.method, 'POST');
+    cookieHeader = new Headers(init?.headers).get('cookie') ?? '';
+    return new Response(
+      JSON.stringify({
+        auth_token: 'fresh-secret',
+        auth_token_expiry: '2026-08-12T10:10:00.000Z',
+        user: { username: 'student1' },
+      }),
+      { status: 201, headers: { 'content-type': 'application/json' } },
+    );
+  });
+
+  const renewed = await client.refreshAccessToken({
+    username: 'student1',
+    refreshToken: 'refresh-secret',
+  });
+  assert.equal(cookieHeader, 'refresh_token=refresh-secret; username=student1');
+  assert.equal(renewed?.auth_token, 'fresh-secret');
+});
+
+test('refreshAccessToken collapses every decline shape to null', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  // Server answers 201 with an empty body when the cookie is declined.
+  mockFetch(async () => new Response('', { status: 201 }));
+  assert.equal(
+    await client.refreshAccessToken({ username: 'student1', refreshToken: 'stale' }),
+    null,
+  );
+
+  mockFetch(async () => new Response('nope', { status: 419 }));
+  assert.equal(
+    await client.refreshAccessToken({ username: 'student1', refreshToken: 'stale' }),
+    null,
+  );
+
+  mockFetch(async () => {
+    throw new Error('connection reset');
+  });
+  assert.equal(
+    await client.refreshAccessToken({ username: 'student1', refreshToken: 'stale' }),
+    null,
+  );
+});

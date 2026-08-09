@@ -8,10 +8,13 @@ import { createSessionFromAccessToken, sessionUsability } from './auth.js';
 import {
   captureCredentialsFromStoredBrowserSession,
   captureSsoCredentials,
+  persistRefreshCookie,
+  readStoredRefreshCookie,
   type AutoLoginOptions,
   type LoginCredentials,
 } from './auto-login.js';
 import { OnTrackApiClient } from './api.js';
+import type { CapturedSignIn } from './api.js';
 import {
   loadSession,
   saveSession,
@@ -20,6 +23,7 @@ import {
 import { normalizeBaseUrl } from './utils.js';
 import type {
   AuthMethodResponse,
+  RefreshCookieMaterial,
   SessionData,
   SignInResponse,
 } from './types.js';
@@ -40,7 +44,13 @@ export interface OnTrackAuthBrokerDependencies {
   exchangeLegacyCredential(
     baseUrl: string,
     captured: LoginCredentials,
-  ): Promise<SignInResponse>;
+  ): Promise<CapturedSignIn>;
+  readStoredRefreshCookie(baseUrl: string): RefreshCookieMaterial | null;
+  httpRefreshAccessToken(
+    baseUrl: string,
+    cookie: RefreshCookieMaterial,
+  ): Promise<SignInResponse | null>;
+  persistRefreshCookie(cookie: RefreshCookieMaterial, baseUrl: string): void;
   now(): Date;
 }
 
@@ -67,11 +77,17 @@ function defaultDependencies(): OnTrackAuthBrokerDependencies {
       captureCredentialsFromStoredBrowserSession(options),
     captureInteractiveSession: (options) => captureSsoCredentials(options),
     exchangeLegacyCredential: (baseUrl, captured) =>
-      new OnTrackApiClient(baseUrl).signIn({
+      new OnTrackApiClient(baseUrl).signInWithCookieCapture({
         auth_token: captured.authToken,
         username: captured.username,
         remember: true,
       }),
+    readStoredRefreshCookie: (baseUrl) =>
+      readStoredRefreshCookie({ targetOrigin: new URL(baseUrl).origin }),
+    httpRefreshAccessToken: (baseUrl, cookie) =>
+      new OnTrackApiClient(baseUrl).refreshAccessToken(cookie),
+    persistRefreshCookie: (cookie, baseUrl) =>
+      persistRefreshCookie(cookie, { targetOrigin: new URL(baseUrl).origin }),
     now: () => new Date(),
   };
 }
@@ -98,7 +114,15 @@ async function sessionFromCapture(
     );
   }
 
-  const response = await dependencies.exchangeLegacyCredential(baseUrl, captured);
+  const exchange = await dependencies.exchangeLegacyCredential(baseUrl, captured);
+  if (exchange.refreshCookie) {
+    try {
+      dependencies.persistRefreshCookie(exchange.refreshCookie, baseUrl);
+    } catch {
+      // Refresh-cookie persistence is best effort; the session itself is valid.
+    }
+  }
+  const response = exchange.response;
   return {
     baseUrl,
     username: captured.username,
@@ -138,6 +162,32 @@ export function createOnTrackAuthBroker(
   const refresh = async (interactive: boolean): Promise<SessionData | null> => {
     const current = await loadScopedSession();
     const baseUrl = targetBaseUrl;
+
+    // A stored refresh cookie mints a fresh access token over plain HTTP,
+    // without launching a browser at all.
+    if (!interactive) {
+      const cookie = dependencies.readStoredRefreshCookie(baseUrl);
+      if (cookie) {
+        try {
+          const renewed = await dependencies.httpRefreshAccessToken(baseUrl, cookie);
+          if (renewed?.auth_token && renewed.auth_token_expiry) {
+            return createSessionFromAccessToken(
+              baseUrl,
+              renewed.user?.username ?? cookie.username,
+              {
+                auth_token: renewed.auth_token,
+                auth_token_expiry: renewed.auth_token_expiry,
+                user: renewed.user ?? { username: cookie.username },
+              },
+              dependencies.now().toISOString(),
+            );
+          }
+        } catch {
+          // Fall through to the browser-based silent capture below.
+        }
+      }
+    }
+
     let method: AuthMethodResponse;
     try {
       method = await dependencies.getAuthMethod(baseUrl);
