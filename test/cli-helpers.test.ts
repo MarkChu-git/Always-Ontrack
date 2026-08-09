@@ -266,6 +266,15 @@ test('buildTaskResourceFilename follows the OnTrack student download naming cont
   );
   const bounded = buildTaskResourceFilename('U'.repeat(500), 'T'.repeat(500));
   assert.equal(bounded.length <= 255, true);
+  // Linked content resources keep the server-declared extension.
+  assert.equal(
+    buildTaskResourceFilename('FIT2004', 'T1', '.ipynb'),
+    'FIT2004-T1-TaskResources.ipynb',
+  );
+  assert.equal(
+    buildTaskResourceFilename('FIT2004', 'T1', 'not-an-ext'),
+    'FIT2004-T1-TaskResources.zip',
+  );
   assert.equal(
     buildTaskResourceFilename('FIT\u001b[31m', 'P1').includes('\u001b'),
     false,

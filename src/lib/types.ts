@@ -102,12 +102,12 @@ export interface UnitSummary {
 
 /** File requirement metadata for upload-capable tasks. */
 export interface TaskUploadRequirement {
-  // Multipart key expected by upload endpoint.
+  // Multipart key expected by upload endpoint (file0, file1, ...).
   key?: string;
-  // UI/display label for requirement.
-  label?: string;
-  // Optional max file size metadata.
-  max_size?: number;
+  // Display name for requirement (server field; no `label` or per-file `max_size` exists).
+  name?: string;
+  // Requirement content category reported by the server (e.g. document, code).
+  type?: string;
   // Preserve unknown requirement metadata.
   [key: string]: unknown;
 }

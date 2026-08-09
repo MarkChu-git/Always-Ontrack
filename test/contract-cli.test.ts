@@ -445,7 +445,7 @@ test('task resources follow the production endpoint and write a safe JSON-descri
             : request.url === '/api/units/55'
               ? unitPayload()
               : null;
-      if (request.url === '/api/units/55/task_definitions/501/task_resources.json?as_attachment=true') {
+      if (request.url === '/api/units/55/task_definitions/501/task_resources.json') {
         response.writeHead(200, {
           'content-type': 'application/zip',
           'content-disposition': 'attachment; filename=FIT0001-P1-TaskResources.zip',

@@ -2195,7 +2195,7 @@ test("agent call task.resources downloads definition resources for an uninstanti
       }));
       return;
     }
-    if (request.url === "/api/units/55/task_definitions/501/task_resources.json?as_attachment=true") {
+    if (request.url === "/api/units/55/task_definitions/501/task_resources.json") {
       response.setHeader("content-type", "application/zip");
       response.setHeader(
         "content-disposition",

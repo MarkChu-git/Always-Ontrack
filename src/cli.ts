@@ -3,9 +3,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import {
+  contentDispositionFilename,
   InvalidDownloadFormatError,
   InvalidPdfDownloadError,
   InvalidJsonResponseError,
@@ -4363,7 +4364,11 @@ async function downloadTaskResourceArtifacts(
           summary: `Task resource batch exceeds ${MAX_TASK_RESOURCE_BATCH_BYTES} bytes; use a narrower selector.`,
         });
       }
-      const filename = buildTaskResourceFilename(resolved.unitCode, resolved.abbr);
+      const filename = buildTaskResourceFilename(
+        resolved.unitCode,
+        resolved.abbr,
+        extname(contentDispositionFilename(download.contentDisposition) ?? '') || '.zip',
+      );
       const filePath = await writeArtifactFile(download.buffer, filename, {
         root: process.cwd(),
         outDir: options.outDir,

@@ -1153,14 +1153,20 @@ export function buildPdfFilename(
   return `${safeUnit}_${safeTask}_${type}.pdf`;
 }
 
-/** Build the stable task-resource archive name used by the OnTrack student UI. */
+/**
+ * Build the stable task-resource download name used by the OnTrack student UI.
+ * Uploaded resources arrive as a ZIP, but linked content resources keep their
+ * original file type, so the extension comes from the server response.
+ */
 export function buildTaskResourceFilename(
   unitCode: string | undefined,
   abbr: string | undefined,
+  extension: string = '.zip',
 ): string {
   const safeUnit = sanitizeFilenamePart(unitCode, 'unit').slice(0, 80);
   const safeTask = sanitizeFilenamePart(abbr, 'task').slice(0, 80);
-  return `${safeUnit}-${safeTask}-TaskResources.zip`;
+  const safeExt = /^\.[A-Za-z0-9]{1,10}$/.test(extension) ? extension : '.zip';
+  return `${safeUnit}-${safeTask}-TaskResources${safeExt}`;
 }
 
 /** Resolve download directory from user override or default location. */

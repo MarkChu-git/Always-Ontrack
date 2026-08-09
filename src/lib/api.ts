@@ -324,6 +324,12 @@ async function requestBinary(
     throw new OnTrackHttpError(response.status, buildErrorMessage(response));
   }
 
+  // OnTrack's stream_file caps responses at 10 MB and answers large files with
+  // 206 chunks; saving the first chunk alone would silently truncate the file.
+  if (response.status === 206) {
+    return readRangedDownload(url, init, response);
+  }
+
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
     await response.body?.cancel().catch(() => undefined);
@@ -337,12 +343,81 @@ async function requestBinary(
   };
 }
 
-/** Reject OnTrack's HTTP-200 placeholder when a requested file has no backing data. */
+/** Parse a `Content-Range: bytes start-end/total` header from a 206 response. */
+function parseContentRange(
+  value: string | null,
+): { start: number; end: number; total: number } | null {
+  const match = value?.match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+  if (!match) {
+    return null;
+  }
+  return { start: Number(match[1]), end: Number(match[2]), total: Number(match[3]) };
+}
+
+/** Reassemble a full download from OnTrack's 10 MB-capped 206 range responses. */
+async function readRangedDownload(
+  url: string,
+  init: RequestInit,
+  firstResponse: Response,
+): Promise<DownloadResult> {
+  const firstRange = parseContentRange(firstResponse.headers.get('content-range'));
+  if (!firstRange || firstRange.start !== 0) {
+    throw new Error('Remote returned a partial download without a valid Content-Range header.');
+  }
+  if (firstRange.total > MAX_DOWNLOAD_BYTES) {
+    await firstResponse.body?.cancel().catch(() => undefined);
+    throw new OversizedBinaryResponseError(MAX_DOWNLOAD_BYTES);
+  }
+
+  const chunks: Buffer[] = [await readBoundedResponseBody(firstResponse.body, MAX_DOWNLOAD_BYTES)];
+  let received = firstRange.end + 1;
+  while (received < firstRange.total) {
+    const headers = new Headers(init.headers);
+    headers.set('Range', `bytes=${received}-`);
+    const next = await fetchOnTrack(url, { ...init, headers });
+    if (!next.ok) {
+      throw new OnTrackHttpError(next.status, buildErrorMessage(next));
+    }
+    const range = parseContentRange(next.headers.get('content-range'));
+    if (
+      !range ||
+      range.start !== received ||
+      range.total !== firstRange.total ||
+      range.end < received
+    ) {
+      throw new Error('Remote returned an inconsistent range during a large download.');
+    }
+    chunks.push(await readBoundedResponseBody(next.body, firstRange.total - received));
+    received = range.end + 1;
+  }
+
+  const buffer = Buffer.concat(chunks);
+  if (buffer.length !== firstRange.total) {
+    throw new Error('Remote returned fewer bytes than declared for a ranged download.');
+  }
+  return {
+    buffer,
+    contentType: firstResponse.headers.get('content-type') || 'application/octet-stream',
+    contentDisposition: firstResponse.headers.get('content-disposition') || undefined,
+  };
+}
+
+/** Extract the filename token from a Content-Disposition header (quoted or plain). */
+export function contentDispositionFilename(disposition?: string): string | undefined {
+  const match = disposition?.match(/(?:^|;)\s*filename\s*=\s*(?:"([^"]+)"|([^\s;]+))/i);
+  return match?.[1] ?? match?.[2] ?? undefined;
+}
+
+/**
+ * Reject OnTrack's HTTP-200 placeholders when the requested file is missing or
+ * still processing. The server only ever serves FileNotFound.pdf or
+ * AwaitingProcessing.pdf placeholders, even from the task_resources endpoint.
+ */
 function requireAvailableDownload(download: DownloadResult): DownloadResult {
   const disposition = download.contentDisposition ?? '';
-  const missingFile =
-    /(?:^|;)\s*filename\*?\s*=\s*(?:UTF-8'[^']*)?["']?FileNotFound\.(?:pdf|zip)["']?(?:\s*;|$)/i;
-  if (missingFile.test(disposition)) {
+  const placeholder =
+    /(?:^|;)\s*filename\*?\s*=\s*(?:UTF-8'[^']*)?["']?(?:FileNotFound|AwaitingProcessing)\.pdf["']?(?:\s*;|$)/i;
+  if (placeholder.test(disposition)) {
     throw new UnavailableDownloadError();
   }
   return download;
@@ -359,6 +434,24 @@ function requireZipDownload(download: DownloadResult): DownloadResult {
       (third === 0x07 && fourth === 0x08));
   if (!isZip) {
     throw new InvalidDownloadFormatError();
+  }
+  return download;
+}
+
+/**
+ * Validate a task-resource payload against the type declared by the server
+ * filename. Uploaded resources and extensionless payloads stay ZIP-validated;
+ * linked content resources keep their original file type, so a declared PDF is
+ * PDF-validated and other declared types pass through under their own names.
+ */
+function requireDeclaredResourceType(download: DownloadResult): DownloadResult {
+  const filename = contentDispositionFilename(download.contentDisposition);
+  const extension = filename?.match(/\.[A-Za-z0-9]{1,10}$/)?.[0]?.toLowerCase();
+  if (extension === undefined || extension === '.zip') {
+    return requireZipDownload(download);
+  }
+  if (extension === '.pdf') {
+    return requirePdfDownload(download);
   }
   return download;
 }
@@ -856,12 +949,12 @@ export class OnTrackApiClient {
     });
   }
 
-  /** Persist planner extension values without inferring their schema. */
+  /** Request a planner extension; the server contract is an integer week count. */
   updateTaskPlan(
     session: SessionData,
     projectId: number,
     taskDefId: number,
-    extensions: Record<string, unknown>,
+    extensionWeeks: number,
   ): Promise<unknown> {
     return requestJson(
       withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}/plan`),
@@ -872,7 +965,7 @@ export class OnTrackApiClient {
           'Content-Type': 'application/json',
           ...authHeaders(this.activeSession(session)),
         },
-        body: JSON.stringify({ extensions }),
+        body: JSON.stringify({ extensions: extensionWeeks }),
       },
     );
   }
@@ -920,7 +1013,12 @@ export class OnTrackApiClient {
     return this.requestTaskPdf(session, unitId, taskDefId);
   }
 
-  /** Download the ZIP archive of resources attached to a task definition. */
+  /**
+   * Download the resources attached to a task definition.
+   * Uploaded resources arrive as a ZIP archive; linked content resources keep
+   * their original file type. The endpoint always responds as an attachment,
+   * so no as_attachment parameter exists for it.
+   */
   downloadTaskResources(
     session: SessionData,
     unitId: number,
@@ -929,7 +1027,7 @@ export class OnTrackApiClient {
     return requestBinary(
       withApiPath(
         this.baseUrl,
-        `units/${unitId}/task_definitions/${taskDefId}/task_resources.json?as_attachment=true`,
+        `units/${unitId}/task_definitions/${taskDefId}/task_resources.json`,
       ),
       {
         method: 'GET',
@@ -943,7 +1041,7 @@ export class OnTrackApiClient {
       this.authRefresh(session),
     )
       .then(requireAvailableDownload)
-      .then(requireZipDownload);
+      .then(requireDeclaredResourceType);
   }
 
   private requestSubmissionPdf(
