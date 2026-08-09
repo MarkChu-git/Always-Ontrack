@@ -215,7 +215,7 @@ test("stored browser capture rejects a state symlink that escapes the operator h
   }
 });
 
-test("stored browser capture skips launch for empty state and invalidates a stale state after one bounded probe", async () => {
+test("stored browser capture skips launch for empty state and restores a stale state after a failed probe", async () => {
   await withBrowserState(
     "ontrack-stored-capture-state-",
     async (storagePath) => {
@@ -264,10 +264,16 @@ test("stored browser capture skips launch for empty state and invalidates a stal
       );
       assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
       assert.equal(browserLaunches, 1);
-      await assert.rejects(() => readFile(storagePath, "utf8"), /ENOENT/);
+      // A failed probe restores the claimed state instead of retiring it, so
+      // the stored credential survives transient capture failures.
+      assert.deepEqual(JSON.parse(await readFile(storagePath, "utf8")), {
+        cookies: [sessionCookie("stale")],
+        origins: [],
+      });
 
+      // The next attempt re-probes the restored state instead of skipping.
       assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
-      assert.equal(browserLaunches, 1);
+      assert.equal(browserLaunches, 2);
     },
   );
 });

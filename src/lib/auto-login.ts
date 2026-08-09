@@ -3718,8 +3718,12 @@ async function captureCredentialsFromPersistedStateFile(
       throw error;
     }
     if (!captured) {
-      // A state that cannot renew credentials remains retired, while any
-      // concurrent replacement at the canonical path stays untouched.
+      // A failed probe does not prove the claimed state is dead: the capture
+      // may have hit a transient network or server error. Restore the claimed
+      // generation so the week-long refresh credential survives transient
+      // failures. A concurrent replacement at the canonical path is still
+      // preserved by the exclusive write inside the restore.
+      restoreClaimedBrowserSessionState(claim);
       return null;
     }
     try {

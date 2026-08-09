@@ -103,6 +103,7 @@
   "101": "normalizeReadOnlyRoute",
   "102": "agent-submission-pdf.test.ts",
   "103": "discovery-cli.test.ts",
+  "104": "extractMfaNumberChallengeFromText",
   "106": "agent-plan.ts",
   "111": "bin"
 }
