@@ -3,7 +3,7 @@
 [简体中文](./README.zh-CN.md)
 
 <p align="center">
-  <img src="./always-ontrack-logo.png" alt="Always OnTrack logo" width="480" />
+  <img src="./always-ontrack-poster.png" alt="Always OnTrack — agent-first CLI for Monash OnTrack / Doubtfire" width="720" />
 </p>
 
 <p align="center">
