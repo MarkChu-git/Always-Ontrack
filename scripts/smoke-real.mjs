@@ -48,6 +48,9 @@ function runJson(commandArgs, label) {
   }
 }
 
+// Watch commands may emit compact or pretty-printed JSON; match either.
+const BASELINE_PATTERN = /"type"\s*:\s*"baseline"/;
+
 function runWatch(projectId, intervalSec) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(process.execPath, [
@@ -66,7 +69,7 @@ function runWatch(projectId, intervalSec) {
     let stopRequested = false;
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk);
-      if (!baselineSeen && stdout.includes('"type": "baseline"')) {
+      if (!baselineSeen && BASELINE_PATTERN.test(stdout)) {
         baselineSeen = true;
         if (!stopRequested) {
           stopRequested = true;
@@ -86,7 +89,7 @@ function runWatch(projectId, intervalSec) {
     }, 60000);
     child.on('close', (code, signal) => {
       clearTimeout(timer);
-      const hasBaseline = stdout.includes('"type": "baseline"');
+      const hasBaseline = BASELINE_PATTERN.test(stdout);
       if (!hasBaseline) {
         reject(new Error(`watch did not produce baseline output.\n${stdout}\n${stderr}`));
         return;
@@ -125,7 +128,7 @@ function runFeedbackWatch(projectId, abbr, intervalSec) {
     let stopRequested = false;
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk);
-      if (!baselineSeen && stdout.includes('"type": "baseline"')) {
+      if (!baselineSeen && BASELINE_PATTERN.test(stdout)) {
         baselineSeen = true;
         if (!stopRequested) {
           stopRequested = true;
@@ -146,7 +149,7 @@ function runFeedbackWatch(projectId, abbr, intervalSec) {
 
     child.on('close', (code, signal) => {
       clearTimeout(timer);
-      const hasBaseline = stdout.includes('"type": "baseline"');
+      const hasBaseline = BASELINE_PATTERN.test(stdout);
       if (!hasBaseline) {
         reject(new Error(`feedback watch did not produce baseline output.\n${stdout}\n${stderr}`));
         return;

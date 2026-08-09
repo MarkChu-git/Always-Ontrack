@@ -1,16 +1,16 @@
 # Graph Report - ontrack-cli  (2026-08-09)
 
 ## Corpus Check
-- 110 files · ~143,612 words
+- 110 files · ~143,695 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1834 nodes · 4498 edges · 106 communities (104 shown, 2 thin omitted)
+- 1834 nodes · 4498 edges · 107 communities (105 shown, 2 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 41 edges (avg confidence: 0.58)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e4c9bc1f`
+- Built from commit: `fb6d09cc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -113,6 +113,7 @@
 - OnTrackAuthBroker
 - handleNativeAgentCommand
 - normalizeReadOnlyRoute
+- extractMfaNumberChallengeFromText
 - agent-plan.ts
 - bin
 
@@ -143,7 +144,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (106 total, 2 thin omitted)
+## Communities (107 total, 2 thin omitted)
 
 ### Community 0 - "agent-project-unit-canonical.ts"
 Cohesion: 0.20
@@ -171,7 +172,7 @@ Nodes (59): AgentAuthStatus, agentFeedbackItemSchema, agentFeedbackListInputSche
 
 ### Community 6 - "auto-login.ts"
 Cohesion: 0.06
-Nodes (48): asErrorMessage(), browserInstallHint(), BrowserLaunchPlan, BrowserStorageEntry, BrowserStorageState, candidateBrowserPaths(), ClaimedBrowserSessionState, clickDetectedMfaOption() (+40 more)
+Nodes (43): asErrorMessage(), browserInstallHint(), BrowserLaunchPlan, BrowserStorageEntry, BrowserStorageState, ClaimedBrowserSessionState, clickDetectedMfaOption(), collectCredentialScopes() (+35 more)
 
 ### Community 7 - "contracts.ts"
 Cohesion: 0.14
@@ -254,8 +255,8 @@ Cohesion: 0.18
 Nodes (20): advanceGuidedSsoOnPage(), BLOCKED_LINK_HOSTS, canUseSelector(), canUseSelectorInScopes(), captureSsoCredentialsInternal(), clickFirstVisible(), clickLikelyActionControl(), collectScopes() (+12 more)
 
 ### Community 27 - "auto-login.test.ts"
-Cohesion: 0.17
-Nodes (12): classifySsoFallback(), clearAllBrowserSessionState(), clearBrowserSessionState(), expandSystemBrowserProfileCandidates(), extractMfaNumberChallenge(), extractMfaNumberChallengeFromText(), extractNumberTokens(), hasMfaChallengeSignal() (+4 more)
+Cohesion: 0.16
+Nodes (14): candidateBrowserPaths(), classifySsoFallback(), clearAllBrowserSessionState(), clearBrowserSessionState(), expandSystemBrowserProfileCandidates(), extractCredentialsFromCookieJar(), extractCredentialsFromUrl(), isLikelyChromiumProfileDir() (+6 more)
 
 ### Community 28 - "check-coverage.ts"
 Cohesion: 0.22
@@ -290,8 +291,8 @@ Cohesion: 0.15
 Nodes (18): AcquiredSessionRefreshLock, acquireSessionRefreshLock(), AUTH_REFRESH_LOCK_TIMEOUT, clearSession(), getConfigRoot(), getSessionPath(), isNodeError(), recoverStaleRefreshLock() (+10 more)
 
 ### Community 36 - "captureCredentialsFromPersistedStateFile"
-Cohesion: 0.18
-Nodes (12): captureCredentialsFromPersistedStateFile(), captureCredentialsFromStoredBrowserSession(), captureCredentialsFromSystemBrowserProfile(), closeBrowserAtMost(), extractCredentialsFromCookieJar(), extractCredentialsFromLocalStorage(), extractCredentialsFromRequestHeaders(), isSystemBrowserProfileReuseEnabled() (+4 more)
+Cohesion: 0.21
+Nodes (10): captureCredentialsFromPersistedStateFile(), captureCredentialsFromStoredBrowserSession(), captureCredentialsFromSystemBrowserProfile(), closeBrowserAtMost(), extractCredentialsFromRequestHeaders(), isTargetOnTrackAuthUrl(), isTargetOnTrackUrl(), probeCredentialsInOpenContext() (+2 more)
 
 ### Community 37 - "persistRefreshCookie"
 Cohesion: 0.30
@@ -311,7 +312,7 @@ Nodes (3): createNativeAgentCommands(), NativeAgentCommandHandlers, AgentStreamC
 
 ### Community 41 - "extractCredentialsFromStorageEntries"
 Cohesion: 0.24
-Nodes (13): extractCredentialsFromAuthPayload(), extractCredentialsFromStorageEntries(), extractCredentialsFromUnknownObject(), extractCredentialsFromUrl(), extractUsernameFromUserRecord(), hasValue(), injectRememberIntoAuthExchange(), isBrowserStorageCookie() (+5 more)
+Nodes (13): extractCredentialsFromAuthPayload(), extractCredentialsFromLocalStorage(), extractCredentialsFromStorageEntries(), extractCredentialsFromUnknownObject(), extractUsernameFromUserRecord(), hasValue(), injectRememberIntoAuthExchange(), isBrowserStorageCookie() (+5 more)
 
 ### Community 42 - "smoke-real.mjs"
 Cohesion: 0.50
@@ -528,6 +529,10 @@ Nodes (11): handleNativeAgentCommand(), writeNativeAgentStream(), AgentCallInput
 ### Community 101 - "normalizeReadOnlyRoute"
 Cohesion: 0.50
 Nodes (4): canonicalRoute(), normalizeReadOnlyRoute(), READ_ONLY_METHODS, ROUTE_CATALOG
+
+### Community 104 - "extractMfaNumberChallengeFromText"
+Cohesion: 0.50
+Nodes (5): extractMfaNumberChallenge(), extractMfaNumberChallengeFromText(), extractNumberTokens(), hasMfaChallengeSignal(), uniqueInOrder()
 
 ### Community 106 - "agent-plan.ts"
 Cohesion: 0.07
