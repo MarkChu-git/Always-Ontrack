@@ -314,12 +314,14 @@ deployment must be configured by the trusted host through `ONTRACK_BASE_URL`
 before the server starts.
 
 Use `auth_ensure` with `interaction: "never"` during autonomous work. It first
-reuses a valid token, then attempts a silent refresh from the restricted browser
-state. If Monash policy requires a number challenge, it returns a structured
-human handoff. `interaction: "if_required"` may open one visible browser flow;
-the Agent resumes after the user completes the Monash-controlled step.
-The default remaining-validity margin is 60 seconds; pass `min_ttl_seconds` (or
-CLI `--min-ttl-seconds`) to require a longer margin for a specific operation.
+reuses a valid token, then attempts a silent renewal over plain HTTP using the
+restricted refresh cookie captured at sign-in, and only then falls back to the
+restricted browser state. If Monash policy requires a number challenge, it
+returns a structured human handoff. `interaction: "if_required"` may open one
+visible browser flow; the Agent resumes after the user completes the
+Monash-controlled step. The default remaining-validity margin is 60 seconds;
+pass `min_ttl_seconds` (or CLI `--min-ttl-seconds`) to require a longer margin
+for a specific operation.
 
 The CLI applies the same lifecycle automatically. A rejected read may silently
 refresh and replay once. Mutations are never automatically replayed.
@@ -579,10 +581,12 @@ ontrack login --auth-token <token> --username <username>
 
 ### What gets cached
 
-After login, the CLI stores the access token locally and keeps browser refresh
-state in a separate restricted file. Authenticated commands renew near-expiry
-tokens silently when possible, so users do not normally sign in for every run.
-Monash can still require verification when its refresh or SSO policy expires.
+After login, the CLI stores the access token locally and requests a persistent
+session, so the server's refresh cookie (about one week) is kept in a separate
+restricted browser-state file. Authenticated commands renew near-expiry tokens
+silently over plain HTTP when possible, without launching a browser, so users
+do not normally sign in for every run. Monash can still require verification
+when its refresh or SSO policy expires.
 
 The API client authenticates with these headers:
 

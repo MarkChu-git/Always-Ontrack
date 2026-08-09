@@ -3,6 +3,7 @@ import type {
   FeedbackItem,
   InboxTask,
   ProjectSummary,
+  RefreshCookieMaterial,
   SessionData,
   SubmissionTrigger,
   SignInResponse,
@@ -35,6 +36,12 @@ const MAX_TASK_PREREQUISITES_RESPONSE_BYTES = 512 * 1024;
 const MAX_SUBMISSION_DETAILS_RESPONSE_BYTES = 64 * 1024;
 
 type AuthSessionRefresh = () => Promise<SessionData | null>;
+
+/** Sign-in result together with any refresh cookie the server issued. */
+export interface CapturedSignIn {
+  response: SignInResponse;
+  refreshCookie: RefreshCookieMaterial | null;
+}
 
 /** Raised when a remote JSON response exceeds a caller-defined safety bound. */
 export class OversizedJsonResponseError extends Error {
@@ -114,6 +121,41 @@ async function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
 /** Build a status-only error; arbitrary remote bodies are never terminal-safe. */
 function buildErrorMessage(response: Response): string {
   return `${response.status} ${response.statusText}`.trim();
+}
+
+/** Extract the OnTrack refresh-cookie pair from sign-in response headers. */
+export function extractRefreshCookieFromHeaders(headers: Headers): RefreshCookieMaterial | null {
+  let username: string | undefined;
+  let refreshToken: string | undefined;
+  let expiresAt: string | undefined;
+  for (const entry of headers.getSetCookie()) {
+    const [pair, ...attributes] = entry.split(';');
+    const separator = pair.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+    const name = pair.slice(0, separator).trim().toLowerCase();
+    const value = pair.slice(separator + 1).trim();
+    if (name === 'username') {
+      username = value;
+    }
+    if (name === 'refresh_token') {
+      refreshToken = value;
+      for (const attribute of attributes) {
+        const [key, raw] = attribute.split('=');
+        if (key.trim().toLowerCase() === 'expires' && raw) {
+          const parsed = new Date(raw.trim());
+          if (!Number.isNaN(parsed.getTime())) {
+            expiresAt = parsed.toISOString();
+          }
+        }
+      }
+    }
+  }
+  if (!username || !refreshToken) {
+    return null;
+  }
+  return { username, refreshToken, ...(expiresAt ? { expiresAt } : {}) };
 }
 
 /** Convert runtime-specific fetch failures into one stable transport error. */
@@ -571,8 +613,12 @@ export class OnTrackApiClient {
   }
 
   /** Exchange captured login payload for API auth token + user profile. */
-  signIn(payload: JsonBody): Promise<SignInResponse> {
-    return requestJson<SignInResponse>(withApiPath(this.baseUrl, 'auth'), {
+  /**
+   * Exchange captured login payload for API credentials, retaining any refresh
+   * cookie the server issues when the payload requested a persistent session.
+   */
+  async signInWithCookieCapture(payload: JsonBody): Promise<CapturedSignIn> {
+    const response = await fetchOnTrack(withApiPath(this.baseUrl, 'auth'), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -580,6 +626,73 @@ export class OnTrackApiClient {
       },
       body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      throw new OnTrackHttpError(response.status, buildErrorMessage(response));
+    }
+    let body: SignInResponse;
+    try {
+      body = (await response.json()) as SignInResponse;
+    } catch (error) {
+      throw new InvalidJsonResponseError(error);
+    }
+    return {
+      response: body,
+      refreshCookie: extractRefreshCookieFromHeaders(response.headers),
+    };
+  }
+
+  /** Exchange captured login payload for API auth token + user profile. */
+  signIn(payload: JsonBody): Promise<SignInResponse> {
+    return this.signInWithCookieCapture(payload).then((result) => result.response);
+  }
+
+  /**
+   * Exchange a stored refresh cookie for a new access token. The server answers
+   * 201 with an empty body when the cookie is missing or declined, so every
+   * failure shape collapses to null for the caller.
+   */
+  async refreshAccessToken(cookie: {
+    username: string;
+    refreshToken: string;
+  }): Promise<SignInResponse | null> {
+    // Cookie values come from the local restricted store; strip anything that
+    // could break header framing before they reach the Cookie header.
+    const safeToken = cookie.refreshToken.replace(/[;\r\n]/g, '');
+    const safeUsername = cookie.username.replace(/[;\r\n]/g, '');
+    let response: Response;
+    try {
+      response = await fetchOnTrack(withApiPath(this.baseUrl, 'auth/access-token'), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Cookie: `refresh_token=${safeToken}; username=${safeUsername}`,
+        },
+      });
+    } catch {
+      return null;
+    }
+    if (!response.ok) {
+      return null;
+    }
+    let body: unknown;
+    try {
+      const text = await response.text();
+      if (!text.trim()) {
+        return null;
+      }
+      body = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      typeof (body as SignInResponse).auth_token !== 'string' ||
+      !(body as SignInResponse).auth_token
+    ) {
+      return null;
+    }
+    return body as SignInResponse;
   }
 
   /** Revoke remote auth session (best effort). */

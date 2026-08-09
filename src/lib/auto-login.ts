@@ -25,6 +25,7 @@ import type {
   Locator,
   Page,
 } from "playwright-core";
+import type { RefreshCookieMaterial } from "./types.js";
 
 /**
  * Browser automation flow for Monash SSO / Okta handoff.
@@ -1621,6 +1622,144 @@ export function buildContextOptionsWithStoredSession(
   }
 }
 
+/**
+ * Rewrite the frontend's POST /api/auth exchange body to request a persistent
+ * ("remember me") session, so the server also issues the one-week refresh
+ * cookie into the captured browser state. Returns null when the request is
+ * not the token-exchange call or needs no change.
+ */
+export function injectRememberIntoAuthExchange(
+  method: string,
+  url: string,
+  postData: string | null,
+  targetOrigin: string,
+): string | null {
+  if (method.toUpperCase() !== "POST" || !postData) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.origin !== targetOrigin) {
+    return null;
+  }
+  const pathname = parsed.pathname.replace(/\/+$/, "").replace(/\.json$/, "");
+  if (pathname !== "/api/auth") {
+    return null;
+  }
+  const body = tryParseJson(postData);
+  if (!isRecord(body) || body.remember === true) {
+    return null;
+  }
+  return JSON.stringify({ ...body, remember: true });
+}
+
+/** Read and structurally validate the managed browser-state file, or null. */
+function readManagedBrowserSessionState(
+  targetOrigin: string,
+): BrowserStorageState | null {
+  const storagePath = resolveManagedBrowserSessionStatePath();
+  try {
+    // The file is parsed and structurally validated before any value leaves it.
+    // codeql[js/path-injection]
+    const parsed = JSON.parse(readFileSync(storagePath, "utf8")) as unknown;
+    if (!isBrowserStorageState(parsed)) {
+      return null;
+    }
+    const filtered = filterBrowserSessionState(parsed, targetOrigin);
+    return hasReusableBrowserSessionState(filtered) ? filtered : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the persisted OnTrack refresh-cookie pair from the trusted local
+ * browser-state store. Returns null when absent, expired, or unreadable.
+ */
+export function readStoredRefreshCookie(
+  options: { targetOrigin?: string } = {},
+): RefreshCookieMaterial | null {
+  const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
+  const state = readManagedBrowserSessionState(targetOrigin);
+  if (!state) {
+    return null;
+  }
+  const refresh = state.cookies.find((cookie) => cookie.name === "refresh_token");
+  const user = state.cookies.find((cookie) => cookie.name === "username");
+  if (!refresh || !user) {
+    return null;
+  }
+  return {
+    username: user.value,
+    refreshToken: refresh.value,
+    ...(refresh.expires > 0
+      ? { expiresAt: new Date(refresh.expires * 1000).toISOString() }
+      : {}),
+  };
+}
+
+/**
+ * Persist a refresh cookie captured by a non-browser sign-in into the trusted
+ * browser-state store, merging with any cookies a browser flow already saved.
+ */
+export function persistRefreshCookie(
+  cookie: RefreshCookieMaterial,
+  options: { targetOrigin?: string } = {},
+): void {
+  const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
+  const hostname = new URL(targetOrigin).hostname;
+  const expiresSeconds = cookie.expiresAt
+    ? Math.floor(Date.parse(cookie.expiresAt) / 1000)
+    : -1;
+  const issued: BrowserStorageState = {
+    cookies: [
+      {
+        name: "refresh_token",
+        value: cookie.refreshToken,
+        domain: hostname,
+        path: "/api/auth",
+        expires: expiresSeconds,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "username",
+        value: cookie.username,
+        domain: hostname,
+        path: "/api/auth",
+        expires: expiresSeconds,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ],
+    origins: [],
+  };
+  const fresh = filterBrowserSessionState(issued, targetOrigin);
+  if (!hasReusableBrowserSessionState(fresh)) {
+    return;
+  }
+  const base = readManagedBrowserSessionState(targetOrigin) ?? {
+    cookies: [],
+    origins: [],
+  };
+  const merged: BrowserStorageState = {
+    cookies: [
+      ...base.cookies.filter(
+        (stored) => stored.name !== "refresh_token" && stored.name !== "username",
+      ),
+      ...fresh.cookies,
+    ],
+    origins: base.origins,
+  };
+  writePrivateBrowserSessionState(resolveManagedBrowserSessionStatePath(), merged);
+}
+
 // Username selector list spans Okta + Microsoft + generic IdP form variants.
 const USERNAME_SELECTORS = [
   "input#okta-signin-username",
@@ -3011,6 +3150,28 @@ async function captureSsoCredentialsInternal(
     const context = await deadline.run(() =>
       browser.newContext(buildContextOptionsWithStoredSession({ targetOrigin })),
     );
+    // Ask the frontend's token exchange for a persistent session so the
+    // one-week refresh cookie lands in the captured browser state. Test
+    // doubles without routing support simply skip the rewrite.
+    if (typeof context.route === "function") {
+      await context.route(
+        (url) =>
+          url.origin === targetOrigin &&
+          url.pathname.replace(/\.json$/, "") === "/api/auth",
+        async (route) => {
+          const request = route.request();
+          const rewritten = injectRememberIntoAuthExchange(
+            request.method(),
+            request.url(),
+            request.postData(),
+            targetOrigin,
+          );
+          await route.continue(
+            rewritten === null ? undefined : { postData: rewritten },
+          );
+        },
+      );
+    }
     const page = await deadline.run(() => context.newPage());
     const seenPages = new Set<Page>();
     let captured: LoginCredentials | null = null;

@@ -285,7 +285,8 @@ Okta challenge 数字、cookie、refresh token、OnTrack access token 或 SSO
 server 启动前通过 `ONTRACK_BASE_URL` 配置。
 
 自主运行时使用 `auth_ensure` 的 `interaction: "never"`。运行时会先复用有效
-token，再尝试从受限浏览器状态静默刷新。如果 Monash 策略要求 number
+token，再尝试用登录时存入受限存储的 refresh cookie 通过纯 HTTP 静默续期，
+最后才回退到受限浏览器状态。如果 Monash 策略要求 number
 challenge，它会返回结构化 human handoff。用户在场时可以改用
 `interaction: "if_required"`，此时最多开启一次可见浏览器流程；用户完成
 Monash 控制的验证后，Agent 继续工作。
@@ -534,10 +535,11 @@ ontrack login --auth-token <token> --username <username>
 
 ### 登录后会发生什么
 
-CLI 会把 access token 保存到本地，并将浏览器 refresh state 单独保存在受限
-文件中。authenticated command 会尽量在 token 临近过期时静默续期，因此一般
-不需要每次重新登录；当 Monash 的 refresh 或 SSO 策略到期时，仍可能要求用户
-完成验证。
+CLI 会把 access token 保存到本地，并在登录时请求持久会话，将服务器签发的
+refresh cookie（约一周有效）单独保存在受限的 browser-state
+文件中。authenticated command 会尽量在 token 临近过期时通过纯 HTTP 静默续期，
+不需要启动浏览器，因此一般不需要每次重新登录；当 Monash 的 refresh 或 SSO
+策略到期时，仍可能要求用户完成验证。
 
 使用的认证头为:
 

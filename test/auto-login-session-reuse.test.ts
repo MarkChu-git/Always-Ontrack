@@ -15,6 +15,9 @@ import { join } from "node:path";
 import {
   buildContextOptionsWithStoredSession,
   captureCredentialsFromStoredBrowserSession,
+  injectRememberIntoAuthExchange,
+  persistRefreshCookie,
+  readStoredRefreshCookie,
   setBrowserSessionStatePathForTests,
   SsoFallbackError,
 } from "../src/lib/auto-login.js";
@@ -750,4 +753,122 @@ test("failed exclusive publication removes its partial file before restoring sta
       );
     },
   );
+});
+
+test("injectRememberIntoAuthExchange only rewrites the token-exchange POST", () => {
+  const origin = "https://ontrack.infotech.monash.edu";
+  assert.equal(
+    injectRememberIntoAuthExchange(
+      "POST",
+      `${origin}/api/auth`,
+      '{"username":"u1","auth_token":"t"}',
+      origin,
+    ),
+    '{"username":"u1","auth_token":"t","remember":true}',
+  );
+  assert.equal(
+    injectRememberIntoAuthExchange(
+      "POST",
+      `${origin}/api/auth.json`,
+      '{"username":"u1"}',
+      origin,
+    ),
+    '{"username":"u1","remember":true}',
+  );
+  assert.equal(
+    injectRememberIntoAuthExchange(
+      "POST",
+      `${origin}/api/auth/access-token`,
+      '{"x":1}',
+      origin,
+    ),
+    null,
+  );
+  assert.equal(
+    injectRememberIntoAuthExchange("GET", `${origin}/api/auth`, '{"x":1}', origin),
+    null,
+  );
+  assert.equal(injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, null, origin), null);
+  assert.equal(
+    injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, "not json", origin),
+    null,
+  );
+  assert.equal(
+    injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, '{"remember":true}', origin),
+    null,
+  );
+  assert.equal(
+    injectRememberIntoAuthExchange("POST", "https://evil.example/api/auth", '{"x":1}', origin),
+    null,
+  );
+});
+
+test("persisted refresh cookies roundtrip through the trusted state store", async () => {
+  await withBrowserState("ontrack-refresh-cookie-", async (storagePath) => {
+    persistRefreshCookie(
+      {
+        username: "student1",
+        refreshToken: "refresh-secret",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+      { targetOrigin: TARGET_ORIGIN },
+    );
+    assert.deepEqual(readStoredRefreshCookie({ targetOrigin: TARGET_ORIGIN }), {
+      username: "student1",
+      refreshToken: "refresh-secret",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const metadata = await stat(storagePath);
+    assert.equal(metadata.mode & 0o077, 0);
+
+    // A second persist merges instead of dropping unrelated stored cookies.
+    const original = JSON.parse(await readFile(storagePath, "utf8")) as {
+      cookies: Array<Record<string, unknown>>;
+    };
+    original.cookies.push({
+      name: "unrelated",
+      value: "kept",
+      domain: "ontrack.infotech.monash.edu",
+      path: "/",
+      expires: -1,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+    });
+    await writeFile(storagePath, JSON.stringify(original), "utf8");
+    persistRefreshCookie(
+      {
+        username: "student1",
+        refreshToken: "rotated-secret",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+      { targetOrigin: TARGET_ORIGIN },
+    );
+    const merged = readStoredRefreshCookie({ targetOrigin: TARGET_ORIGIN });
+    assert.equal(merged?.refreshToken, "rotated-secret");
+    const finalState = JSON.parse(await readFile(storagePath, "utf8")) as {
+      cookies: Array<{ name: string }>;
+    };
+    assert.ok(finalState.cookies.some((cookie) => cookie.name === "unrelated"));
+  });
+});
+
+test("expired refresh cookies are neither persisted nor returned", async () => {
+  await withBrowserState("ontrack-refresh-cookie-expired-", async () => {
+    persistRefreshCookie(
+      {
+        username: "student1",
+        refreshToken: "old",
+        expiresAt: "2020-01-01T00:00:00.000Z",
+      },
+      { targetOrigin: TARGET_ORIGIN },
+    );
+    assert.equal(readStoredRefreshCookie({ targetOrigin: TARGET_ORIGIN }), null);
+  });
+});
+
+test("readStoredRefreshCookie returns null without a state file", async () => {
+  await withBrowserState("ontrack-refresh-cookie-missing-", async () => {
+    assert.equal(readStoredRefreshCookie({ targetOrigin: TARGET_ORIGIN }), null);
+  });
 });
