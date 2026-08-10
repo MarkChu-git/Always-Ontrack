@@ -10,12 +10,14 @@ import {
   extractCredentialsFromCookieJar,
   extractCredentialsFromStorageEntries,
   extractCredentialsFromUrl,
+  extractRefreshCookieMaterial,
   expandSystemBrowserProfileCandidates,
   isSystemBrowserProfileReuseEnabled,
   resolveBrowserSessionStatePath,
   resolveBrowserLaunchPlan,
   resolveSystemBrowserUserDataDirs,
   saveBrowserSessionState,
+  waitForRefreshCookieInContext,
 } from "../src/lib/auto-login.js";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -676,4 +678,83 @@ test("extractMfaNumberChallengeFromText ignores unrelated numbers", () => {
   `);
 
   assert.deepEqual(numbers, []);
+});
+
+test("extractRefreshCookieMaterial accepts exact, dotted, and parent domains", () => {
+  const target = "https://ontrack.infotech.monash.edu";
+  const base = [
+    { name: "refresh_token", value: "rt-1", domain: "ontrack.infotech.monash.edu", expires: 1999999999 },
+    { name: "username", value: "student1", domain: "ontrack.infotech.monash.edu", expires: 1999999999 },
+  ];
+  assert.deepEqual(extractRefreshCookieMaterial(base, target), {
+    username: "student1",
+    refreshToken: "rt-1",
+    expiresAt: new Date(1999999999 * 1000).toISOString(),
+  });
+
+  const dotted = base.map((cookie) => ({ ...cookie, domain: ".ontrack.infotech.monash.edu" }));
+  assert.equal(extractRefreshCookieMaterial(dotted, target)?.refreshToken, "rt-1");
+
+  const parent = base.map((cookie) => ({ ...cookie, domain: ".infotech.monash.edu" }));
+  assert.equal(extractRefreshCookieMaterial(parent, target)?.refreshToken, "rt-1");
+});
+
+test("extractRefreshCookieMaterial rejects foreign domains and incomplete pairs", () => {
+  const target = "https://ontrack.infotech.monash.edu";
+  const foreign = [
+    { name: "refresh_token", value: "rt-1", domain: "monashuni.okta.com", expires: -1 },
+    { name: "username", value: "student1", domain: "monashuni.okta.com", expires: -1 },
+  ];
+  assert.equal(extractRefreshCookieMaterial(foreign, target), null);
+
+  const missingPair = [
+    { name: "refresh_token", value: "rt-1", domain: "ontrack.infotech.monash.edu", expires: -1 },
+  ];
+  assert.equal(extractRefreshCookieMaterial(missingPair, target), null);
+
+  const siblingSubdomain = [
+    { name: "refresh_token", value: "rt-1", domain: "other.infotech.monash.edu", expires: -1 },
+    { name: "username", value: "student1", domain: "other.infotech.monash.edu", expires: -1 },
+  ];
+  assert.equal(extractRefreshCookieMaterial(siblingSubdomain, target), null);
+});
+
+test("extractRefreshCookieMaterial omits expiresAt for session cookies", () => {
+  const pair = [
+    { name: "refresh_token", value: "rt-1", domain: "ontrack.infotech.monash.edu", expires: -1 },
+    { name: "username", value: "student1", domain: "ontrack.infotech.monash.edu", expires: -1 },
+  ];
+  const material = extractRefreshCookieMaterial(pair, "https://ontrack.infotech.monash.edu");
+  assert.equal(material?.refreshToken, "rt-1");
+  assert.equal(material && "expiresAt" in material, false);
+});
+
+test("waitForRefreshCookieInContext returns late-arriving cookies within budget", async () => {
+  const target = "https://ontrack.infotech.monash.edu";
+  const pair = [
+    { name: "refresh_token", value: "rt-late", domain: "ontrack.infotech.monash.edu", expires: 1999999999 },
+    { name: "username", value: "student1", domain: "ontrack.infotech.monash.edu", expires: 1999999999 },
+  ];
+  let calls = 0;
+  const context = {
+    cookies: async () => {
+      calls += 1;
+      return calls < 3 ? [] : pair;
+    },
+  };
+  const material = await waitForRefreshCookieInContext(context, target, 5_000);
+  assert.equal(material?.refreshToken, "rt-late");
+  assert.ok(calls >= 3);
+});
+
+test("waitForRefreshCookieInContext returns null when the budget expires", async () => {
+  const started = Date.now();
+  const context = { cookies: async () => [] as Array<{ name: string; value: string }> };
+  const material = await waitForRefreshCookieInContext(
+    context,
+    "https://ontrack.infotech.monash.edu",
+    300,
+  );
+  assert.equal(material, null);
+  assert.ok(Date.now() - started >= 300);
 });

@@ -32,9 +32,11 @@ import {
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
   persistRefreshCookie,
+  readStoredRefreshCookie,
 } from "./lib/auto-login.js";
 import type { MfaMethodOption } from "./lib/auto-login.js";
 import type { LoginCredentials } from './lib/auto-login.js';
+import type { RefreshCookieMaterial } from './lib/types.js';
 import {
   MAX_DISCOVERY_PROBE_REQUEST_BUDGET,
   discoverOnTrackSurface,
@@ -2057,6 +2059,7 @@ async function handleLogin(args: string[]): Promise<void> {
   let credentialSource: CredentialSource = 'manual-sign-in';
   let credentialExpiresAt: string | undefined;
   let credentialContract: LoginCredentials['contract'];
+  let capturedRefreshCookie: RefreshCookieMaterial | undefined;
 
   // Manual redirect URL can also directly provide auth token + username.
   const redirectUrl = getFlagValue(args, '--redirect-url');
@@ -2175,6 +2178,7 @@ async function handleLogin(args: string[]): Promise<void> {
           headless: !showBrowser,
         });
         authToken = captured.authToken;
+        capturedRefreshCookie = captured.refreshCookie;
         username = captured.username;
         credentialExpiresAt = captured.expiresAt;
         credentialContract = captured.contract;
@@ -2315,6 +2319,7 @@ async function handleLogin(args: string[]): Promise<void> {
           username = captured.username;
           credentialExpiresAt = captured.expiresAt;
           credentialContract = captured.contract;
+          capturedRefreshCookie = captured.refreshCookie;
           credentialSource =
             captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
           renderTerminalEvent(`Guided SSO captured credentials from ${captured.source}.`, 'success');
@@ -2345,6 +2350,7 @@ async function handleLogin(args: string[]): Promise<void> {
             username = captured.username;
             credentialExpiresAt = captured.expiresAt;
             credentialContract = captured.contract;
+            capturedRefreshCookie = captured.refreshCookie;
             credentialSource =
               captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
             console.log(`Browser-assisted SSO captured credentials from ${captured.source}.`);
@@ -2412,6 +2418,24 @@ async function handleLogin(args: string[]): Promise<void> {
 
   // Persist session for subsequent CLI commands.
   await saveSession(session);
+
+  // The browser-context capture paths (auto/guided SSO) never re-exchange over
+  // HTTP, so persist their observed refresh cookie explicitly; the legacy
+  // exchange path already persisted its own Set-Cookie pair above.
+  if (capturedRefreshCookie) {
+    try {
+      persistRefreshCookie(capturedRefreshCookie, {
+        targetOrigin: new URL(api.base).origin,
+      });
+    } catch {
+      // Refresh-cookie persistence is best effort; the session itself is valid.
+    }
+  }
+  if (!readStoredRefreshCookie({ targetOrigin: new URL(api.base).origin })) {
+    console.log(
+      '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.',
+    );
+  }
   renderLoginSuccessPanel(session);
 }
 
