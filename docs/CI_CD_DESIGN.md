@@ -168,7 +168,8 @@ jobs:
       - run: bun audit
       - run: bun run build
       - run: bun dist/cli.js --help
-      - run: bun dist/cli.js auth-method --help
+      # auth-method --help calls the production API; gates must stay hermetic.
+      - run: bun dist/cli.js schema auth.method --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.data?.path !== "auth.method") process.exit(1)'
 
       - name: Pack the already-built release candidate
         run: |
