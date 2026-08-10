@@ -72,7 +72,8 @@ jobs:
       - name: Smoke built CLI help
         run: |
           bun dist/cli.js --help
-          bun dist/cli.js auth-method --help
+          # auth-method --help would call the production API: CI gates must stay hermetic.
+          bun dist/cli.js schema auth.method --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.data?.path !== "auth.method") process.exit(1)'
           test -x dist/auth-mcp.js
           bun dist/cli.js capabilities --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.schema_version !== "ontrack.agent/v1") process.exit(1)'
 
