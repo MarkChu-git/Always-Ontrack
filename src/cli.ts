@@ -153,12 +153,14 @@ import type {
   ProjectSummary,
   SessionData,
   SignInResponse,
+  StudentStatusTrigger,
   SubmissionTrigger,
   TaskDefinitionSummary,
   TaskSelector,
   TaskSummary,
   UnitSummary,
 } from './lib/types.js';
+import { STUDENT_STATUS_TRIGGERS } from './lib/types.js';
 import type { WelcomeMenuItem } from './lib/welcome.js';
 import type { ResolvedTaskSelector } from "./lib/utils.js";
 import {
@@ -319,6 +321,7 @@ Usage:
   ontrack task show --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--json]
   ontrack task prerequisites --project-id ID (--task-definition-id ID | --abbr ABBR) [--json]
   ontrack task resources --project-id ID [--all-tasks | --task-definition-id ID [--task-definition-id ID ...] | --abbr ABBR [--abbr ABBR ...]] [--out-dir PATH] [--allow-external-dir] [--json]
+  ontrack task set-status --project-id ID (--task-definition-id ID | --abbr ABBR) --status STATUS [--confirm] [--idempotency-key] [--json]
   ontrack plan show --project-id ID [--include-beyond-target] [--json]
   ontrack plan set-dates --project-id ID (--task-definition-id ID | --abbr ABBR) --start YYYY-MM-DD --target YYYY-MM-DD [--confirm] [--idempotency-key KEY] [--json]
   ontrack plan reset --project-id ID [--confirm] [--idempotency-key KEY] [--json]
@@ -347,7 +350,7 @@ Notes:
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
   - Upload commands accept repeated --file values. You can also map explicit keys like --file file0=report.pdf.
   - Upload files are regular, non-symlink, non-hard-link files capped at 50 MiB each; use --allow-external-file only for explicit external input.
-  - Planner and submission writes are dry-runs unless --confirm is supplied.
+  - Planner, status, and submission writes are dry-runs unless --confirm is supplied.
   - Confirmed Agent writes also require --idempotency-key; completed keys replay safely and unknown outcomes stay blocked.
   - Agent callers should use --output agent-json for the versioned ontrack.agent/v1 envelope.
   - Structured Agent input is accepted via --input-json OBJECT or --input -.
@@ -1564,6 +1567,51 @@ function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | un
   }
 
   throw new Error('--trigger must be one of: need_help, ready_for_feedback.');
+}
+
+/** Server-accepted aliases normalized to the canonical student trigger. */
+const STUDENT_STATUS_TRIGGER_ALIASES: Readonly<Record<string, StudentStatusTrigger>> = {
+  rtm: 'ready_for_feedback',
+  rff: 'ready_for_feedback',
+  ready_to_mark: 'ready_for_feedback',
+  ns: 'not_started',
+  aip: 'assess_in_portfolio',
+};
+
+/** Tutor-only statuses get a precise refusal instead of the server's silent no-op. */
+const TUTOR_ONLY_STATUSES: ReadonlySet<string> = new Set([
+  'complete',
+  'discuss',
+  'demonstrate',
+  'fix_and_resubmit',
+  'redo',
+  'fail',
+  'time_exceeded',
+  'attention_required',
+  'rediscuss',
+  'feedback_exceeded',
+]);
+
+/** Parse and validate the requested student status transition. */
+function parseStudentStatusTrigger(raw: string | undefined): StudentStatusTrigger {
+  const validList = STUDENT_STATUS_TRIGGERS.join(', ');
+  if (!raw || !raw.trim()) {
+    throw new Error(`task set-status requires --status (${validList}).`);
+  }
+  const value = raw.trim().toLowerCase();
+  if ((STUDENT_STATUS_TRIGGERS as readonly string[]).includes(value)) {
+    return value as StudentStatusTrigger;
+  }
+  const aliased = STUDENT_STATUS_TRIGGER_ALIASES[value];
+  if (aliased) {
+    return aliased;
+  }
+  if (TUTOR_ONLY_STATUSES.has(value)) {
+    throw new Error(
+      `Status '${value}' can only be set by your tutor. Student-settable statuses: ${validList}.`,
+    );
+  }
+  throw new Error(`Unknown status '${raw.trim()}'. Student-settable statuses: ${validList}.`);
 }
 
 /** Preserve actionable artifact policy failures without exposing local paths or raw I/O errors. */
@@ -5032,6 +5080,167 @@ async function handleWatch(args: string[]): Promise<void> {
   }
 }
 
+/** Preview or apply one student task status transition. */
+async function handleTaskStatus(args: string[]): Promise<void> {
+  const session = await requireSession();
+  const api = createAuthenticatedApi(session);
+  const selector = parseTaskSelectorArgs(args);
+  const trigger = parseStudentStatusTrigger(parseOptionalString(args, '--status'));
+  const projects = await loadProjectsWithTaskMetadata(api, session, {
+    projectId: selector.projectId,
+  });
+  const resolved = resolveTaskSelector(projects, selector);
+  const before = resolved.task ? getTaskStatus(resolved.task) || null : null;
+  const mutation = {
+    method: 'PUT' as const,
+    endpoint: `/api/projects/${selector.projectId}/task_def_id/${resolved.taskDefId}`,
+    body: { trigger },
+  };
+  if (!hasFlag(args, '--confirm')) {
+    const preview = {
+      dryRun: true,
+      mutation,
+      before: { status: before },
+      idempotency: {
+        required_for_agent_apply: true,
+        key: requestedIdempotencyKey(args) ?? null,
+      },
+    };
+    if (hasFlag(args, '--json')) {
+      printJson(preview);
+    } else {
+      console.log('Dry run only. Re-run with --confirm to apply this status change.');
+      printJson(preview);
+    }
+    return;
+  }
+
+  const command = 'task.set_status';
+  const executionInput = {
+    project_id: selector.projectId,
+    task_definition_id: resolved.taskDefId,
+    status: trigger,
+  };
+  const claim = await claimConfirmedWrite(args, command, executionInput);
+  if (replayedWriteOutput(claim)) {
+    return;
+  }
+
+  let response: { status?: string } | undefined;
+  try {
+    response = await api.updateTaskStatus(
+      session,
+      selector.projectId,
+      resolved.taskDefId,
+      trigger,
+    );
+  } catch (error) {
+    if (isDefinitiveWriteRejection(error)) {
+      if (claim) {
+        await updateExecution(claim, command, executionInput, 'rejected');
+      }
+      if (error.status === 403 && trigger === 'ready_for_feedback') {
+        throw new AgentProtocolError({
+          code: 'FORBIDDEN',
+          summary:
+            'OnTrack refused ready_for_feedback: this task requires uploaded documents first. Use submission upload to attach files.',
+          nextActions: [
+            {
+              action: 'submission.upload',
+              arguments: {
+                project_id: selector.projectId,
+                task_definition_id: resolved.taskDefId,
+              },
+            },
+          ],
+          cause: error,
+        });
+      }
+      throw error;
+    }
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The status-change request was dispatched, but its outcome is unknown.',
+      'task.show',
+      { project_id: selector.projectId, task_definition_id: resolved.taskDefId },
+      error,
+    );
+  }
+  if (!response) {
+    throw new Error('Unreachable: the status update produced no response.');
+  }
+
+  const after =
+    typeof response.status === 'string' && response.status.trim()
+      ? response.status.trim()
+      : null;
+  if (!after) {
+    await recordUnknownWrite(
+      claim,
+      command,
+      executionInput,
+      'The status-change response did not include the resulting status.',
+      'task.show',
+      { project_id: selector.projectId, task_definition_id: resolved.taskDefId },
+    );
+    throw new Error('Unreachable after recording an unknown write outcome.');
+  }
+  if (after !== trigger && after === before) {
+    // A refused transition comes back as 200 with the unchanged task entity.
+    if (claim) {
+      await updateExecution(claim, command, executionInput, 'rejected');
+    }
+    throw new AgentProtocolError({
+      code: 'CONFLICT',
+      status: 'action_required',
+      summary: `OnTrack left the status at '${before ?? 'unknown'}': this transition is locked or tutor-only from the current state.`,
+      nextActions: [
+        {
+          action: 'task.show',
+          arguments: {
+            project_id: selector.projectId,
+            task_definition_id: resolved.taskDefId,
+          },
+        },
+      ],
+    });
+  }
+  const matched = after === trigger;
+  const output = {
+    ...(claim
+      ? {
+          operationId: claim.operationId,
+          idempotency: { replayed: false },
+        }
+      : {}),
+    confirmed: true,
+    verified: true,
+    matched,
+    ...(matched
+      ? {}
+      : {
+          note: `The server remapped the requested '${trigger}' transition to '${after}'.`,
+        }),
+    mutation,
+    before: { status: before },
+    after: { status: after },
+  };
+  if (claim) {
+    await updateExecution(claim, command, executionInput, 'succeeded', output);
+  }
+  if (hasFlag(args, '--json')) {
+    printJson(output);
+    return;
+  }
+  if (matched) {
+    console.log(`Updated ${resolved.abbr ?? `#${resolved.taskDefId}`} status to '${after}'.`);
+  } else {
+    console.log(`Status is now '${after}' (server remapped the requested '${trigger}').`);
+  }
+}
+
 /** Route subcommands under `ontrack task ...`. */
 async function handleTaskCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
@@ -5046,6 +5255,10 @@ async function handleTaskCommand(args: string[]): Promise<void> {
   }
   if (subcommand === 'resources') {
     await handleTaskResourceDownload(rest);
+    return;
+  }
+  if (subcommand === 'set-status') {
+    await handleTaskStatus(rest);
     return;
   }
   throw new Error(`Unknown task subcommand: ${subcommand || '(missing)'}`);

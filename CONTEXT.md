@@ -23,6 +23,11 @@ It records meaning, not TypeScript signatures or endpoint guesses.
   prerequisites, and date policy.
 - **Task Reference** — an unambiguous project plus Task Definition identity used by
   downstream read and write workflows. It never guesses from a Task Instance id.
+- **Status Trigger** — a student-settable Task Instance transition
+  (`working_on_it`, `need_help`, `not_started`, `ready_for_feedback`,
+  `assess_in_portfolio`) applied through `task set-status`. The server may refuse
+  a trigger with an unchanged 200 response or remap it (for example past-due
+  submissions), so the resulting status is always verified from the response.
 
 ## Submission
 
