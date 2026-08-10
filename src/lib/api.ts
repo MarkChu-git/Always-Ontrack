@@ -5,6 +5,7 @@ import type {
   ProjectSummary,
   RefreshCookieMaterial,
   SessionData,
+  StudentStatusTrigger,
   SubmissionTrigger,
   SignInResponse,
   UnitSummary,
@@ -1060,6 +1061,31 @@ export class OnTrackApiClient {
         ...authHeaders(this.activeSession(session)),
       },
     });
+  }
+
+  /**
+   * Trigger one task status transition. The server answers 200 with the task
+   * entity even when it refuses the trigger, so callers must compare the
+   * returned status against the requested one to detect a silent no-op.
+   */
+  updateTaskStatus(
+    session: SessionData,
+    projectId: number,
+    taskDefId: number,
+    trigger: StudentStatusTrigger,
+  ): Promise<{ status?: string }> {
+    return requestJson(
+      withApiPath(this.baseUrl, `projects/${projectId}/task_def_id/${taskDefId}`),
+      {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...authHeaders(this.activeSession(session)),
+        },
+        body: JSON.stringify({ trigger }),
+      },
+    );
   }
 
   /** Request a planner extension; the server contract is an integer week count. */
