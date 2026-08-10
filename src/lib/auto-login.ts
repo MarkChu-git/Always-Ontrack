@@ -42,6 +42,8 @@ export interface LoginCredentials {
   expiresAt?: string;
   source: "url" | "auth_request" | "auth_response" | "local_storage" | "cookie";
   contract?: "access-token" | "legacy-auth";
+  /** Refresh-cookie pair observed in the browser context, when it appeared. */
+  refreshCookie?: RefreshCookieMaterial;
 }
 
 /** Guided SSO options for username/password + MFA interaction mode. */
@@ -52,6 +54,8 @@ export interface SsoLoginOptions {
   password: string;
   timeoutMs?: number;
   headless?: boolean;
+  /** How long to poll for the refresh-cookie pair after a URL/request capture. */
+  refreshCookieWaitMs?: number;
   chooseMfaMethod?: (
     options: MfaMethodOption[],
   ) => Promise<number | null | undefined>;
@@ -804,6 +808,8 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
+  /** How long to poll for the refresh-cookie pair after a URL/request capture. */
+  refreshCookieWaitMs?: number;
   /** Trusted test/diagnostic seam; production resolves the operator environment. */
   browserPlan?: BrowserLaunchPlan;
   /** Trusted adapter seam for isolating live-profile policy in tests. */
@@ -1677,11 +1683,79 @@ function readManagedBrowserSessionState(
 }
 
 /**
+ * Extract the OnTrack refresh-cookie pair from a browser cookie jar. Accepts
+ * parent-domain cookies (the server may scope them above the exact host)
+ * while still rejecting foreign domains.
+ */
+export function extractRefreshCookieMaterial(
+  cookies: ReadonlyArray<{
+    name: string;
+    value: string;
+    domain?: string;
+    expires?: number;
+  }>,
+  targetOrigin: string,
+): RefreshCookieMaterial | null {
+  const targetHostname = new URL(targetOrigin).hostname.toLowerCase();
+  const appliesToTarget = (domain: string | undefined): boolean => {
+    const normalized = domain?.trim().toLowerCase().replace(/^\./, "");
+    if (!normalized) {
+      return true; // Host-only cookie set by the target host itself.
+    }
+    return normalized === targetHostname || targetHostname.endsWith(`.${normalized}`);
+  };
+  const refresh = cookies.find(
+    (cookie) => cookie.name === "refresh_token" && appliesToTarget(cookie.domain),
+  );
+  const user = cookies.find(
+    (cookie) => cookie.name === "username" && appliesToTarget(cookie.domain),
+  );
+  if (!refresh || !user) {
+    return null;
+  }
+  return {
+    username: user.value,
+    refreshToken: refresh.value,
+    ...(refresh.expires !== undefined && refresh.expires > 0
+      ? { expiresAt: new Date(refresh.expires * 1000).toISOString() }
+      : {}),
+  };
+}
+
+/**
+ * The refresh-cookie Set-Cookie can land slightly after the first captured
+ * credential signal (the frontend exchanges asynchronously after landing).
+ * Poll briefly so the pair is present before the browser state snapshot.
+ */
+export async function waitForRefreshCookieInContext(
+  context: Pick<BrowserContext, "cookies">,
+  targetOrigin: string,
+  budgetMs = 8_000,
+): Promise<RefreshCookieMaterial | null> {
+  const deadlineAt = Date.now() + Math.max(0, budgetMs);
+  for (;;) {
+    let cookies: Array<{ name: string; value: string; domain?: string; expires?: number }>;
+    try {
+      cookies = await context.cookies();
+    } catch {
+      return null;
+    }
+    const material = extractRefreshCookieMaterial(cookies, targetOrigin);
+    if (material) {
+      return material;
+    }
+    if (Date.now() >= deadlineAt) {
+      return null;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+}
+
+/**
  * Read the persisted OnTrack refresh-cookie pair from the trusted local
  * browser-state store. Returns null when absent, expired, or unreadable.
  */
-export function readStoredRefreshCookie(
-  options: { targetOrigin?: string } = {},
+export function readStoredRefreshCookie(  options: { targetOrigin?: string } = {},
 ): RefreshCookieMaterial | null {
   const targetOrigin = options.targetOrigin ?? DEFAULT_ONTRACK_ORIGIN;
   const state = readManagedBrowserSessionState(targetOrigin);
@@ -3395,6 +3469,23 @@ async function captureSsoCredentialsInternal(
         "Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.",
       );
     }
+    // The refresh-cookie Set-Cookie can land slightly after a URL/request
+    // capture (the frontend exchanges asynchronously after landing), so wait
+    // briefly for it before snapshotting. Response/storage/cookie captures
+    // already imply the exchange completed and get one immediate check.
+    const capturedFinal = captured as LoginCredentials;
+    const waitBudgetMs =
+      capturedFinal.source === "url" || capturedFinal.source === "auth_request"
+        ? Math.min(options.refreshCookieWaitMs ?? 8_000, Math.max(0, deadline.remainingMs()))
+        : 0;
+    const capturedRefreshCookie = await waitForRefreshCookieInContext(
+      context,
+      targetOrigin,
+      waitBudgetMs,
+    );
+    if (capturedRefreshCookie) {
+      capturedFinal.refreshCookie = capturedRefreshCookie;
+    }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
     try {
       await deadline.run(() => saveBrowserSessionState(context, { targetOrigin }));
@@ -3866,6 +3957,7 @@ export async function captureSsoCredentialsWithGuidedLogin(
       apiBaseUrl: options.apiBaseUrl,
       timeoutMs: options.timeoutMs,
       headless: options.headless,
+      refreshCookieWaitMs: options.refreshCookieWaitMs,
       browserAdapter: options.browserAdapter,
     },
     {

@@ -638,6 +638,7 @@ ontrack logout
 | `ontrack inbox` | Load inbox tasks or fallback task list | Prefers `/units/:id/tasks/inbox` and falls back when needed |
 | `ontrack task show --project-id <id> --abbr <abbr>` | Show one or many tasks | Supports repeated/comma selectors and `--all-tasks` |
 | `ontrack task resources --project-id <id> --abbr <abbr>` | Download task resource archive(s) | Uses the real `/units/:unitId/task_definitions/:taskDefId/task_resources.json?as_attachment=true` route; definition-first and batch-capable; saves `FIT0001-P1-TaskResources.zip`-style files; external output requires `--allow-external-dir` |
+| `ontrack task set-status --project-id <id> --abbr <abbr> --status <status>` | Preview or apply a student status transition | Student-settable: `working_on_it`, `need_help`, `not_started`, `ready_for_feedback`, `assess_in_portfolio` (aliases `rtm`/`rff`, `ns`, `aip`); dry-run by default; `--confirm` applies once; the resulting status is verified from the response |
 
 ### Feedback and live tracking
 
@@ -1237,10 +1238,10 @@ Supported now:
 - submission upload
 - new evidence or new file upload
 - posting a comment after upload
+- student task status transitions (`task set-status`)
 
 Not expanded yet:
 
-- broader task status mutations
 - more complex staff-side write workflows
 - interactive task pickers
 - persistent long-term watch deduplication across processes

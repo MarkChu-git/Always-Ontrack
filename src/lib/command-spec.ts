@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AGENT_NONEMPTY_SAFE_TEXT_PATTERN } from './agent-contract.js';
+import { STUDENT_STATUS_TRIGGERS } from './types.js';
 import {
   AGENT_TASKS_LIST_MAX_STATUS_LENGTH,
   agentProjectsListInputSchema,
@@ -339,6 +340,23 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
   spec({ path: 'task.prerequisites', description: 'Read prerequisites for one task.', fields: singleTaskReadFields, inputSchema: singleTaskReadInputSchema }),
   spec({ path: 'task.resources', description: 'Download task resource archives with artifact metadata.', fields: taskResourceFields, inputSchema: taskResourceInputSchema }),
   spec({
+    path: 'task.set_status',
+    description: 'Prepare or apply one student task status transition.',
+    risk: 'write',
+    idempotency: 'client_guarded',
+    fields: {
+      ...oneTaskSelector,
+      status: {
+        flag: '--status',
+        type: 'string',
+        required: true,
+        enum: STUDENT_STATUS_TRIGGERS,
+      },
+      confirm: booleanField('--confirm'),
+      idempotency_key: stringField('--idempotency-key'),
+    },
+  }),
+  spec({
     path: 'plan.show',
     description: 'Read the definition-first student plan.',
     fields: {
@@ -403,7 +421,12 @@ const GROUPED_PATHS: Readonly<Record<string, Readonly<Record<string, string>>>> 
   },
   project: { show: 'project.show' },
   unit: { show: 'unit.show', tasks: 'unit.tasks' },
-  task: { show: 'task.show', prerequisites: 'task.prerequisites', resources: 'task.resources' },
+  task: {
+    show: 'task.show',
+    prerequisites: 'task.prerequisites',
+    resources: 'task.resources',
+    'set-status': 'task.set_status',
+  },
   plan: { show: 'plan.show', 'set-dates': 'plan.set_dates', reset: 'plan.reset' },
   feedback: { list: 'feedback.list', watch: 'feedback.watch' },
   pdf: { task: 'pdf.task', submission: 'pdf.submission' },

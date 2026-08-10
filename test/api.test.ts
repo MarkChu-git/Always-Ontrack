@@ -1086,3 +1086,45 @@ test('refreshAccessToken collapses every decline shape to null', async () => {
     null,
   );
 });
+
+test('updateTaskStatus PUTs the trigger and returns the resulting entity status', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  let requestedUrl = '';
+  let requestedBody: unknown;
+  mockFetch(async (input, init) => {
+    requestedUrl = String(input);
+    assert.equal(init?.method, 'PUT');
+    assert.equal((init?.headers as Record<string, string>)['Auth-Token'], 'token-123');
+    requestedBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ status: 'need_help' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  const result = await client.updateTaskStatus(session, 101, 501, 'need_help');
+  assert.match(requestedUrl, /\/api\/projects\/101\/task_def_id\/501$/);
+  assert.deepEqual(requestedBody, { trigger: 'need_help' });
+  assert.equal(result.status, 'need_help');
+});
+
+test('updateTaskStatus surfaces server refusals as typed HTTP errors', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(
+    async () =>
+      new Response(JSON.stringify({ error: 'forbidden' }), {
+        status: 403,
+        statusText: 'Forbidden',
+        headers: { 'content-type': 'application/json' },
+      }),
+  );
+
+  await assert.rejects(
+    () => client.updateTaskStatus(session, 101, 501, 'ready_for_feedback'),
+    (error: unknown) => {
+      assert.ok(error instanceof OnTrackHttpError);
+      assert.equal(error.status, 403);
+      return true;
+    },
+  );
+});
