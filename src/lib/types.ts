@@ -289,6 +289,17 @@ export interface FeedbackItem {
 
 export type SubmissionTrigger = 'need_help' | 'ready_for_feedback';
 
+/** Status transitions a student may trigger on their own task via the task endpoint. */
+export const STUDENT_STATUS_TRIGGERS = [
+  'working_on_it',
+  'need_help',
+  'not_started',
+  'ready_for_feedback',
+  'assess_in_portfolio',
+] as const;
+
+export type StudentStatusTrigger = (typeof STUDENT_STATUS_TRIGGERS)[number];
+
 export type WatchEventType = 'status_changed' | 'due_changed' | 'new_feedback';
 
 /** Normalized watch delta emitted by status/feedback polling loops. */

@@ -591,6 +591,7 @@ ontrack logout
 | `ontrack inbox` | 读取 inbox / fallback task list | 优先走 `/units/:id/tasks/inbox`，失败时回退 |
 | `ontrack task show --project-id <id> --abbr <abbr>` | 查看单个或多个任务 | 支持重复/逗号 selector 与 `--all-tasks` |
 | `ontrack task resources --project-id <id> --abbr <abbr>` | 下载 task resource 压缩包 | 使用真实 `/units/:unitId/task_definitions/:taskDefId/task_resources.json?as_attachment=true` 路由；definition-first、支持批量；默认生成 `FIT0001-P1-TaskResources.zip`；外部目录必须显式 `--allow-external-dir` |
+| `ontrack task set-status --project-id <id> --abbr <abbr> --status <status>` | 预览或应用一次学生侧任务状态流转 | 学生可设：`working_on_it`、`need_help`、`not_started`、`ready_for_feedback`、`assess_in_portfolio`（别名 `rtm`/`rff`、`ns`、`aip`）；默认 dry-run；`--confirm` 才执行一次；结果状态从响应中校验 |
 
 ### 反馈与实时跟踪
 
@@ -1142,10 +1143,10 @@ FORCE_COLOR=1 ontrack tasks --project-id 87
 - 上传 submission
 - 上传 new evidence / new files
 - 上传后附带评论
+- 学生侧任务状态流转（`task set-status`）
 
 当前没有扩展到的方向包括:
 
-- 更大范围的任务状态写操作
 - 更复杂的 staff workflow mutation
 - 交互式任务选择器
 - 长期持久化 watch 去重状态

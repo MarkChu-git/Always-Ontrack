@@ -174,6 +174,7 @@ test('injected browser Adapter captures credentials from an exact OnTrack redire
     browserAdapter: createBrowserAdapter({
       urlAfterGoto: 'https://ontrack.infotech.monash.edu/sign_in?authToken=url-token&username=url-user',
     }),
+    refreshCookieWaitMs: 0,
   });
   assert.deepEqual(credentials, { authToken: 'url-token', username: 'url-user', source: 'url' });
 });
@@ -189,6 +190,7 @@ test('browser Adapter accepts only OnTrack auth request credentials and preserve
         postData: '{"auth_token":"request-token","username":"request-user"}',
       },
     }),
+    refreshCookieWaitMs: 0,
   });
   assert.deepEqual(credentials, { authToken: 'request-token', username: 'request-user', source: 'auth_request' });
 });
@@ -262,6 +264,7 @@ test('guided capture records terminal steps while using only fake visible select
       urlAfterGoto: 'https://monashuni.okta.com/login',
       guidedRedirectAfterPassword: 'https://ontrack.infotech.monash.edu/sign_in?authToken=guided-token&username=guided-user',
     }),
+    refreshCookieWaitMs: 0,
   }, (step) => steps.push(step));
   assert.equal(credentials.authToken, 'guided-token');
   assert.deepEqual(steps, ['username', 'password', 'completed']);
