@@ -1,3 +1,11 @@
+## Pull request workflow
+
+- Never merge a pull request on green CI alone. Before merging, self-review
+  the full diff with the repository `code-review` skill (Standards and Spec
+  axes), report the conclusion to the user, and only then merge. Resolve
+  review findings first, or get the user's explicit acceptance of them.
+- Merge only when every check is green, not just the required ones.
+
 ## graphify
 
 This project uses Graphify 0.9.31 for a knowledge graph in `graphify-out/`.
