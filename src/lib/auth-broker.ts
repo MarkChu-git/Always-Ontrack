@@ -102,6 +102,15 @@ async function sessionFromCapture(
     if (!captured.expiresAt) {
       throw new Error('The access-token response did not include an expiry.');
     }
+    // This path never re-exchanges over HTTP, so persist the refresh cookie
+    // observed in the browser context explicitly.
+    if (captured.refreshCookie) {
+      try {
+        dependencies.persistRefreshCookie(captured.refreshCookie, baseUrl);
+      } catch {
+        // Refresh-cookie persistence is best effort; the session itself is valid.
+      }
+    }
     return createSessionFromAccessToken(
       baseUrl,
       captured.username,
