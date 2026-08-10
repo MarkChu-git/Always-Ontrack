@@ -1,6 +1,6 @@
 {
   "name": "ontrack-cli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Agent-first CLI and authentication MCP for Monash OnTrack / Doubtfire",
   "license": "Apache-2.0",
   "repository": {
