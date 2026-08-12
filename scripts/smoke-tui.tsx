@@ -12,6 +12,8 @@
 import { testRender } from '@opentui/react/test-utils';
 import { act } from 'react';
 import { App } from '../src/tui/app';
+import type { LoadState } from '../src/tui/data';
+import { FAKE_TASKS } from '../src/tui/tasks';
 
 let failures = 0;
 
@@ -38,7 +40,13 @@ function locate(frame: string, text: string): { x: number; y: number } {
   throw new Error(`"${text}" not found in frame`);
 }
 
-const setup = await testRender(<App />, { width: 100, height: 32 });
+const readyLoad = async (): Promise<LoadState> => ({
+  kind: 'ready',
+  username: 'alice.zhang',
+  tasks: FAKE_TASKS,
+});
+
+const setup = await testRender(<App load={readyLoad} />, { width: 100, height: 32 });
 const { renderer, mockInput, mockMouse, captureCharFrame } = setup;
 
 // Warm-up keypress: forces the first real paint (capturing before any input
@@ -126,10 +134,60 @@ await act(async () => {
 });
 check('palette runs /theme and shows toast', captureCharFrame(), ['theme: light']);
 
+await act(async () => {
+  const at = locate(captureCharFrame(), 'FIT1045'); // header unit label (first occurrence)
+  await mockMouse.click(at.x, at.y);
+  await settle();
+});
+await act(async () => {
+  const again = locate(captureCharFrame(), 'FIT1045');
+  await mockMouse.click(again.x, again.y);
+  await settle();
+});
+check('click cycles unit filter', captureCharFrame(), ['all units']);
+
 // Wrap destroy in act: testRender's onDestroy unmounts the React root, and
 // doing it outside act() prints a spurious "not wrapped in act" warning.
 await act(async () => {
   renderer.destroy();
+});
+
+const authSetup = await testRender(
+  <App load={async (): Promise<LoadState> => ({ kind: 'auth_required' })} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await authSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+check('auth screen', authSetup.captureCharFrame(), ['Not signed in', 'ontrack login', 'r retry']);
+await act(async () => {
+  authSetup.renderer.destroy();
+});
+
+// First load fails, pressing r retries and the second load succeeds.
+let errCalls = 0;
+const flakyLoad = async (): Promise<LoadState> => {
+  errCalls += 1;
+  return errCalls === 1 ? { kind: 'error', message: 'boom' } : readyLoad();
+};
+const errSetup = await testRender(<App load={flakyLoad} />, { width: 100, height: 32 });
+await act(async () => {
+  await errSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+check('error screen', errSetup.captureCharFrame(), ['Failed to load tasks', 'boom']);
+await act(async () => {
+  await errSetup.mockInput.pressKey('r');
+  await settle();
+});
+// The async loader resolves outside the act batch; one more tick paints it.
+await act(async () => {
+  await settle();
+});
+check('r retries after error', errSetup.captureCharFrame(), ['Tasks (7)']);
+await act(async () => {
+  errSetup.renderer.destroy();
 });
 
 if (failures > 0) {
