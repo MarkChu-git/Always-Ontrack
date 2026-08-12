@@ -42,6 +42,16 @@ export const STATUS_ICON: Record<TaskStatus, string> = {
   complete: '✓',
 };
 
+/** Compact labels for dense UI regions like the status bar. */
+export const STATUS_SHORT_LABEL: Record<TaskStatus, string> = {
+  not_started: 'not started',
+  working_on_it: 'working',
+  need_help: 'need help',
+  ready_for_feedback: 'ready',
+  assess_in_portfolio: 'portfolio',
+  complete: 'complete',
+};
+
 export const FAKE_USER = 'alice.zhang';
 export const FAKE_UNIT = 'FIT1045';
 

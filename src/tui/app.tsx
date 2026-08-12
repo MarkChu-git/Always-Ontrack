@@ -8,6 +8,7 @@ import {
   FAKE_USER,
   STATUS_ICON,
   STATUS_LABEL,
+  STATUS_SHORT_LABEL,
   type FakeTask,
   type TaskStatus,
 } from './tasks';
@@ -44,6 +45,18 @@ function matches(task: FakeTask, query: string): boolean {
     task.unit.toLowerCase().includes(q) ||
     STATUS_LABEL[task.status].toLowerCase().includes(q)
   );
+}
+
+/** Subsequence match, opencode-palette style: "th" matches "theme". */
+function fuzzyMatch(query: string, text: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === '') return true;
+  let i = 0;
+  for (const ch of text.toLowerCase()) {
+    if (ch === q[i]) i += 1;
+    if (i === q.length) return true;
+  }
+  return false;
 }
 
 function dueBadge(task: FakeTask, theme: Theme): { text: string; fg: string } {
@@ -247,7 +260,7 @@ function StatusBar({ theme, tasks }: { theme: Theme; tasks: FakeTask[] }) {
               <span fg={theme.status[s]}>{STATUS_ICON[s]}</span>
               <span fg={theme.muted}>
                 {' '}
-                {counts.get(s)} {s === 'ready_for_feedback' ? 'ready' : s === 'need_help' ? 'need help' : 'working'}
+                {counts.get(s)} {STATUS_SHORT_LABEL[s]}
                 {i < parts.length - 1 ? '  ' : ''}
               </span>
             </span>
@@ -291,10 +304,23 @@ export function App() {
     if (mode === 'palette') paletteInputRef.current?.focus();
   }, [mode]);
 
+  // Never leave a pending toast timer behind on unmount.
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+
   const showToast = (msg: string) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2500);
+  };
+
+  const clearFilterInput = () => {
+    setQuery('');
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   const toggleWatch = () => {
@@ -325,48 +351,49 @@ export function App() {
     return counts;
   }, []);
 
-  const commands: Command[] = [
-    {
-      name: 'login',
-      description: 'Sign in with Monash SSO',
-      run: () => showToast('login flow not wired yet (skeleton)'),
-    },
-    {
-      name: 'submit',
-      description: 'Submit files for the selected task',
-      run: () => showToast('submission wizard not wired yet (skeleton)'),
-    },
-    { name: 'watch', description: 'Toggle watch mode', run: toggleWatch },
-    {
-      name: 'theme',
-      description: 'Switch dark / light theme',
-      run: () => {
-        setTheme((t) => {
-          const next = t.name === 'dark' ? lightTheme : darkTheme;
-          showToast(`theme: ${next.name}`);
-          return next;
-        });
+  // Command closures only touch stable refs/setters, so memoize once and keep
+  // visibleCommands' dependency list honest.
+  const commands = useMemo<Command[]>(
+    () => [
+      {
+        name: 'login',
+        description: 'Sign in with Monash SSO',
+        run: () => showToast('login flow not wired yet (skeleton)'),
       },
-    },
-    {
-      name: 'quit',
-      description: 'Exit the TUI',
-      run: () => {
-        renderer.destroy();
-        process.exit(0);
+      {
+        name: 'submit',
+        description: 'Submit files for the selected task',
+        run: () => showToast('submission wizard not wired yet (skeleton)'),
       },
-    },
-  ];
+      { name: 'watch', description: 'Toggle watch mode', run: toggleWatch },
+      {
+        name: 'theme',
+        description: 'Switch dark / light theme',
+        run: () => {
+          setTheme((t) => {
+            const next = t.name === 'dark' ? lightTheme : darkTheme;
+            showToast(`theme: ${next.name}`);
+            return next;
+          });
+        },
+      },
+      {
+        name: 'quit',
+        description: 'Exit the TUI',
+        run: () => {
+          renderer.destroy();
+          process.exit(0);
+        },
+      },
+    ],
+    [],
+  );
 
   const visibleCommands = useMemo(() => {
     const q = paletteQuery.trim().toLowerCase();
     if (q === '') return commands;
-    return commands.filter(
-      (c) => c.name.includes(q) || c.description.toLowerCase().includes(q),
-    );
-    // commands is stable across renders except for its showToast closures.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paletteQuery]);
+    return commands.filter((c) => fuzzyMatch(q, c.name) || fuzzyMatch(q, c.description));
+  }, [paletteQuery, commands]);
 
   const runCommand = (raw: string) => {
     const name = raw.replace(/^\//, '').trim().toLowerCase();
@@ -395,8 +422,7 @@ export function App() {
       } else if (mode === 'detail') {
         setMode('main');
       } else if (query !== '') {
-        setQuery('');
-        if (inputRef.current) inputRef.current.value = '';
+        clearFilterInput();
       }
       return;
     }
@@ -418,8 +444,7 @@ export function App() {
     const v = String(value).trim();
     if (v.startsWith('/')) {
       runCommand(v);
-      setQuery('');
-      if (inputRef.current) inputRef.current.value = '';
+      clearFilterInput();
       return;
     }
     if (selectedTask) setMode('detail');

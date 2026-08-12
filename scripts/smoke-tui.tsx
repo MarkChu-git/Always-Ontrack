@@ -126,7 +126,11 @@ await act(async () => {
 });
 check('palette runs /theme and shows toast', captureCharFrame(), ['theme: light']);
 
-renderer.destroy();
+// Wrap destroy in act: testRender's onDestroy unmounts the React root, and
+// doing it outside act() prints a spurious "not wrapped in act" warning.
+await act(async () => {
+  renderer.destroy();
+});
 
 if (failures > 0) {
   console.error(`\n${failures} smoke check(s) failed`);

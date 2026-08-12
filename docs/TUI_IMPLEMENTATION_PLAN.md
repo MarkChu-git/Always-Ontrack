@@ -1,7 +1,7 @@
 # OnTrack TUI 全面实施计划
 
 状态：TUI 骨架（OpenTUI + React，假数据）已完成并通过 10/10 无头冒烟；本计划覆盖全功能接入
-骨架分支：`codex/pr-review-rule` 工作区（未提交）
+骨架分支：`feat/tui-skeleton`（PR #53）
 协议目标：TUI 不引入新业务行为，只做 `src/lib/` 能力的人类渲染层
 
 ## 1. 定位与原则
@@ -20,12 +20,9 @@ TUI 是 agent-first 核心之上的第二个前端。它与 agent 协议共享�
 
 ## 2. 分支与 PR 策略
 
-当前骨架改动挂在 `codex/pr-review-rule` 工作区（未提交），该分支是 PR 审查
-规则的文档分支，不应混入 TUI 代码。建议：
-
-1. `feat/tui-skeleton`（从 `main` 切出）— 骨架 + 冒烟测试 + AGENTS.md 说明，
-   作为第一个 PR。操作步骤：stash → checkout main → 新分支 → pop → 提交。
-2. 后续每个阶段（见 §4）一个分支一个 PR，叠在 skeleton 合并后的 main 上。
+1. `feat/tui-skeleton`（从 `origin/master` 切出，已完成）— 骨架 + 冒烟测试 +
+   AGENTS.md 说明，即 PR #53。
+2. 后续每个阶段（见 §4）一个分支一个 PR，叠在 skeleton 合并后的 master 上。
 3. 遵循仓库规则：每个 PR 合并前用 `code-review` skill 自审（Standards + Spec
    两轴），全部检查绿才合并。
 

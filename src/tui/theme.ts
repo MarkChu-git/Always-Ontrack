@@ -1,6 +1,6 @@
 /**
  * Theme tokens for the OnTrack TUI.
- * Status colors map 1:1 to the OnTrack Status Trigger semantics.
+ * Status colors map 1:1 to OnTrack task status semantics.
  */
 export interface Theme {
   name: string;
