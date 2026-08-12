@@ -1,7 +1,7 @@
 /**
- * Fake task data for the TUI skeleton.
- * Mirrors the domain's Student Task View shape loosely; will be replaced
- * by real projections from src/lib/student-task-view.ts once wired up.
+ * TUI task model plus a fake fixture used by the headless smoke test.
+ * The production data path maps Student Task Views onto this model in
+ * src/tui/data.ts (`viewToTuiTask`).
  */
 export type TaskStatus =
   | 'not_started'
@@ -11,17 +11,25 @@ export type TaskStatus =
   | 'assess_in_portfolio'
   | 'complete';
 
-export interface FakeTask {
+export interface TuiTask {
   id: string;
   unit: string;
   title: string;
   status: TaskStatus;
+  /** The un-bucketed OnTrack workflow status, e.g. 'fix_and_resubmit'. */
+  statusRaw?: string;
   due: string;
-  /** Days until the effective due date; negative means overdue. */
-  dueInDays: number;
+  /** Days until the effective due date; negative means overdue, null means no date. */
+  dueInDays: number | null;
   dateSource: 'unit default' | 'personal override';
   description: string;
   prerequisites: string[];
+}
+
+/** Humanize a raw OnTrack status ('fix_and_resubmit' → 'Fix and resubmit'). */
+export function humanizeStatus(raw: string): string {
+  const spaced = raw.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -52,10 +60,7 @@ export const STATUS_SHORT_LABEL: Record<TaskStatus, string> = {
   complete: 'complete',
 };
 
-export const FAKE_USER = 'alice.zhang';
-export const FAKE_UNIT = 'FIT1045';
-
-export const FAKE_TASKS: FakeTask[] = [
+export const FAKE_TASKS: TuiTask[] = [
   {
     id: '1',
     unit: 'FIT1045',

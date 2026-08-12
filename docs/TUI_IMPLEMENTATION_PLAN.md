@@ -73,12 +73,13 @@ UI 显示响应里的最终状态而非乐观值）。
   （代替任务列表）。
 - 任务列表/详情接入 `resolveStudentTaskViews` / `buildStudentTaskRows` 投影；
   多 unit 时在顶栏加 unit 切换（`agent-projects` / `agent-units` 数据）。
-- 详情面板补充 `agentTaskShowOutput` 的完整字段：Effective Date 及其来源、
-  前置任务（`agentTaskPrerequisites`）、资源/任务 PDF 下载入口
-  （`agent-task-pdf`，落到 `downloads/`）。
+- 详情面板补充投影字段：Effective Date 及其来源。前置任务
+  （`agentTaskPrerequisites`）与资源/任务 PDF 下载入口移至 Phase 4 随提交
+  向导一起做，避免在此引入只读下载的半成品。
 - 视图状态三态：loading / error（结构化错误 + 建议动作）/ empty。
-- 验收：冒烟脚本换成 contract fixture 数据驱动；真实账号手动验证
-  （`smoke:real` 流程不回归）。
+- 验收：数据映射由 contract fixture 单测覆盖；交互冒烟用合成数据驱动
+  （需要多任务、多状态覆盖交互路径）；真实账号手动验证（`smoke:real`
+  流程不回归）。
 
 ### Phase 2 — 认证向导
 
@@ -98,8 +99,10 @@ UI 显示响应里的最终状态而非乐观值）。
   重映射，UI 以响应中的最终状态为准并刷新该任务行；结果显示 toast。
 - 验收：覆盖"服务器重映射状态"的 fixture 测试；确认对话框防误触。
 
-### Phase 4 — 提交向导
+### Phase 4 — 提交向导与任务资源
 
+- 详情面板补充前置任务（`agentTaskPrerequisites`）与资源/任务 PDF 下载
+  入口（`agent-task-pdf`，落到 `downloads/`）。
 - Wizard 步骤：Evidence Slot 清单 → 文件选择（路径输入 + 校验，
   `inspectUploadFile` / `readUploadArtifact`，外部路径需显式授权，沿用
   `--allow-external-file` 语义）→ 预检摘要 → 单发派送 + 进度 → 服务器回执。

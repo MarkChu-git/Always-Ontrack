@@ -1,22 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InputRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer } from '@opentui/react';
+import type { LoadState, TaskLoader } from './data';
 import { darkTheme, lightTheme, type Theme } from './theme';
 import {
-  FAKE_TASKS,
-  FAKE_UNIT,
-  FAKE_USER,
   STATUS_ICON,
   STATUS_LABEL,
   STATUS_SHORT_LABEL,
-  type FakeTask,
+  humanizeStatus,
   type TaskStatus,
+  type TuiTask,
 } from './tasks';
 
 type Mode = 'main' | 'detail' | 'palette';
 type TabId = 'all' | 'active' | 'ready' | 'done';
 
-const TABS: { id: TabId; label: string; match: (t: FakeTask) => boolean }[] = [
+const TABS: { id: TabId; label: string; match: (t: TuiTask) => boolean }[] = [
   { id: 'all', label: 'All', match: () => true },
   {
     id: 'active',
@@ -37,7 +36,7 @@ interface Command {
   run: () => void;
 }
 
-function matches(task: FakeTask, query: string): boolean {
+function matches(task: TuiTask, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (q === '') return true;
   return (
@@ -59,8 +58,9 @@ function fuzzyMatch(query: string, text: string): boolean {
   return false;
 }
 
-function dueBadge(task: FakeTask, theme: Theme): { text: string; fg: string } {
+function dueBadge(task: TuiTask, theme: Theme): { text: string; fg: string } {
   if (task.status === 'complete') return { text: 'done', fg: theme.status.complete };
+  if (task.dueInDays === null) return { text: 'no date', fg: theme.muted };
   const days = task.dueInDays;
   if (days < 0) return { text: `${-days}d overdue`, fg: theme.urgent };
   if (days === 0) return { text: 'today', fg: theme.soon };
@@ -68,11 +68,13 @@ function dueBadge(task: FakeTask, theme: Theme): { text: string; fg: string } {
   return { text: `in ${days}d`, fg: theme.muted };
 }
 
-function StatusPill({ status, theme }: { status: TaskStatus; theme: Theme }) {
+function StatusPill({ task, theme }: { task: TuiTask; theme: Theme }) {
+  // Colour comes from the bucket; the label stays the honest raw status.
+  const label = task.statusRaw ? humanizeStatus(task.statusRaw) : STATUS_LABEL[task.status];
   return (
     <box
       style={{
-        backgroundColor: theme.status[status],
+        backgroundColor: theme.status[task.status],
         paddingLeft: 1,
         paddingRight: 1,
         alignSelf: 'flex-start',
@@ -80,7 +82,7 @@ function StatusPill({ status, theme }: { status: TaskStatus; theme: Theme }) {
     >
       <text>
         <strong fg={theme.onAccent}>
-          {STATUS_ICON[status]} {STATUS_LABEL[status]}
+          {STATUS_ICON[task.status]} {label}
         </strong>
       </text>
     </box>
@@ -91,10 +93,16 @@ function Header({
   theme,
   watchOn,
   onToggleWatch,
+  username,
+  unitLabel,
+  onCycleUnit,
 }: {
   theme: Theme;
   watchOn: boolean;
   onToggleWatch: () => void;
+  username: string | null;
+  unitLabel: string;
+  onCycleUnit: () => void;
 }) {
   return (
     <box
@@ -109,11 +117,16 @@ function Header({
     >
       <ascii-font text="OnTrack" font="tiny" color={theme.accent} backgroundColor={theme.panel} />
       <box style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 0 }}>
-        <text>
-          <span fg={theme.status.complete}>● </span>
-          <span fg={theme.fg}>{FAKE_USER}</span>
-          <span fg={theme.muted}> · {FAKE_UNIT}</span>
-        </text>
+        <box style={{ flexDirection: 'row' }}>
+          <text>
+            <span fg={username ? theme.status.complete : theme.muted}>● </span>
+            <span fg={theme.fg}>{username ?? 'not signed in'}</span>
+            <span fg={theme.muted}> · </span>
+          </text>
+          <text onMouseDown={onCycleUnit}>
+            <span fg={theme.accent}>{unitLabel}</span>
+          </text>
+        </box>
         <box
           onMouseDown={onToggleWatch}
           style={{
@@ -175,7 +188,7 @@ function TaskRow({
   onHover,
   onOpen,
 }: {
-  task: FakeTask;
+  task: TuiTask;
   selected: boolean;
   hovered: boolean;
   theme: Theme;
@@ -204,22 +217,22 @@ function TaskRow({
   );
 }
 
-function TaskDetailBody({ task, theme }: { task: FakeTask; theme: Theme }) {
+function TaskDetailBody({ task, theme }: { task: TuiTask; theme: Theme }) {
   const badge = dueBadge(task, theme);
   return (
     <box style={{ flexDirection: 'column', gap: 1 }}>
-      <StatusPill status={task.status} theme={theme} />
+      <StatusPill task={task} theme={theme} />
       <text>
         <span fg={theme.muted}>Due    </span>
         <span fg={theme.fg}>{task.due}</span>
         <span fg={badge.fg}>  {badge.text}</span>
-        <span fg={theme.muted}>  ({task.dateSource})</span>
+        {task.dueInDays !== null ? <span fg={theme.muted}>  ({task.dateSource})</span> : null}
       </text>
       <text>
         <span fg={theme.muted}>Unit   </span>
         <span fg={theme.fg}>{task.unit}</span>
       </text>
-      <text fg={theme.fg}>{task.description}</text>
+      {task.description !== '' ? <text fg={theme.fg}>{task.description}</text> : null}
       {task.prerequisites.length > 0 ? (
         <text>
           <span fg={theme.muted}>Requires </span>
@@ -230,7 +243,7 @@ function TaskDetailBody({ task, theme }: { task: FakeTask; theme: Theme }) {
   );
 }
 
-function StatusBar({ theme, tasks }: { theme: Theme; tasks: FakeTask[] }) {
+function StatusBar({ theme, tasks }: { theme: Theme; tasks: TuiTask[] }) {
   const counts = useMemo(() => {
     const map = new Map<TaskStatus, number>();
     for (const t of tasks) map.set(t.status, (map.get(t.status) ?? 0) + 1);
@@ -281,11 +294,54 @@ function StatusBar({ theme, tasks }: { theme: Theme; tasks: FakeTask[] }) {
   );
 }
 
-export function App() {
+/** Full-screen states used before the task catalogue becomes available. */
+function NoticeScreen({
+  theme,
+  title,
+  lines,
+  hint,
+}: {
+  theme: Theme;
+  title: string;
+  lines: string[];
+  hint: string;
+}) {
+  return (
+    <box style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <box
+        style={{
+          border: true,
+          borderStyle: 'rounded',
+          borderColor: theme.border,
+          backgroundColor: theme.panel,
+          padding: 2,
+          flexDirection: 'column',
+          gap: 1,
+          width: 64,
+        }}
+      >
+        <text>
+          <strong fg={theme.fg}>{title}</strong>
+        </text>
+        {lines.map((line) => (
+          <text key={line} fg={theme.muted}>
+            {line}
+          </text>
+        ))}
+        <text fg={theme.accent}>{hint}</text>
+      </box>
+    </box>
+  );
+}
+
+export function App({ load }: { load: TaskLoader }) {
   const renderer = useRenderer();
   const [theme, setTheme] = useState<Theme>(darkTheme);
+  const [screen, setScreen] = useState<LoadState>({ kind: 'loading' });
+  const [reloadTick, setReloadTick] = useState(0);
   const [mode, setMode] = useState<Mode>('main');
   const [tab, setTab] = useState<TabId>('all');
+  const [unitFilter, setUnitFilter] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [paletteQuery, setPaletteQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -296,6 +352,16 @@ export function App() {
   const inputRef = useRef<InputRenderable>(null);
   const paletteInputRef = useRef<InputRenderable>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void load().then((state) => {
+      if (live) setScreen(state);
+    });
+    return () => {
+      live = false;
+    };
+  }, [load, reloadTick]);
 
   // Focus is imperative and race-prone in OpenTUI; re-assert it on mode
   // changes instead of relying only on the `focused` prop.
@@ -330,6 +396,20 @@ export function App() {
     });
   };
 
+  const tasks = screen.kind === 'ready' ? screen.tasks : [];
+  const units = useMemo(() => [...new Set(tasks.map((t) => t.unit))].sort(), [tasks]);
+  const unitLabel = unitFilter ?? (units.length > 1 ? 'all units' : (units[0] ?? '—'));
+
+  const cycleUnit = () => {
+    if (units.length === 0) return;
+    const order: (string | null)[] = [null, ...units];
+    const i = order.indexOf(unitFilter);
+    const next = order[(i + 1) % order.length];
+    setUnitFilter(next);
+    setSelected(0);
+    showToast(next === null ? 'all units' : `unit: ${next}`);
+  };
+
   const cycleTab = (dir: 1 | -1) => {
     setTab((current) => {
       const i = TABS.findIndex((t) => t.id === current);
@@ -340,16 +420,22 @@ export function App() {
   };
 
   const visible = useMemo(
-    () => FAKE_TASKS.filter((t) => TABS.find((x) => x.id === tab)!.match(t) && matches(t, query)),
-    [tab, query],
+    () =>
+      tasks.filter(
+        (t) =>
+          (unitFilter === null || t.unit === unitFilter) &&
+          TABS.find((x) => x.id === tab)!.match(t) &&
+          matches(t, query),
+      ),
+    [tasks, unitFilter, tab, query],
   );
   const selectedTask = visible[Math.min(selected, Math.max(visible.length - 1, 0))];
 
   const tabCounts = useMemo(() => {
     const counts = {} as Record<TabId, number>;
-    for (const t of TABS) counts[t.id] = FAKE_TASKS.filter(t.match).length;
+    for (const t of TABS) counts[t.id] = tasks.filter(t.match).length;
     return counts;
-  }, []);
+  }, [tasks]);
 
   // Command closures only touch stable refs/setters, so memoize once and keep
   // visibleCommands' dependency list honest.
@@ -358,12 +444,12 @@ export function App() {
       {
         name: 'login',
         description: 'Sign in with Monash SSO',
-        run: () => showToast('login flow not wired yet (skeleton)'),
+        run: () => showToast('login wizard lands in phase 2 — run `ontrack login` in a terminal'),
       },
       {
         name: 'submit',
         description: 'Submit files for the selected task',
-        run: () => showToast('submission wizard not wired yet (skeleton)'),
+        run: () => showToast('submission wizard lands in phase 4'),
       },
       { name: 'watch', description: 'Toggle watch mode', run: toggleWatch },
       {
@@ -412,6 +498,10 @@ export function App() {
       setPaletteSelected(0);
       return;
     }
+    if (screen.kind === 'error' || screen.kind === 'auth_required') {
+      if (key.name === 'r') setReloadTick((n) => n + 1);
+      return;
+    }
     if (key.ctrl && (key.name === 'right' || key.name === 'left')) {
       if (mode === 'main') cycleTab(key.name === 'right' ? 1 : -1);
       return;
@@ -450,6 +540,8 @@ export function App() {
     if (selectedTask) setMode('detail');
   };
 
+  const ready = screen.kind === 'ready';
+
   return (
     <box
       style={{
@@ -459,103 +551,149 @@ export function App() {
         backgroundColor: theme.bg,
       }}
     >
-      <Header theme={theme} watchOn={watchOn} onToggleWatch={toggleWatch} />
+      <Header
+        theme={theme}
+        watchOn={watchOn}
+        onToggleWatch={toggleWatch}
+        username={screen.kind === 'ready' ? screen.username : null}
+        unitLabel={unitLabel}
+        onCycleUnit={cycleUnit}
+      />
 
-      <Tabs theme={theme} tab={tab} counts={tabCounts} onSelect={(t) => { setTab(t); setSelected(0); }} />
-
-      <box style={{ flexDirection: 'row', flexGrow: 1, padding: 1, gap: 1 }}>
-        <box
-          title={`Tasks (${visible.length})`}
-          titleColor={theme.muted}
-          style={{
-            border: true,
-            borderStyle: 'rounded',
-            borderColor: theme.border,
-            width: '45%',
-            flexDirection: 'column',
-            backgroundColor: theme.panel,
-          }}
-        >
-          {visible.length === 0 ? (
-            <box style={{ padding: 1 }}>
-              <text fg={theme.muted}>no tasks match "{query}"</text>
-            </box>
-          ) : (
-            visible.map((task, i) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                selected={i === selected && mode !== 'palette'}
-                hovered={i === hovered}
-                theme={theme}
-                onHover={() => setHovered(i)}
-                onOpen={() => {
-                  setSelected(i);
-                  setMode('detail');
-                }}
-              />
-            ))
-          )}
-        </box>
-
-        {selectedTask ? (
-          <box
-            title={selectedTask.title}
-            titleColor={theme.fg}
-            style={{
-              border: true,
-              borderStyle: 'rounded',
-              borderColor: theme.border,
-              flexGrow: 1,
-              padding: 1,
-              backgroundColor: theme.panel,
-            }}
-          >
-            <TaskDetailBody task={selectedTask} theme={theme} />
-          </box>
-        ) : (
-          <box
-            style={{
-              border: true,
-              borderStyle: 'rounded',
-              borderColor: theme.border,
-              flexGrow: 1,
-              backgroundColor: theme.panel,
-              padding: 1,
-            }}
-          >
-            <text fg={theme.muted}>nothing selected</text>
-          </box>
-        )}
-      </box>
-
-      <box
-        style={{
-          border: true,
-          borderStyle: 'rounded',
-          borderColor: mode === 'main' ? theme.accent : theme.border,
-          marginLeft: 1,
-          marginRight: 1,
-          flexDirection: 'row',
-          paddingLeft: 1,
-          backgroundColor: theme.panel,
-        }}
-      >
-        <text fg={theme.accent}>❯ </text>
-        <input
-          ref={inputRef}
-          placeholder="Filter tasks…  (type / for commands)"
-          focused={mode === 'main'}
-          onInput={(value: string) => {
-            setQuery(value);
-            setSelected(0);
-          }}
-          onSubmit={onSubmitInput}
-          style={{ flexGrow: 1, backgroundColor: theme.panel, focusedBackgroundColor: theme.panel }}
+      {!ready ? (
+        <NoticeScreen
+          theme={theme}
+          title={
+            screen.kind === 'loading'
+              ? 'Loading tasks…'
+              : screen.kind === 'auth_required'
+                ? 'Not signed in'
+                : 'Failed to load tasks'
+          }
+          lines={
+            screen.kind === 'loading'
+              ? ['Reading the stored session and projecting your Student Task View.']
+              : screen.kind === 'auth_required'
+                ? [
+                    'The TUI needs a stored OnTrack session.',
+                    'Run `ontrack login` in another terminal, then come back.',
+                    '(The in-TUI SSO wizard lands in phase 2.)',
+                  ]
+                : [screen.message]
+          }
+          hint={screen.kind === 'loading' ? '' : 'r retry · ctrl+c quit'}
         />
-      </box>
+      ) : (
+        <>
+          <Tabs
+            theme={theme}
+            tab={tab}
+            counts={tabCounts}
+            onSelect={(t) => {
+              setTab(t);
+              setSelected(0);
+            }}
+          />
 
-      <StatusBar theme={theme} tasks={FAKE_TASKS} />
+          <box style={{ flexDirection: 'row', flexGrow: 1, padding: 1, gap: 1 }}>
+            <box
+              title={`Tasks (${visible.length})`}
+              titleColor={theme.muted}
+              style={{
+                border: true,
+                borderStyle: 'rounded',
+                borderColor: theme.border,
+                width: '45%',
+                flexDirection: 'column',
+                backgroundColor: theme.panel,
+              }}
+            >
+              {visible.length === 0 ? (
+                <box style={{ padding: 1 }}>
+                  <text fg={theme.muted}>
+                    {query !== '' || tab !== 'all' || unitFilter !== null
+                      ? 'no tasks match the current filters'
+                      : 'all clear — no tasks due'}
+                  </text>
+                </box>
+              ) : (
+                visible.map((task, i) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    selected={i === selected && mode !== 'palette'}
+                    hovered={i === hovered}
+                    theme={theme}
+                    onHover={() => setHovered(i)}
+                    onOpen={() => {
+                      setSelected(i);
+                      setMode('detail');
+                    }}
+                  />
+                ))
+              )}
+            </box>
+
+            {selectedTask ? (
+              <box
+                title={selectedTask.title}
+                titleColor={theme.fg}
+                style={{
+                  border: true,
+                  borderStyle: 'rounded',
+                  borderColor: theme.border,
+                  flexGrow: 1,
+                  padding: 1,
+                  backgroundColor: theme.panel,
+                }}
+              >
+                <TaskDetailBody task={selectedTask} theme={theme} />
+              </box>
+            ) : (
+              <box
+                style={{
+                  border: true,
+                  borderStyle: 'rounded',
+                  borderColor: theme.border,
+                  flexGrow: 1,
+                  backgroundColor: theme.panel,
+                  padding: 1,
+                }}
+              >
+                <text fg={theme.muted}>nothing selected</text>
+              </box>
+            )}
+          </box>
+
+          <box
+            style={{
+              border: true,
+              borderStyle: 'rounded',
+              borderColor: mode === 'main' ? theme.accent : theme.border,
+              marginLeft: 1,
+              marginRight: 1,
+              flexDirection: 'row',
+              paddingLeft: 1,
+              backgroundColor: theme.panel,
+            }}
+          >
+            <text fg={theme.accent}>❯ </text>
+            <input
+              ref={inputRef}
+              placeholder="Filter tasks…  (type / for commands)"
+              focused={mode === 'main'}
+              onInput={(value: string) => {
+                setQuery(value);
+                setSelected(0);
+              }}
+              onSubmit={onSubmitInput}
+              style={{ flexGrow: 1, backgroundColor: theme.panel, focusedBackgroundColor: theme.panel }}
+            />
+          </box>
+
+          <StatusBar theme={theme} tasks={tasks} />
+        </>
+      )}
 
       {mode === 'detail' && selectedTask ? (
         <box
