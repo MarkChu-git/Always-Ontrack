@@ -13,12 +13,12 @@ import {
 } from '../lib/project-catalogue';
 import { buildStudentTaskViews, type StudentTaskView } from '../lib/student-task-view';
 import { redactSensitiveText, normalizeBaseUrl } from '../lib/utils';
-import { toWhoAmIView } from '../lib/whoami';
+import { toWhoAmIView, type WhoAmIView } from '../lib/whoami';
 import type { TaskStatus, TuiTask } from './tasks';
 
 export type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; username: string; tasks: TuiTask[] }
+  | { kind: 'ready'; identity: WhoAmIView; expiresAt: string | null; tasks: TuiTask[] }
   | { kind: 'auth_required' }
   | { kind: 'error'; message: string };
 
@@ -114,7 +114,12 @@ export const loadOnTrackTasks: TaskLoader = async () => {
     const api = createAuthenticatedApi(session);
     const projects = await loadProjectsWithTaskMetadata(api, session);
     const tasks = buildStudentTaskViews(projects).map(viewToTuiTask);
-    return { kind: 'ready', username: toWhoAmIView(session).username, tasks };
+    return {
+      kind: 'ready',
+      identity: toWhoAmIView(session),
+      expiresAt: session.expiresAt ?? null,
+      tasks,
+    };
   } catch (err) {
     if (err instanceof OnTrackHttpError && err.authFailure !== 'other') {
       return { kind: 'auth_required' };
