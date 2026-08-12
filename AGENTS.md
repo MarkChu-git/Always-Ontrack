@@ -1,3 +1,19 @@
+## TUI (experimental)
+
+An OpenTUI/React skeleton lives in `src/tui/` (separate from the agent-first
+CLI core in `src/lib/`). It currently runs on fake data and is not wired into
+the `ontrack` entry point.
+
+- `bun run tui` starts it; `bun run typecheck:tui` type-checks it against
+  `tsconfig.tui.json` (the main `tsconfig.json` excludes `src/tui`, so the
+  published `dist/` build is unaffected).
+- `bun scripts/smoke-tui.tsx` is the headless smoke test. Quirks it
+  encapsulates: capture before first paint returns an uninitialized buffer;
+  under `testRender` a state update needs a short settle before input typing
+  works again; a lone ESC byte needs a beat for the key parser.
+- In `src/tui`, focus inputs imperatively via refs on mode changes; the
+  `focused` prop alone races when overlays mount/unmount.
+
 ## Pull request workflow
 
 - Never merge a pull request on green CI alone. Before merging, self-review
