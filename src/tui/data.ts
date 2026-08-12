@@ -1,13 +1,16 @@
 /**
  * Real data path for the TUI: composes the public src/lib primitives
- * (auth broker, API client, Student Task View projection) into one loader.
- * Contains no business rules of its own — date precedence and visibility
- * stay in src/lib/student-task-view.ts.
+ * (auth broker, project catalogue loader, Student Task View projection)
+ * into one loader. Contains no business rules of its own — date precedence
+ * and visibility stay in src/lib/student-task-view.ts.
  */
 import { OnTrackHttpError } from '../lib/auth';
-import { OnTrackApiClient } from '../lib/api';
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
+import {
+  createAuthenticatedApi,
+  loadProjectsWithTaskMetadata,
+} from '../lib/project-catalogue';
 import { buildStudentTaskViews, type StudentTaskView } from '../lib/student-task-view';
 import { redactSensitiveText, normalizeBaseUrl } from '../lib/utils';
 import { toWhoAmIView } from '../lib/whoami';
@@ -36,11 +39,15 @@ export function bucketStatus(raw: string | undefined): TaskStatus {
     case 'feedback_exceeded':
       return 'ready_for_feedback';
     case 'assess_in_portfolio':
-      return 'assess_in_portfolio';
+    // Accepted by staff, awaiting tutor discussion/demonstration — in the
+    // assessment flow, not yet complete.
     case 'discuss':
     case 'demonstrate':
+      return 'assess_in_portfolio';
     case 'complete':
       return 'complete';
+    // Unknown/future statuses fall back to the neutral bucket; the raw status
+    // stays visible via TuiTask.statusRaw so nothing renders misleadingly.
     case 'not_started':
     case 'not_instantiated':
     default:
@@ -76,6 +83,7 @@ export function viewToTuiTask(view: StudentTaskView): TuiTask {
     unit: view.unitCode ?? String(view.reference.unitId),
     title: abbreviation ? `${abbreviation}: ${name}` : name,
     status: bucketStatus(view.status),
+    statusRaw: view.status,
     due: effectiveDue ? formatDue(effectiveDue) : '—',
     dueInDays: effectiveDue ? daysUntil(effectiveDue) : null,
     dateSource: view.dates.instanceDue ? 'personal override' : 'unit default',
@@ -84,7 +92,6 @@ export function viewToTuiTask(view: StudentTaskView): TuiTask {
   };
 }
 
-/** The refresh wiring mirrors cli.ts's createAuthenticatedApi (src/cli.ts:1363). */
 export const loadOnTrackTasks: TaskLoader = async () => {
   try {
     const broker = createOnTrackAuthBroker({ baseUrl: normalizeBaseUrl() });
@@ -102,36 +109,11 @@ export const loadOnTrackTasks: TaskLoader = async () => {
     const session = await broker.currentSession();
     if (!session) return { kind: 'auth_required' };
 
-    const api = new OnTrackApiClient(session.baseUrl, {
-      refreshSession: async () => {
-        const refreshed = await broker.ensure({
-          minTtlSeconds: 0,
-          interaction: 'never',
-          forceRefresh: true,
-        });
-        return refreshed.status === 'ready' ? broker.currentSession() : null;
-      },
-    });
-
-    const overview = await api.listProjects(session);
-    const detailed = await Promise.all(overview.map((p) => api.getProject(session, p.id)));
-    const unitIds = [
-      ...new Set(
-        detailed
-          .map((p) => p.unit?.id)
-          .filter((id): id is number => typeof id === 'number'),
-      ),
-    ];
-    const units = new Map(
-      await Promise.all(unitIds.map(async (id) => [id, await api.getUnit(session, id)] as const)),
-    );
-    const enriched = detailed.map((p) =>
-      p.unit?.id !== undefined && units.has(p.unit.id)
-        ? { ...p, unit: { ...p.unit, ...units.get(p.unit.id) } }
-        : p,
-    );
-
-    const tasks = buildStudentTaskViews(enriched).map(viewToTuiTask);
+    // Same catalogue pipeline the CLI task commands use: per-project/unit
+    // read failures degrade to overview data instead of blanking the TUI.
+    const api = createAuthenticatedApi(session);
+    const projects = await loadProjectsWithTaskMetadata(api, session);
+    const tasks = buildStudentTaskViews(projects).map(viewToTuiTask);
     return { kind: 'ready', username: toWhoAmIView(session).username, tasks };
   } catch (err) {
     if (err instanceof OnTrackHttpError && err.authFailure !== 'other') {

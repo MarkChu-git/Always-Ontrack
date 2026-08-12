@@ -27,8 +27,9 @@ test('bucketStatus folds the full OnTrack workflow set into the six TUI buckets'
   assert.equal(bucketStatus('ready_for_feedback'), 'ready_for_feedback');
   assert.equal(bucketStatus('feedback_exceeded'), 'ready_for_feedback');
   assert.equal(bucketStatus('assess_in_portfolio'), 'assess_in_portfolio');
-  assert.equal(bucketStatus('discuss'), 'complete');
-  assert.equal(bucketStatus('demonstrate'), 'complete');
+  // Accepted but awaiting tutor discussion/demonstration: in-assessment, not complete.
+  assert.equal(bucketStatus('discuss'), 'assess_in_portfolio');
+  assert.equal(bucketStatus('demonstrate'), 'assess_in_portfolio');
   assert.equal(bucketStatus('complete'), 'complete');
   assert.equal(bucketStatus(undefined), 'not_started');
   assert.equal(bucketStatus('some_future_status'), 'not_started');

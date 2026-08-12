@@ -16,12 +16,20 @@ export interface TuiTask {
   unit: string;
   title: string;
   status: TaskStatus;
+  /** The un-bucketed OnTrack workflow status, e.g. 'fix_and_resubmit'. */
+  statusRaw?: string;
   due: string;
   /** Days until the effective due date; negative means overdue, null means no date. */
   dueInDays: number | null;
   dateSource: 'unit default' | 'personal override';
   description: string;
   prerequisites: string[];
+}
+
+/** Humanize a raw OnTrack status ('fix_and_resubmit' → 'Fix and resubmit'). */
+export function humanizeStatus(raw: string): string {
+  const spaced = raw.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {

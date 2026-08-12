@@ -7,6 +7,7 @@ import {
   STATUS_ICON,
   STATUS_LABEL,
   STATUS_SHORT_LABEL,
+  humanizeStatus,
   type TaskStatus,
   type TuiTask,
 } from './tasks';
@@ -67,11 +68,13 @@ function dueBadge(task: TuiTask, theme: Theme): { text: string; fg: string } {
   return { text: `in ${days}d`, fg: theme.muted };
 }
 
-function StatusPill({ status, theme }: { status: TaskStatus; theme: Theme }) {
+function StatusPill({ task, theme }: { task: TuiTask; theme: Theme }) {
+  // Colour comes from the bucket; the label stays the honest raw status.
+  const label = task.statusRaw ? humanizeStatus(task.statusRaw) : STATUS_LABEL[task.status];
   return (
     <box
       style={{
-        backgroundColor: theme.status[status],
+        backgroundColor: theme.status[task.status],
         paddingLeft: 1,
         paddingRight: 1,
         alignSelf: 'flex-start',
@@ -79,7 +82,7 @@ function StatusPill({ status, theme }: { status: TaskStatus; theme: Theme }) {
     >
       <text>
         <strong fg={theme.onAccent}>
-          {STATUS_ICON[status]} {STATUS_LABEL[status]}
+          {STATUS_ICON[task.status]} {label}
         </strong>
       </text>
     </box>
@@ -218,12 +221,12 @@ function TaskDetailBody({ task, theme }: { task: TuiTask; theme: Theme }) {
   const badge = dueBadge(task, theme);
   return (
     <box style={{ flexDirection: 'column', gap: 1 }}>
-      <StatusPill status={task.status} theme={theme} />
+      <StatusPill task={task} theme={theme} />
       <text>
         <span fg={theme.muted}>Due    </span>
         <span fg={theme.fg}>{task.due}</span>
         <span fg={badge.fg}>  {badge.text}</span>
-        <span fg={theme.muted}>  ({task.dateSource})</span>
+        {task.dueInDays !== null ? <span fg={theme.muted}>  ({task.dateSource})</span> : null}
       </text>
       <text>
         <span fg={theme.muted}>Unit   </span>
@@ -607,7 +610,11 @@ export function App({ load }: { load: TaskLoader }) {
             >
               {visible.length === 0 ? (
                 <box style={{ padding: 1 }}>
-                  <text fg={theme.muted}>no tasks match</text>
+                  <text fg={theme.muted}>
+                    {query !== '' || tab !== 'all' || unitFilter !== null
+                      ? 'no tasks match the current filters'
+                      : 'all clear — no tasks due'}
+                  </text>
                 </box>
               ) : (
                 visible.map((task, i) => (
