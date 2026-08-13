@@ -44,6 +44,14 @@ export function isDefinitiveWriteRejection(error: unknown): error is OnTrackHttp
   );
 }
 
+/** OnTrack refuses ready_for_feedback with a 403 until files are uploaded. */
+export function isFilesRequiredRejection(
+  error: OnTrackHttpError,
+  trigger: StudentStatusTrigger,
+): boolean {
+  return error.status === 403 && trigger === 'ready_for_feedback';
+}
+
 /** Apply one student status trigger and classify exactly what the server did. */
 export async function applyStudentStatusTrigger(
   api: OnTrackApiClient,

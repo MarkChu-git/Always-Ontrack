@@ -45,6 +45,7 @@ import {
 import {
   applyStudentStatusTrigger,
   isDefinitiveWriteRejection,
+  isFilesRequiredRejection,
 } from './lib/set-task-status.js';
 import { signOutEverywhere } from './lib/sign-out.js';
 import type { RefreshCookieMaterial } from './lib/types.js';
@@ -4819,7 +4820,7 @@ async function handleTaskStatus(args: string[]): Promise<void> {
       if (claim) {
         await updateExecution(claim, command, executionInput, 'rejected');
       }
-      if (outcome.error.status === 403 && trigger === 'ready_for_feedback') {
+      if (isFilesRequiredRejection(outcome.error, trigger)) {
         throw new AgentProtocolError({
           code: 'FORBIDDEN',
           summary:

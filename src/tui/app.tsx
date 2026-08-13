@@ -6,6 +6,7 @@ import { DEFAULT_TUI_AUTH, type TuiAuthActions } from './auth';
 import { bucketStatus, type LoadState, type TaskLoader } from './data';
 import { LoginWizard } from './login';
 import { runSetStatus, type SetStatusRunner } from './status';
+import { isFilesRequiredRejection } from '../lib/set-task-status';
 import { darkTheme, lightTheme, type Theme } from './theme';
 import {
   STATUS_ICON,
@@ -493,7 +494,7 @@ export function App({
             break;
           case 'rejected':
             showToast(
-              outcome.error.status === 403 && trigger === 'ready_for_feedback'
+              isFilesRequiredRejection(outcome.error, trigger)
                 ? 'refused: upload the required files first'
                 : `rejected by the server (${outcome.error.status})`,
             );
