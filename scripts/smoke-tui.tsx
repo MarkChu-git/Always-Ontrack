@@ -1032,6 +1032,142 @@ await act(async () => {
   retrySetup.renderer.destroy();
 });
 
+// Scenario M: bracketed paste fills the login wizard's self-drawn fields.
+let pastedCreds: { username: string; password: string } | null = null;
+const pasteRunner: GuidedLoginRunner = async (creds) => {
+  pastedCreds = creds;
+  return creds.username;
+};
+const pasteLoginSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: pasteRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(pasteLoginSetup);
+await act(async () => {
+  await pasteLoginSetup.mockInput.pasteBracketedText('jdoe@example.com');
+  await settle();
+});
+await act(async () => {
+  await pasteLoginSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await pasteLoginSetup.mockInput.pasteBracketedText('p@ss w0rd!');
+  await settle();
+});
+check('pasted username renders in the credentials stage', pasteLoginSetup.captureCharFrame(), [
+  'jdoe@example.com',
+]);
+await act(async () => {
+  await pasteLoginSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+if (pastedCreds?.username !== 'jdoe@example.com' || pastedCreds?.password !== 'p@ss w0rd!') {
+  failures += 1;
+  console.error(`FAIL runner received pasted credentials ${JSON.stringify(pastedCreds)}`);
+} else {
+  console.log('ok   runner received the pasted credentials');
+}
+await act(async () => {
+  pasteLoginSetup.renderer.destroy();
+});
+
+// Scenario N: bracketed paste fills the submit wizard's path fields.
+let pasteSubmit: SubmitRequest | null = null;
+const pasteSubmitActions: SubmitActions = {
+  inspect: async () => ({ size: 2048 }),
+  run: async (request) => {
+    pasteSubmit = request;
+    return {
+      kind: 'completed',
+      output: {
+        command: 'submission upload',
+        projectId: 101,
+        unitCode: 'FIT1045',
+        task: 'P1',
+        taskDefinitionId: 1001,
+        operationId: 'op_fixture',
+        state: 'succeeded',
+        dryRun: false,
+        confirmed: true,
+        verification: 'observed',
+        trigger: 'ready_for_feedback',
+        files: request.files.map((f) => ({ key: f.key ?? 'file0', bytes: 2048 })),
+        upload: { status: 'response_accepted' },
+        comment: { status: 'not_requested' },
+      },
+    };
+  },
+};
+const pasteSubmitSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={pasteSubmitActions} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pasteBracketedText('/tmp/evidence final.pdf');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pasteBracketedText('/tmp/logs.txt');
+  await settle();
+});
+check('pasted paths render in the slot fields', pasteSubmitSetup.captureCharFrame(), [
+  '/tmp/evidence final.pdf',
+  '/tmp/logs.txt',
+]);
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// Validation (inspect) resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('paste-driven dispatch lands on the receipt', pasteSubmitSetup.captureCharFrame(), [
+  '✓ response accepted',
+]);
+if (
+  pasteSubmit?.files[0]?.path !== '/tmp/evidence final.pdf' ||
+  pasteSubmit?.files[1]?.path !== '/tmp/logs.txt'
+) {
+  failures += 1;
+  console.error(`FAIL submit runner saw ${JSON.stringify(pasteSubmit)}`);
+} else {
+  console.log('ok   submit runner received the pasted paths');
+}
+await act(async () => {
+  pasteSubmitSetup.renderer.destroy();
+});
+
 if (failures > 0) {
   console.error(`\n${failures} smoke check(s) failed`);
   process.exit(1);

@@ -17,7 +17,8 @@
  * keystrokes. Refs are always current in both renderers.
  */
 import { useEffect, useRef, useState } from 'react';
-import { useKeyboard } from '@opentui/react';
+import { useKeyboard, usePaste } from '@opentui/react';
+import { decodePasteBytes, stripAnsiSequences } from '@opentui/core';
 import type { MfaMethodOption, SsoFallbackReason, SsoStep } from '../lib/auto-login';
 import { isGuidedLoginFailure, type GuidedLoginRunner } from './auth';
 import type { Theme } from './theme';
@@ -270,6 +271,21 @@ export function LoginWizard({
       }
       default:
         return;
+    }
+  });
+
+  // Bracketed paste never reaches useKeyboard (it is not a keypress), so
+  // without this hook self-drawn fields silently drop pasted credentials.
+  usePaste((event) => {
+    const current = stageRef.current;
+    if (current.kind !== 'credentials' && current.kind !== 'mfa_code') return;
+    const text = stripAnsiSequences(decodePasteBytes(event.bytes)).replace(/[\r\n]+/g, '');
+    if (!text) return;
+    if (current.kind === 'credentials') {
+      if (current.field === 'username') setUsername((u) => u + text);
+      else setPassword((p) => p + text);
+    } else {
+      setMfaCode((c) => c + text);
     }
   });
 

@@ -15,7 +15,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { randomUUID } from 'node:crypto';
-import { useKeyboard } from '@opentui/react';
+import { useKeyboard, usePaste } from '@opentui/react';
+import { decodePasteBytes, stripAnsiSequences } from '@opentui/core';
 import { AgentProtocolError } from '../lib/agent-protocol';
 import { OnTrackHttpError } from '../lib/auth';
 import type { SubmissionTrigger } from '../lib/types';
@@ -319,6 +320,20 @@ export function SubmitWizard({
         const ch = key.sequence;
         setPaths((prev) => prev.map((p, i) => (i === idx ? p + ch : p)));
       }
+    }
+  });
+
+  // Bracketed paste never reaches useKeyboard (it is not a keypress); route it
+  // into the focused field so paths and comments can be pasted.
+  usePaste((event) => {
+    if (stageRef.current.kind !== 'editing') return;
+    const text = stripAnsiSequences(decodePasteBytes(event.bytes)).replace(/[\r\n]+/g, '');
+    if (!text) return;
+    if (focusIdxRef.current === slots.length) {
+      setComment((c) => c + text);
+    } else {
+      const idx = focusIdxRef.current;
+      setPaths((prev) => prev.map((p, i) => (i === idx ? p + text : p)));
     }
   });
 

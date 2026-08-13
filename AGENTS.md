@@ -38,6 +38,9 @@ without auto-retry.
 - In `src/tui`, focus inputs imperatively via refs on mode changes; the
   `focused` prop alone races when overlays mount/unmount. OpenTUI inputs
   have no secure-echo mode, so password-style fields are self-drawn.
+  Self-drawn fields must also wire `usePaste`: bracketed paste is not a
+  keypress, so `useKeyboard` never sees it (decode with
+  `decodePasteBytes` + `stripAnsiSequences` from `@opentui/core`).
 
 ## Pull request workflow
 
