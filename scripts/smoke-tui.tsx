@@ -14,6 +14,7 @@ import { act } from 'react';
 import { App } from '../src/tui/app';
 import type { GuidedLoginRunner } from '../src/tui/auth';
 import type { LoadState } from '../src/tui/data';
+import type { SetStatusRunner } from '../src/tui/status';
 import { FAKE_TASKS } from '../src/tui/tasks';
 
 let failures = 0;
@@ -475,6 +476,110 @@ if (logoutCalls !== 1) {
 }
 await act(async () => {
   logoutSetup.renderer.destroy();
+});
+
+// Scenario F: status trigger with a server-side remap (keyboard flow).
+let seenWrite: { taskId: string; trigger: string } | null = null;
+const remapRunner: SetStatusRunner = async ({ task, trigger }) => {
+  seenWrite = { taskId: task.id, trigger };
+  // The server answers 200 but maps the request to a different final status.
+  return { kind: 'remapped', before: null, requested: trigger, after: 'working_on_it' };
+};
+const writeSetup = await testRender(<App load={readyLoad} setStatus={remapRunner} />, {
+  width: 100,
+  height: 32,
+});
+await act(async () => {
+  await writeSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await writeSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+check('detail pane lists status triggers', writeSetup.captureCharFrame(), [
+  'Set status',
+  '[r]',
+  'Ready for feedback',
+]);
+await act(async () => {
+  await writeSetup.mockInput.pressKey('n');
+  await settle();
+});
+check('trigger preselects with a confirm line', writeSetup.captureCharFrame(), [
+  'Apply Not started?',
+  'click again to confirm',
+]);
+await act(async () => {
+  await writeSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('remap surfaces the server remap note', writeSetup.captureCharFrame(), [
+  'server remapped to Working on it',
+]);
+// The detail pane covers the list; close it to see the patched row.
+await act(async () => {
+  await writeSetup.mockInput.pressKey('ESCAPE');
+  await settle();
+});
+check('remap patches the row with the server status', writeSetup.captureCharFrame(), [
+  '◐ P1: Algorithm',
+]);
+if (seenWrite?.taskId !== '1' || seenWrite?.trigger !== 'not_started') {
+  failures += 1;
+  console.error(`FAIL writer saw ${JSON.stringify(seenWrite)}, expected task 1 + not_started`);
+} else {
+  console.log('ok   writer received the selected task and trigger');
+}
+await act(async () => {
+  writeSetup.renderer.destroy();
+});
+
+// Scenario G: a 200-level refusal surfaces and never patches the row (click flow).
+const refuseRunner: SetStatusRunner = async () => ({
+  kind: 'refused',
+  before: 'ready_for_feedback',
+});
+const refuseSetup = await testRender(<App load={readyLoad} setStatus={refuseRunner} />, {
+  width: 100,
+  height: 32,
+});
+await act(async () => {
+  await refuseSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await refuseSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  const at = locate(refuseSetup.captureCharFrame(), '[w]');
+  await refuseSetup.mockMouse.click(at.x, at.y);
+  await settle();
+});
+check('click preselects a trigger', refuseSetup.captureCharFrame(), ['Apply Working on it?']);
+await act(async () => {
+  const at = locate(refuseSetup.captureCharFrame(), '[w]');
+  await refuseSetup.mockMouse.click(at.x, at.y);
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('refusal is surfaced', refuseSetup.captureCharFrame(), ['refused']);
+// Close the detail pane to verify the row kept its pre-write status.
+await act(async () => {
+  await refuseSetup.mockInput.pressKey('ESCAPE');
+  await settle();
+});
+check('refusal leaves the row unchanged', refuseSetup.captureCharFrame(), [
+  '● P1: Algorithm',
+]);
+await act(async () => {
+  refuseSetup.renderer.destroy();
 });
 
 if (failures > 0) {

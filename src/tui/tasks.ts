@@ -13,6 +13,9 @@ export type TaskStatus =
 
 export interface TuiTask {
   id: string;
+  /** Owning project/task-definition ids, needed by the write paths. */
+  projectId: number;
+  taskDefinitionId: number;
   unit: string;
   title: string;
   status: TaskStatus;
@@ -63,6 +66,8 @@ export const STATUS_SHORT_LABEL: Record<TaskStatus, string> = {
 export const FAKE_TASKS: TuiTask[] = [
   {
     id: '1',
+    projectId: 101,
+    taskDefinitionId: 1001,
     unit: 'FIT1045',
     title: 'P1: Algorithm design workbook',
     status: 'ready_for_feedback',
@@ -75,6 +80,8 @@ export const FAKE_TASKS: TuiTask[] = [
   },
   {
     id: '2',
+    projectId: 101,
+    taskDefinitionId: 1002,
     unit: 'FIT1045',
     title: 'H1: Code reading homework',
     status: 'working_on_it',
@@ -86,6 +93,8 @@ export const FAKE_TASKS: TuiTask[] = [
   },
   {
     id: '3',
+    projectId: 101,
+    taskDefinitionId: 1003,
     unit: 'FIT1045',
     title: 'P2: Pair programming milestone',
     status: 'need_help',
@@ -98,6 +107,8 @@ export const FAKE_TASKS: TuiTask[] = [
   },
   {
     id: '4',
+    projectId: 101,
+    taskDefinitionId: 1004,
     unit: 'FIT1045',
     title: 'Quiz 3: Data structures',
     status: 'not_started',
@@ -109,6 +120,8 @@ export const FAKE_TASKS: TuiTask[] = [
   },
   {
     id: '5',
+    projectId: 101,
+    taskDefinitionId: 1005,
     unit: 'FIT1045',
     title: 'P3: Portfolio draft',
     status: 'not_started',
@@ -120,6 +133,8 @@ export const FAKE_TASKS: TuiTask[] = [
   },
   {
     id: '6',
+    projectId: 101,
+    taskDefinitionId: 1006,
     unit: 'FIT1045',
     title: 'Lab test 1',
     status: 'complete',
@@ -131,6 +146,8 @@ export const FAKE_TASKS: TuiTask[] = [
   },
   {
     id: '7',
+    projectId: 101,
+    taskDefinitionId: 1007,
     unit: 'FIT1045',
     title: 'Reflection: Week 5 studio',
     status: 'complete',
