@@ -3,6 +3,9 @@
 An OpenTUI/React TUI lives in `src/tui/` (separate from the agent-first CLI
 core in `src/lib/`). It loads the real Student Task View through
 `src/tui/data.ts` (auth broker + API client + `buildStudentTaskViews`),
+and its default view hides completed units (`isCurrentUnit`: web-parity
+with the home page's "all courses" split — `active: false` or a past
+teaching-period `end_date` excludes the unit).
 has an in-TUI guided SSO login wizard (`src/tui/login.tsx`, driver in
 `src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts` and
 `src/lib/login-finalize.ts`), and is not yet wired into the `ontrack` entry

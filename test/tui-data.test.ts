@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'bun:test';
 import { buildStudentTaskViews } from '../src/lib/student-task-view.js';
 import type { ProjectSummary } from '../src/lib/types.js';
-import { bucketStatus, viewToTuiTask } from '../src/tui/data';
+import { bucketStatus, isCurrentUnit, viewToTuiTask } from '../src/tui/data';
 
 function fixtureProject(): ProjectSummary {
   const fixture = JSON.parse(
@@ -65,4 +65,18 @@ test('viewToTuiTask prefers a personal due-date override as the effective date',
   assert.equal(task.dateSource, 'personal override');
   assert.equal(task.due, 'Jan 15');
   assert.ok(task.dueInDays !== null && task.dueInDays > 1000);
+});
+
+test('isCurrentUnit hides completed or inactive units from the default view', () => {
+  const today = '2026-08-13';
+  assert.equal(isCurrentUnit({ id: 1, end_date: '2099-01-01' }, today), true);
+  // A unit ending today is still current.
+  assert.equal(isCurrentUnit({ id: 1, end_date: today }, today), true);
+  // The observed completed-unit shape: active stays true, end_date is past.
+  assert.equal(isCurrentUnit({ id: 1, active: true, end_date: '2025-11-07' }, today), false);
+  assert.equal(isCurrentUnit({ id: 1, active: false, end_date: '2099-01-01' }, today), false);
+  // No usable end date fails open.
+  assert.equal(isCurrentUnit({ id: 1 }, today), true);
+  assert.equal(isCurrentUnit({ id: 1, end_date: 'Semester 2' }, today), true);
+  assert.equal(isCurrentUnit(undefined, today), true);
 });

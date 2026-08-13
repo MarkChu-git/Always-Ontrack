@@ -226,6 +226,11 @@ export function SubmitWizard({
         return;
       }
       if (error instanceof OnTrackHttpError) {
+        // An auth-classified rejection is an expired session, not a refusal.
+        if (error.authFailure !== 'other') {
+          onAuthRequiredRef.current();
+          return;
+        }
         setStage({
           kind: 'failed',
           message: `rejected by the server (HTTP ${error.status})`,

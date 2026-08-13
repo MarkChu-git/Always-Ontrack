@@ -555,6 +555,12 @@ export function App({
             showToast(`refused — still ${task.statusRaw ? humanizeStatus(task.statusRaw) : 'unchanged'}`);
             break;
           case 'rejected':
+            // An auth-classified rejection is an expired session, not a
+            // refusal: drop to the sign-in screen like the other actions.
+            if (outcome.error.authFailure !== 'other') {
+              handleAuthRequired();
+              break;
+            }
             showToast(
               isFilesRequiredRejection(outcome.error, trigger)
                 ? 'refused: upload the required files first'

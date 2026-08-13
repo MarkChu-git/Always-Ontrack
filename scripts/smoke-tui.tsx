@@ -1168,6 +1168,103 @@ await act(async () => {
   pasteSubmitSetup.renderer.destroy();
 });
 
+// Scenario O: an auth-classified rejection mid-submit drops to the sign-in
+// screen instead of posing as a server refusal.
+const expiredSubmit: SubmitActions = {
+  inspect: async () => ({ size: 10 }),
+  run: async () => {
+    throw new OnTrackHttpError(419, 'Authentication timeout');
+  },
+};
+const expiredSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={expiredSubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKeys(['.', '/', 'a', '.', 'p', 'd', 'f']);
+  await settle();
+  await expiredSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+  await expiredSetup.mockInput.pressKeys(['.', '/', 'b', '.', 'p', 'd', 'f']);
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('a 419 mid-submit drops to the sign-in screen', expiredSetup.captureCharFrame(), [
+  'Not signed in',
+  'session expired — sign in again',
+]);
+await act(async () => {
+  expiredSetup.renderer.destroy();
+});
+
+// Scenario P: an auth-classified set-status rejection drops to the sign-in
+// screen instead of a refusal toast.
+const expiredStatusRunner: SetStatusRunner = async () => ({
+  kind: 'rejected',
+  error: new OnTrackHttpError(419, 'Authentication timeout'),
+});
+const expiredStatusSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} setStatus={expiredStatusRunner} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('n');
+  await settle();
+});
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('a 419 set-status rejection drops to the sign-in screen', expiredStatusSetup.captureCharFrame(), [
+  'Not signed in',
+  'session expired — sign in again',
+]);
+await act(async () => {
+  expiredStatusSetup.renderer.destroy();
+});
+
 if (failures > 0) {
   console.error(`\n${failures} smoke check(s) failed`);
   process.exit(1);

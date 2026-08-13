@@ -1,8 +1,10 @@
 /**
  * Real data path for the TUI: composes the public src/lib primitives
  * (auth broker, project catalogue loader, Student Task View projection)
- * into one loader. Contains no business rules of its own — date precedence
- * and visibility stay in src/lib/student-task-view.ts.
+ * into one loader. The one presentation rule it owns is web-parity unit
+ * currency (completed units stay out of the default view, like the OnTrack
+ * home page's "all courses" split); task date precedence and task
+ * visibility stay in src/lib/student-task-view.ts.
  */
 import { OnTrackHttpError } from '../lib/auth';
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
@@ -12,6 +14,7 @@ import {
   loadProjectsWithTaskMetadata,
 } from '../lib/project-catalogue';
 import { buildStudentTaskViews, type StudentTaskView } from '../lib/student-task-view';
+import type { UnitSummary } from '../lib/types';
 import { redactSensitiveText, normalizeBaseUrl } from '../lib/utils';
 import { toWhoAmIView, type WhoAmIView } from '../lib/whoami';
 import type { TaskStatus, TuiTask, UploadSlot } from './tasks';
@@ -23,6 +26,21 @@ export type LoadState =
   | { kind: 'error'; message: string };
 
 export type TaskLoader = () => Promise<LoadState>;
+
+/**
+ * Web-parity default: the OnTrack home page hides completed units behind
+ * "all courses". Match it — a unit stays current while its teaching period
+ * end date is today or later, and while it is not flagged inactive. Units
+ * without a parseable end date fail open. ISO dates compare
+ * lexicographically; `today` is injectable for tests.
+ */
+export function isCurrentUnit(unit: UnitSummary | undefined, today?: string): boolean {
+  if (!unit) return true;
+  if (unit.active === false) return false;
+  const end = typeof unit.end_date === 'string' ? unit.end_date.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return true;
+  return end >= (today ?? new Date().toISOString().slice(0, 10));
+}
 
 /** Bucket the full OnTrack workflow status set into the TUI's six display states. */
 export function bucketStatus(raw: string | undefined): TaskStatus {
@@ -136,7 +154,8 @@ export const loadOnTrackTasks: TaskLoader = async () => {
     // read failures degrade to overview data instead of blanking the TUI.
     const api = createAuthenticatedApi(session);
     const projects = await loadProjectsWithTaskMetadata(api, session);
-    const tasks = buildStudentTaskViews(projects).map(viewToTuiTask);
+    const current = projects.filter((project) => isCurrentUnit(project.unit));
+    const tasks = buildStudentTaskViews(current).map(viewToTuiTask);
     return {
       kind: 'ready',
       identity: toWhoAmIView(session),

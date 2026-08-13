@@ -6,13 +6,16 @@
  *
  * The wizard always confirms interactively, mints one idempotency key per
  * attempt (`tui:<uuid>`), and lets errors propagate for classification:
- * definitive rejections arrive as OnTrackHttpError, an unknown transport
+ * definitive rejections arrive as OnTrackHttpError (an auth-classified one
+ * becomes `auth_required` here, so the App drops to the sign-in screen
+ * instead of reporting it as a server refusal), an unknown transport
  * outcome as AgentProtocolError IDEMPOTENCY_OUTCOME_UNKNOWN (never retried
  * automatically), and preflight problems as plain Errors.
  *
  * Injectable into the App so headless smoke tests drive it with fixtures.
  */
 import { inspectUploadFile } from '../lib/artifact-safety';
+import { OnTrackHttpError } from '../lib/auth';
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
 import { createAuthenticatedApi } from '../lib/project-catalogue';
@@ -70,19 +73,29 @@ export const PRODUCTION_SUBMIT_ACTIONS: SubmitActions = {
       return { kind: 'auth_required' };
     }
     const api = createAuthenticatedApi(session);
-    const outcome = await applySubmissionUpload(api, session, {
-      selector: {
-        projectId: request.task.projectId,
-        taskDefinitionId: request.task.taskDefinitionId,
-      },
-      mode: request.mode,
-      files: request.files,
-      allowExternalFile: request.allowExternalFile,
-      trigger: request.trigger,
-      comment: request.comment,
-      confirm: true,
-      idempotencyKey: request.idempotencyKey,
-    });
+    let outcome;
+    try {
+      outcome = await applySubmissionUpload(api, session, {
+        selector: {
+          projectId: request.task.projectId,
+          taskDefinitionId: request.task.taskDefinitionId,
+        },
+        mode: request.mode,
+        files: request.files,
+        allowExternalFile: request.allowExternalFile,
+        trigger: request.trigger,
+        comment: request.comment,
+        confirm: true,
+        idempotencyKey: request.idempotencyKey,
+      });
+    } catch (error) {
+      // The token expired mid-dispatch: not a refusal of the submission —
+      // send the user to re-authentication like every other TUI action.
+      if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
+        return { kind: 'auth_required' };
+      }
+      throw error;
+    }
     if (outcome.kind === 'replayed') {
       return { kind: 'replayed', operationId: outcome.claim.operationId };
     }
