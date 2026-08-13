@@ -42,6 +42,10 @@ import {
   sessionFromAccessTokenCapture,
   signInAndPersistRefreshCookie,
 } from './lib/login-finalize.js';
+import {
+  applyStudentStatusTrigger,
+  isDefinitiveWriteRejection,
+} from './lib/set-task-status.js';
 import { signOutEverywhere } from './lib/sign-out.js';
 import type { RefreshCookieMaterial } from './lib/types.js';
 import {
@@ -3263,16 +3267,6 @@ async function recordUnknownWrite(
   });
 }
 
-function isDefinitiveWriteRejection(error: unknown): error is OnTrackHttpError {
-  return (
-    error instanceof OnTrackHttpError &&
-    error.status >= 400 &&
-    error.status < 500 &&
-    error.status !== 408 &&
-    error.status !== 425
-  );
-}
-
 /** Preview or apply one exact target-date mutation. */
 async function handlePlanSetDates(args: string[]): Promise<void> {
   const session = await requireSession();
@@ -4813,20 +4807,19 @@ async function handleTaskStatus(args: string[]): Promise<void> {
     return;
   }
 
-  let response: { status?: string } | undefined;
-  try {
-    response = await api.updateTaskStatus(
-      session,
-      selector.projectId,
-      resolved.taskDefId,
-      trigger,
-    );
-  } catch (error) {
-    if (isDefinitiveWriteRejection(error)) {
+  const outcome = await applyStudentStatusTrigger(api, session, {
+    projectId: selector.projectId,
+    taskDefinitionId: resolved.taskDefId,
+    trigger,
+    before,
+  });
+
+  switch (outcome.kind) {
+    case 'rejected': {
       if (claim) {
         await updateExecution(claim, command, executionInput, 'rejected');
       }
-      if (error.status === 403 && trigger === 'ready_for_feedback') {
+      if (outcome.error.status === 403 && trigger === 'ready_for_feedback') {
         throw new AgentProtocolError({
           code: 'FORBIDDEN',
           summary:
@@ -4840,42 +4833,26 @@ async function handleTaskStatus(args: string[]): Promise<void> {
               },
             },
           ],
-          cause: error,
+          cause: outcome.error,
         });
       }
-      throw error;
+      throw outcome.error;
     }
-    await recordUnknownWrite(
-      claim,
-      command,
-      executionInput,
-      'The status-change request was dispatched, but its outcome is unknown.',
-      'task.show',
-      { project_id: selector.projectId, task_definition_id: resolved.taskDefId },
-      error,
-    );
-  }
-  if (!response) {
-    throw new Error('Unreachable: the status update produced no response.');
+    case 'unknown': {
+      await recordUnknownWrite(
+        claim,
+        command,
+        executionInput,
+        outcome.summary,
+        'task.show',
+        { project_id: selector.projectId, task_definition_id: resolved.taskDefId },
+        outcome.cause,
+      );
+      throw new Error('Unreachable after recording an unknown write outcome.');
+    }
   }
 
-  const after =
-    typeof response.status === 'string' && response.status.trim()
-      ? response.status.trim()
-      : null;
-  if (!after) {
-    await recordUnknownWrite(
-      claim,
-      command,
-      executionInput,
-      'The status-change response did not include the resulting status.',
-      'task.show',
-      { project_id: selector.projectId, task_definition_id: resolved.taskDefId },
-    );
-    throw new Error('Unreachable after recording an unknown write outcome.');
-  }
-  if (after !== trigger && after === before) {
-    // A refused transition comes back as 200 with the unchanged task entity.
+  if (outcome.kind === 'refused') {
     if (claim) {
       await updateExecution(claim, command, executionInput, 'rejected');
     }
@@ -4894,7 +4871,7 @@ async function handleTaskStatus(args: string[]): Promise<void> {
       ],
     });
   }
-  const matched = after === trigger;
+  const matched = outcome.kind === 'applied';
   const output = {
     ...(claim
       ? {
@@ -4908,11 +4885,11 @@ async function handleTaskStatus(args: string[]): Promise<void> {
     ...(matched
       ? {}
       : {
-          note: `The server remapped the requested '${trigger}' transition to '${after}'.`,
+          note: `The server remapped the requested '${trigger}' transition to '${outcome.after}'.`,
         }),
     mutation,
     before: { status: before },
-    after: { status: after },
+    after: { status: outcome.after },
   };
   if (claim) {
     await updateExecution(claim, command, executionInput, 'succeeded', output);
@@ -4922,9 +4899,9 @@ async function handleTaskStatus(args: string[]): Promise<void> {
     return;
   }
   if (matched) {
-    console.log(`Updated ${resolved.abbr ?? `#${resolved.taskDefId}`} status to '${after}'.`);
+    console.log(`Updated ${resolved.abbr ?? `#${resolved.taskDefId}`} status to '${outcome.after}'.`);
   } else {
-    console.log(`Status is now '${after}' (server remapped the requested '${trigger}').`);
+    console.log(`Status is now '${outcome.after}' (server remapped the requested '${trigger}').`);
   }
 }
 

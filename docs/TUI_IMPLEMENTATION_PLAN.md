@@ -1,7 +1,7 @@
 # OnTrack TUI 全面实施计划
 
-状态：Phase 0（骨架，PR #53）与 Phase 1（只读数据接入，PR #54）已合并；
-Phase 2（认证向导）实施完成，自审后合并
+状态：Phase 0（骨架，PR #53）、Phase 1（只读数据接入，PR #54）、
+Phase 2（认证向导，PR #56）已合并；Phase 3（状态变更）实施完成，自审后合并
 骨架分支：`feat/tui-skeleton`（PR #53）
 协议目标：TUI 不引入新业务行为，只做 `src/lib/` 能力的人类渲染层
 
@@ -93,13 +93,20 @@ UI 显示响应里的最终状态而非乐观值）。
 - 验收达成：456 项现有测试不回归；向导每一步（凭据/MFA 选择/MFA 代码/
   数字挑战/失败分类/登出）由 fixture runner 在无头冒烟驱动（31 项断言）。
 
-### Phase 3 — 状态变更（第一个写操作）
+### Phase 3 — 状态变更（第一个写操作）（已完成）
 
 - 任务详情弹层加可点操作与快捷键：`working_on_it` / `need_help` /
-  `ready_for_feedback` 等 Status Trigger。
-- 写路径严格复用现有 `task set-status` 逻辑：服务器可能以 200 原样拒绝或
-  重映射，UI 以响应中的最终状态为准并刷新该任务行；结果显示 toast。
-- 验收：覆盖"服务器重映射状态"的 fixture 测试；确认对话框防误触。
+  `not_started` / `ready_for_feedback` / `assess_in_portfolio`，字母键或
+  点击预选，enter/再次点击确认（防误触），esc 分级取消。
+- 写路径复用提取出的 `src/lib/set-task-status.ts`
+  （`applyStudentStatusTrigger`，CLI 同一实现）：服务器 200 原样拒绝与
+  重映射都被识别，UI 以响应中的最终状态为准局部刷新该行；结果显示
+  toast；`unknown` 结果不自动重试。
+- 验收达成：重映射与拒绝两个 fixture 场景进无头冒烟（39 项断言）；
+  修复过程中发现并修掉一个真实 bug（loading 屏按方向键会把选中索引
+  钳到 -1，选中态卡死）。
+- 顺带修复：离开 `main` 模式时显式 blur 过滤输入框（AGENTS.md 已记录
+  的 focus 竞态），否则详情弹层按键被输入框吞掉。
 
 ### Phase 4 — 提交向导与任务资源
 

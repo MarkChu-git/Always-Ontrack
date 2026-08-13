@@ -80,6 +80,8 @@ export function viewToTuiTask(view: StudentTaskView): TuiTask {
   const description = view.definition.description;
   return {
     id: `${view.reference.projectId}:${view.reference.taskDefinitionId}`,
+    projectId: view.reference.projectId,
+    taskDefinitionId: view.reference.taskDefinitionId,
     unit: view.unitCode ?? String(view.reference.unitId),
     title: abbreviation ? `${abbreviation}: ${name}` : name,
     status: bucketStatus(view.status),

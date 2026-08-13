@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InputRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer } from '@opentui/react';
+import type { StudentStatusTrigger } from '../lib/types';
 import { DEFAULT_TUI_AUTH, type TuiAuthActions } from './auth';
-import type { LoadState, TaskLoader } from './data';
+import { bucketStatus, type LoadState, type TaskLoader } from './data';
 import { LoginWizard } from './login';
+import { runSetStatus, type SetStatusRunner } from './status';
 import { darkTheme, lightTheme, type Theme } from './theme';
 import {
   STATUS_ICON,
@@ -59,6 +61,15 @@ function fuzzyMatch(query: string, text: string): boolean {
   }
   return false;
 }
+
+/** Keyboard/click accelerators for the detail pane's student status triggers. */
+const TRIGGER_ACTIONS: { key: string; trigger: StudentStatusTrigger }[] = [
+  { key: 'w', trigger: 'working_on_it' },
+  { key: 'h', trigger: 'need_help' },
+  { key: 'n', trigger: 'not_started' },
+  { key: 'r', trigger: 'ready_for_feedback' },
+  { key: 'a', trigger: 'assess_in_portfolio' },
+];
 
 function dueBadge(task: TuiTask, theme: Theme): { text: string; fg: string } {
   if (task.status === 'complete') return { text: 'done', fg: theme.status.complete };
@@ -358,7 +369,15 @@ function NoticeScreen({
   );
 }
 
-export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?: TuiAuthActions }) {
+export function App({
+  load,
+  auth = DEFAULT_TUI_AUTH,
+  setStatus = runSetStatus,
+}: {
+  load: TaskLoader;
+  auth?: TuiAuthActions;
+  setStatus?: SetStatusRunner;
+}) {
   const renderer = useRenderer();
   const [theme, setTheme] = useState<Theme>(darkTheme);
   const [screen, setScreen] = useState<LoadState>({ kind: 'loading' });
@@ -373,6 +392,8 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
   const [paletteSelected, setPaletteSelected] = useState(0);
   const [watchOn, setWatchOn] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
+  /** Trigger selected in the detail pane, awaiting an explicit confirm. */
+  const [pendingTrigger, setPendingTrigger] = useState<StudentStatusTrigger | null>(null);
   const inputRef = useRef<InputRenderable>(null);
   const paletteInputRef = useRef<InputRenderable>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -392,10 +413,15 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
   }, [load, reloadTick]);
 
   // Focus is imperative and race-prone in OpenTUI; re-assert it on mode
-  // changes instead of relying only on the `focused` prop.
+  // changes instead of relying only on the `focused` prop. Leaving `main`
+  // must explicitly blur the filter input, or it keeps swallowing keystrokes
+  // while an overlay (detail pane) is up.
   useEffect(() => {
     if (mode === 'main') inputRef.current?.focus();
+    else inputRef.current?.blur();
     if (mode === 'palette') paletteInputRef.current?.focus();
+    // A pending status confirmation never survives a mode change.
+    setPendingTrigger(null);
   }, [mode]);
 
   // Never leave a pending toast timer behind on unmount.
@@ -433,6 +459,59 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
     });
   };
 
+  /** Patch one task row with the server-returned status (never an optimistic one). */
+  const patchTaskStatus = (taskId: string, statusRaw: string) => {
+    setScreen((prev) =>
+      prev.kind === 'ready'
+        ? {
+            ...prev,
+            tasks: prev.tasks.map((t) =>
+              t.id === taskId ? { ...t, statusRaw, status: bucketStatus(statusRaw) } : t,
+            ),
+          }
+        : prev,
+    );
+  };
+
+  const applyTrigger = (task: TuiTask, trigger: StudentStatusTrigger) => {
+    setPendingTrigger(null);
+    showToast(`setting ${humanizeStatus(trigger)}…`);
+    void setStatus({ task, trigger })
+      .then((outcome) => {
+        switch (outcome.kind) {
+          case 'applied':
+            patchTaskStatus(task.id, outcome.after);
+            showToast(`status: ${humanizeStatus(outcome.after)}`);
+            break;
+          case 'remapped':
+            // The server wins: render the returned status, say it was remapped.
+            patchTaskStatus(task.id, outcome.after);
+            showToast(`server remapped to ${humanizeStatus(outcome.after)}`);
+            break;
+          case 'refused':
+            showToast(`refused — still ${task.statusRaw ? humanizeStatus(task.statusRaw) : 'unchanged'}`);
+            break;
+          case 'rejected':
+            showToast(
+              outcome.error.status === 403 && trigger === 'ready_for_feedback'
+                ? 'refused: upload the required files first'
+                : `rejected by the server (${outcome.error.status})`,
+            );
+            break;
+          case 'unknown':
+            // Unknown-outcome rule: never auto-retry; point at a later check.
+            showToast('outcome unknown — not retried; reopen the task to verify');
+            break;
+          case 'auth_required':
+            setMode('main');
+            setScreen({ kind: 'auth_required' });
+            showToast('session expired — sign in again');
+            break;
+        }
+      })
+      .catch(() => showToast('status change failed'));
+  };
+
   const tasks = screen.kind === 'ready' ? screen.tasks : [];
   const units = useMemo(() => [...new Set(tasks.map((t) => t.unit))].sort(), [tasks]);
   const unitLabel = unitFilter ?? (units.length > 1 ? 'all units' : (units[0] ?? '—'));
@@ -466,7 +545,9 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
       ),
     [tasks, unitFilter, tab, query],
   );
-  const selectedTask = visible[Math.min(selected, Math.max(visible.length - 1, 0))];
+  // Clamp defensively: an arrow key pressed during the loading screen computes
+  // against an empty list (length-1 = -1) and must not park selection at -1.
+  const selectedTask = visible[Math.min(Math.max(selected, 0), Math.max(visible.length - 1, 0))];
 
   const tabCounts = useMemo(() => {
     const counts = {} as Record<TabId, number>;
@@ -576,9 +657,25 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
       if (mode === 'palette') {
         setMode('main');
       } else if (mode === 'detail') {
-        setMode('main');
+        // A pending trigger confirmation eats the first ESC; the second closes.
+        if (pendingTrigger) {
+          setPendingTrigger(null);
+        } else {
+          setMode('main');
+        }
       } else if (query !== '') {
         clearFilterInput();
+      }
+      return;
+    }
+    if (mode === 'detail' && selectedTask) {
+      if (key.name === 'return' && pendingTrigger) {
+        applyTrigger(selectedTask, pendingTrigger);
+        return;
+      }
+      const trigger = TRIGGER_ACTIONS.find((a) => a.key === key.sequence)?.trigger;
+      if (trigger && trigger !== selectedTask.statusRaw) {
+        setPendingTrigger(trigger);
       }
       return;
     }
@@ -590,7 +687,8 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
     }
     if (mode === 'main') {
       if (key.name === 'up') setSelected((i) => Math.max(i - 1, 0));
-      if (key.name === 'down') setSelected((i) => Math.min(i + 1, visible.length - 1));
+      if (key.name === 'down')
+        setSelected((i) => Math.max(0, Math.min(i + 1, visible.length - 1)));
     }
   });
 
@@ -772,7 +870,7 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
           onMouseDown={() => setMode('main')}
           style={{
             position: 'absolute',
-            top: 7,
+            top: 5,
             left: 8,
             right: 8,
             bottom: 4,
@@ -789,7 +887,48 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
             <strong fg={theme.fg}>{selectedTask.title}</strong>
           </text>
           <TaskDetailBody task={selectedTask} theme={theme} />
-          <text fg={theme.muted}>esc / click to close</text>
+          <box style={{ flexDirection: 'column', gap: 0 }}>
+            <text fg={theme.muted}>Set status:</text>
+            <box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 1 }}>
+              {TRIGGER_ACTIONS.filter((a) => a.trigger !== selectedTask.statusRaw).map((action) => {
+                const pending = pendingTrigger === action.trigger;
+                return (
+                  <box
+                    key={action.trigger}
+                    onMouseDown={(event) => {
+                      // Keep the click from reaching the pane's close-on-click.
+                      event.stopPropagation();
+                      if (pending) {
+                        applyTrigger(selectedTask, action.trigger);
+                      } else {
+                        setPendingTrigger(action.trigger);
+                      }
+                    }}
+                    style={{
+                      backgroundColor: pending ? theme.accent : theme.hover,
+                      paddingLeft: 1,
+                      paddingRight: 1,
+                    }}
+                  >
+                    <text>
+                      <span fg={pending ? theme.onAccent : theme.accent}>[{action.key}] </span>
+                      <span fg={pending ? theme.onAccent : theme.fg}>
+                        {humanizeStatus(action.trigger)}
+                      </span>
+                    </text>
+                  </box>
+                );
+              })}
+            </box>
+          </box>
+          {pendingTrigger ? (
+            <text>
+              <span fg={theme.soon}>Apply {humanizeStatus(pendingTrigger)}? </span>
+              <span fg={theme.muted}>enter / click again to confirm · esc cancel</span>
+            </text>
+          ) : (
+            <text fg={theme.muted}>esc / click to close</text>
+          )}
         </box>
       ) : null}
 
