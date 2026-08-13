@@ -1,22 +1,19 @@
 #!/usr/bin/env bun
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { extname, join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import {
-  contentDispositionFilename,
   InvalidDownloadFormatError,
   InvalidPdfDownloadError,
   InvalidJsonResponseError,
-  MAX_DOWNLOAD_BYTES,
   OnTrackApiClient,
   OversizedBinaryResponseError,
   OversizedJsonResponseError,
   UnavailableDownloadError,
 } from './lib/api.js';
-import type { DownloadResult } from './lib/api.js';
 import {
   createSessionFromAccessToken,
   OnTrackHttpError,
@@ -55,11 +52,7 @@ import {
   probeDiscoveredApiTemplates,
 } from "./lib/discovery.js";
 import {
-  ArtifactSafetyError,
   findExternalArtifactPaths,
-  inspectUploadFile,
-  readUploadArtifact,
-  writeArtifactFile,
 } from './lib/artifact-safety.js';
 import {
   buildExternalArtifactAuthorizationArgs,
@@ -69,7 +62,6 @@ import {
 import {
   buildStudentTaskRows,
   buildStudentTaskViews,
-  resolveStudentTaskViews,
 } from "./lib/student-task-view.js";
 import type { StudentTaskRow } from './lib/student-task-view.js';
 import {
@@ -105,21 +97,26 @@ import {
 } from "./lib/watch-snapshots.js";
 import { pollUntilInterrupted } from "./lib/watch-runtime.js";
 import {
-  createSubmissionAttempt,
   InvalidSubmissionDetailsError,
-  isSubmissionObserved,
   parseSubmissionDetails,
-  parseStrictSubmissionDetails,
-  prepareSubmission,
-  transitionSubmissionAttempt,
-  validateSubmissionMode,
 } from "./lib/submission-lifecycle.js";
-import type { SubmissionDetails } from './lib/submission-lifecycle.js';
+import {
+  applySubmissionUpload,
+  parseSubmissionTrigger,
+} from './lib/submission-upload.js';
+import {
+  downloadTaskResourceArtifacts,
+  MAX_AGENT_TASK_ITEMS,
+  MAX_AGENT_TASK_OUTPUT_BYTES,
+  readAgentSubmissionPdf,
+  readAgentSubmissionStatus,
+  readAgentTaskPdf,
+  readAgentTaskPrerequisites,
+  readAgentTaskResources,
+} from './lib/agent-task-reads.js';
 import {
   buildPdfFilename,
-  buildTaskResourceFilename,
   diffWatchStates,
-  exceedsByteBudget,
   filterTasksByStatus,
   feedbackIdentity,
   formatDate,
@@ -152,6 +149,7 @@ import {
   safeUrlForHumanDisplay,
   safeUrlForManualDisplay,
   sortFeedbackItems,
+  taskIdentityJson,
   toWatchStateMap,
   toRedactedError,
   writePdfFile,
@@ -164,7 +162,6 @@ import type {
   SessionData,
   SignInResponse,
   StudentStatusTrigger,
-  SubmissionTrigger,
   TaskDefinitionSummary,
   TaskSelector,
   TaskSummary,
@@ -210,19 +207,9 @@ import {
   type AgentFeedbackListOutput,
   type AgentFeedbackWatchInput,
   type AgentSubmissionStatusInput,
-  type AgentSubmissionStatusOutput,
-  agentSubmissionStatusOutputSchema,
   createNativeAgentCommands,
-  type AgentTaskPrerequisitesInput,
-  type AgentTaskPrerequisitesOutput,
   type AgentTaskShowInput,
   type AgentTaskShowOutput,
-  type AgentTaskResourcesInput,
-  type AgentTaskResourcesOutput,
-  type AgentTaskPdfInput,
-  type AgentTaskPdfOutput,
-  type AgentSubmissionPdfInput,
-  type AgentSubmissionPdfOutput,
 } from './lib/agent-commands.js';
 import { createOnTrackAuthBroker } from './lib/auth-broker.js';
 import {
@@ -253,11 +240,6 @@ import type { ExecutionClaim } from './lib/execution-journal.js';
  * Lower-level HTTP/session/parsing logic lives in `src/lib/*`.
  */
 type InboxRowTask = (InboxTask | StudentTaskRow) & { _unitId: number };
-
-const MAX_AGENT_TASK_ITEMS = 200;
-const MAX_AGENT_TASK_OUTPUT_BYTES = 512 * 1024;
-const MAX_AGENT_SUBMISSION_STATUS_OUTPUT_BYTES = 16 * 1024;
-const MAX_TASK_RESOURCE_BATCH_BYTES = MAX_DOWNLOAD_BYTES * 4;
 
 /** Print command help and high-level behavioral notes. */
 function help(): void {
@@ -1330,23 +1312,6 @@ function flattenTasks(projects: ProjectSummary[]): StudentTaskRow[] {
   return buildStudentTaskRows(projects);
 }
 
-/** Add explicit task identities plus the stable legacy JSON aliases. */
-function taskIdentityJson(
-  resolved: Pick<ResolvedTaskSelector, 'taskDefId' | 'taskInstanceId'>,
-): {
-  taskDefinitionId: number;
-  taskInstanceId?: number;
-  taskId: number;
-  taskDefId: number;
-} {
-  return {
-    taskDefinitionId: resolved.taskDefId,
-    taskInstanceId: resolved.taskInstanceId,
-    taskId: resolved.taskInstanceId ?? resolved.taskDefId,
-    taskDefId: resolved.taskDefId,
-  };
-}
-
 /** Parse optional integer flag; returns undefined when flag is not present. */
 function parseOptionalInteger(args: string[], flag: string): number | undefined {
   if (!hasFlag(args, flag)) {
@@ -1463,36 +1428,6 @@ function dedupeInboxTasks(tasks: InboxRowTask[]): InboxRowTask[] {
   return [...map.values()];
 }
 
-type UploadFileInput = {
-  key?: string;
-  path: string;
-};
-
-/** Infer default upload trigger from task status when not supplied explicitly. */
-function deriveDefaultSubmissionTrigger(
-  task: Partial<TaskSummary>,
-): SubmissionTrigger | undefined {
-  const status = (getTaskStatus(task) || '').trim().toLowerCase();
-  if (status === 'working_on_it' || status === 'need_help') {
-    return 'need_help';
-  }
-  return undefined;
-}
-
-/** Parse and validate submission trigger flag. */
-function parseSubmissionTrigger(raw: string | undefined): SubmissionTrigger | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  const value = raw.trim().toLowerCase();
-  if (value === 'need_help' || value === 'ready_for_feedback') {
-    return value;
-  }
-
-  throw new Error('--trigger must be one of: need_help, ready_for_feedback.');
-}
-
 /** Server-accepted aliases normalized to the canonical student trigger. */
 const STUDENT_STATUS_TRIGGER_ALIASES: Readonly<Record<string, StudentStatusTrigger>> = {
   rtm: 'ready_for_feedback',
@@ -1536,45 +1471,6 @@ function parseStudentStatusTrigger(raw: string | undefined): StudentStatusTrigge
     );
   }
   throw new Error(`Unknown status '${raw.trim()}'. Student-settable statuses: ${validList}.`);
-}
-
-/** Preserve actionable artifact policy failures without exposing local paths or raw I/O errors. */
-function safeArtifactFailure(error: unknown): string {
-  return error instanceof ArtifactSafetyError
-    ? error.message
-    : 'Artifact access could not be completed safely.';
-}
-
-/** Read upload file bytes and annotate with server-only key + filename metadata. */
-async function readUploadFiles(
-  assignments: Array<{ key: string; localPath: string }>,
-  allowExternalFile: boolean,
-): Promise<
-  Array<{
-    key: string;
-    filename: string;
-    content: Buffer;
-  }>
-> {
-  return Promise.all(
-    assignments.map(async (assignment, index) => {
-      try {
-        const artifact = await readUploadArtifact(assignment.localPath, {
-          root: process.cwd(),
-          allowExternal: allowExternalFile,
-        });
-        return {
-          key: assignment.key,
-          filename: artifact.filename,
-          content: artifact.content,
-        };
-      } catch (error) {
-        throw new Error(
-          `Failed to read upload file ${index + 1}: ${safeArtifactFailure(error)}`,
-        );
-      }
-    }),
-  );
 }
 
 /** Build inbox fallback rows from project/task metadata when inbox endpoint is unavailable. */
@@ -3010,23 +2906,6 @@ async function handleTaskShow(args: string[]): Promise<void> {
   );
 }
 
-/** Resolve one definition-first StudentTaskView at the CLI selection Seam. */
-function resolveSelectedStudentTask(
-  projects: ProjectSummary[],
-  projectId: number,
-  taskDefinitionId: number,
-) {
-  const views = buildStudentTaskViews(projects, {
-    includeBeyondTarget: true,
-    includeTutorialMismatches: true,
-  });
-  return resolveStudentTaskViews(views, {
-    projectId,
-    taskDefinitionIds: [taskDefinitionId],
-    abbreviations: [],
-  })[0];
-}
-
 /** Show the observed prerequisite rows for one task definition. */
 async function handleTaskPrerequisites(args: string[]): Promise<void> {
   const session = await requireSession();
@@ -4019,146 +3898,6 @@ async function handlePdfDownload(args: string[], type: 'task' | 'submission'): P
   );
 }
 
-interface TaskResourceDownloadRecord {
-  readonly project_id: number;
-  readonly unit_id: number | null;
-  readonly unit_code: string | null;
-  readonly task_definition_id: number;
-  readonly task_instance_id: number | null;
-  readonly task_id: number;
-  readonly task_def_id: number;
-  readonly abbreviation: string;
-  readonly instantiated: boolean;
-  readonly artifact: {
-    readonly filename: string;
-    readonly path: string;
-    readonly bytes: number;
-    readonly content_type: string;
-    readonly sha256: string;
-  };
-}
-
-interface TaskResourceUnavailableRecord {
-  readonly project_id: number;
-  readonly unit_id: number | null;
-  readonly unit_code: string | null;
-  readonly task_definition_id: number;
-  readonly task_instance_id: number | null;
-  readonly task_id: number;
-  readonly task_def_id: number;
-  readonly abbreviation: string;
-  readonly instantiated: boolean;
-  readonly reason: 'not_available';
-}
-
-interface TaskResourceDownloadResult {
-  readonly project_id: number;
-  readonly selected_count: number;
-  readonly downloaded_count: number;
-  readonly unavailable_count: number;
-  readonly downloads: readonly TaskResourceDownloadRecord[];
-  readonly unavailable: readonly TaskResourceUnavailableRecord[];
-}
-
-function taskResourceIdentity(
-  resolved: ResolvedTaskSelector,
-): Omit<TaskResourceDownloadRecord, 'artifact'> {
-  const identity = taskIdentityJson(resolved);
-  const unitCode = resolved.unitCode
-    ? safeTextForHumanDisplay(resolved.unitCode, 'unit')
-    : null;
-  return {
-    project_id: resolved.project.id,
-    unit_id: resolved.unitId ?? null,
-    unit_code: unitCode,
-    task_definition_id: identity.taskDefinitionId,
-    task_instance_id: identity.taskInstanceId ?? null,
-    task_id: identity.taskId,
-    task_def_id: identity.taskDefId,
-    abbreviation: safeTextForHumanDisplay(
-      resolved.abbr,
-      String(resolved.taskDefId),
-    ),
-    instantiated: resolved.task.isInstantiated === true,
-  };
-}
-
-/** Download task resources through the shared artifact-safety writer. */
-async function downloadTaskResourceArtifacts(
-  session: SessionData,
-  api: OnTrackApiClient,
-  resolvedItems: readonly ResolvedTaskSelector[],
-  options: { readonly outDir?: string; readonly allowExternalDir?: boolean },
-): Promise<TaskResourceDownloadResult> {
-  const downloads: TaskResourceDownloadRecord[] = [];
-  const unavailable: TaskResourceUnavailableRecord[] = [];
-  let totalBytes = 0;
-
-  for (const resolved of resolvedItems) {
-    const identity = taskResourceIdentity(resolved);
-    try {
-      if (resolved.unitId === undefined) {
-        throw new Error('Unit id not found for task resource download.');
-      }
-      const download = await api.downloadTaskResources(
-        session,
-        resolved.unitId,
-        resolved.taskDefId,
-      );
-      if (
-        exceedsByteBudget(
-          totalBytes,
-          download.buffer.byteLength,
-          MAX_TASK_RESOURCE_BATCH_BYTES,
-        )
-      ) {
-        throw new AgentProtocolError({
-          code: 'INVALID_ARGUMENT',
-          summary: `Task resource batch exceeds ${MAX_TASK_RESOURCE_BATCH_BYTES} bytes; use a narrower selector.`,
-        });
-      }
-      const filename = buildTaskResourceFilename(
-        resolved.unitCode,
-        resolved.abbr,
-        extname(contentDispositionFilename(download.contentDisposition) ?? '') || '.zip',
-      );
-      const filePath = await writeArtifactFile(download.buffer, filename, {
-        root: process.cwd(),
-        outDir: options.outDir,
-        allowExternal: options.allowExternalDir,
-      });
-      totalBytes += download.buffer.byteLength;
-      downloads.push({
-        ...identity,
-        artifact: {
-          filename,
-          path: relative(process.cwd(), filePath) || filename,
-          bytes: download.buffer.byteLength,
-          content_type: safeTextForHumanDisplay(
-            download.contentType,
-            'application/zip',
-          ),
-          sha256: createHash('sha256').update(download.buffer).digest('hex'),
-        },
-      });
-    } catch (error) {
-      if (!(error instanceof UnavailableDownloadError)) {
-        throw error;
-      }
-      unavailable.push({ ...identity, reason: 'not_available' });
-    }
-  }
-
-  return {
-    project_id: resolvedItems[0]?.project.id ?? 0,
-    selected_count: resolvedItems.length,
-    downloaded_count: downloads.length,
-    unavailable_count: unavailable.length,
-    downloads,
-    unavailable,
-  };
-}
-
 /** Human-facing task resource archive workflow. */
 async function handleTaskResourceDownload(args: string[]): Promise<void> {
   const session = await requireSession();
@@ -4215,257 +3954,54 @@ async function handleSubmissionUpload(
   const session = await requireSession();
   const api = createAuthenticatedApi(session);
   const selector = parseTaskSelectorArgs(args);
-  const projects = await loadProjectsWithTaskMetadata(api, session, {
-    projectId: selector.projectId,
-  });
-  const resolved = resolveTaskSelector(projects, selector);
-  const fileInputs = parseUploadFileSpecs(args) as UploadFileInput[];
-  const allowExternalFile = hasFlag(args, '--allow-external-file');
-  const explicitTrigger = parseSubmissionTrigger(parseOptionalString(args, '--trigger'));
-  const trigger =
-    explicitTrigger ??
-    (mode === 'upload' ? deriveDefaultSubmissionTrigger(resolved.task) : undefined);
-  const comment = parseOptionalString(args, '--comment');
-
-  const view = resolveSelectedStudentTask(
-    projects,
-    resolved.project.id,
-    resolved.taskDefId,
-  );
-  const inputDetails = await Promise.all(
-    fileInputs.map(async (input, index) => {
-      try {
-        const artifact = await inspectUploadFile(input.path, {
-          root: process.cwd(),
-          allowExternal: allowExternalFile,
-        });
-        return {
-          key: input.key,
-          localPath: input.path,
-          size: artifact.size,
-        };
-      } catch (error) {
-        throw new Error(
-          `Failed to inspect upload file ${index + 1}: ${safeArtifactFailure(error)}`,
-        );
-      }
-    }),
-  );
-  const prepared = prepareSubmission(view, inputDetails);
-  let attempt = createSubmissionAttempt(prepared, {
-    operationId: crypto.randomUUID(),
-    at: new Date().toISOString(),
+  const outcome = await applySubmissionUpload(api, session, {
+    selector,
+    mode,
+    files: parseUploadFileSpecs(args),
+    allowExternalFile: hasFlag(args, '--allow-external-file'),
+    trigger: parseSubmissionTrigger(parseOptionalString(args, '--trigger')),
+    comment: parseOptionalString(args, '--comment'),
+    confirm: hasFlag(args, '--confirm'),
+    idempotencyKey: requestedIdempotencyKey(args),
+    requireIdempotencyKey: Boolean(getAgentOutputContext()),
   });
 
-  if (mode === 'upload-new-files') {
-    const existing = parseSubmissionDetails(
-      await api.getSubmissionDetails(
-        session,
-        resolved.project.id,
-        resolved.taskDefId,
-      ),
-    );
-    validateSubmissionMode(mode, existing);
-  }
-
-  const safeFiles = prepared.files.map((file) => ({
-    key: file.key,
-    bytes: file.size,
-  }));
-  if (!hasFlag(args, '--confirm')) {
-    const preview = {
-      command: `submission ${mode}`,
-      dryRun: true,
-      confirmed: false,
-      projectId: resolved.project.id,
-      unitCode: resolved.unitCode,
-      task: resolved.abbr,
-      taskDefinitionId: resolved.taskDefId,
-      operationId: attempt.operationId,
-      state: attempt.state,
-      trigger: trigger ?? null,
-      files: safeFiles,
-      comment: { status: comment ? 'requested' : 'not_requested' },
-      idempotency: {
-        required_for_agent_apply: true,
-        key: requestedIdempotencyKey(args) ?? null,
-      },
-    };
+  if (outcome.kind === 'preview') {
+    const { preview } = outcome;
     if (hasFlag(args, '--json')) {
       printJson(preview);
     } else {
       console.log('Dry run only. No submission request was sent.');
-      printTable(safeFiles);
+      printTable(preview.files);
       console.log('Re-run with --confirm to dispatch exactly once.');
     }
     return;
   }
 
-  const files = await readUploadFiles(prepared.files, allowExternalFile);
-  const command =
-    mode === 'upload'
-      ? 'submission.upload'
-      : 'submission.upload_new_files';
-  const executionInput = {
-    project_id: resolved.project.id,
-    task_definition_id: resolved.taskDefId,
-    mode,
-    trigger: trigger ?? null,
-    files: files.map((file) => ({
-      key: file.key,
-      bytes: file.content.byteLength,
-      sha256: createHash('sha256').update(file.content).digest('hex'),
-    })),
-    comment_sha256: comment
-      ? createHash('sha256').update(comment).digest('hex')
-      : null,
-  };
-  const claim = await claimConfirmedWrite(args, command, executionInput);
-  if (replayedWriteOutput(claim)) {
+  if (outcome.kind === 'replayed') {
+    replayedWriteOutput(outcome.claim);
     return;
   }
-  if (claim) {
-    attempt = createSubmissionAttempt(prepared, {
-      operationId: claim.operationId,
-      at: new Date().toISOString(),
-    });
-  }
-  attempt = transitionSubmissionAttempt(attempt, {
-    type: 'upload_started',
-    at: new Date().toISOString(),
-  });
 
-  try {
-    // This non-idempotent request is dispatched exactly once.
-    await api.uploadTaskSubmission(
-      session,
-      resolved.project.id,
-      resolved.taskDefId,
-      files,
-      {
-        trigger,
-      },
-    );
-    attempt = transitionSubmissionAttempt(attempt, {
-      type: 'upload_accepted',
-      at: new Date().toISOString(),
-    });
-  } catch (error) {
-    if (isDefinitiveWriteRejection(error)) {
-      attempt = transitionSubmissionAttempt(attempt, {
-        type: 'upload_rejected',
-        at: new Date().toISOString(),
-      });
-      if (claim) {
-        await updateExecution(claim, command, executionInput, 'rejected');
-      }
-      throw error;
-    }
-    attempt = transitionSubmissionAttempt(attempt, {
-      type: 'upload_outcome_unknown',
-      at: new Date().toISOString(),
-    });
-    await recordUnknownWrite(
-      claim,
-      command,
-      executionInput,
-      'Submission was dispatched once, but the transport outcome is unknown.',
-      'submission.status',
-      {
-        project_id: resolved.project.id,
-        task_definition_id: resolved.taskDefId,
-      },
-      error,
-    );
-  }
-
-  let verification: 'observed' | 'not_observed' | 'unavailable' | 'credential_expired' =
-    'not_observed';
-  try {
-    const details = parseSubmissionDetails(
-      await api.getSubmissionDetails(
-        session,
-        resolved.project.id,
-        resolved.taskDefId,
-      ),
-    );
-    if (isSubmissionObserved(details)) {
-      attempt = transitionSubmissionAttempt(attempt, {
-        type: 'submission_observed',
-        at: new Date().toISOString(),
-      });
-      verification = 'observed';
-    }
-  } catch (error) {
-    verification =
-      error instanceof OnTrackHttpError && error.authFailure !== 'other'
-        ? 'credential_expired'
-        : 'unavailable';
-  }
-
-  let commentResult: FeedbackItem | undefined;
-  let commentFailed = false;
-  if (comment && attempt.state === 'succeeded') {
-    try {
-      // Keep comment as a separate non-idempotent API call. A failure here must
-      // never downgrade the already-confirmed upload into a retryable error.
-      commentResult = await api.addTaskComment(
-        session,
-        resolved.project.id,
-        resolved.taskDefId,
-        comment,
-      );
-    } catch (error) {
-      void error;
-      commentFailed = true;
-    }
-  }
-
-  const output = {
-    command: `submission ${mode}`,
-    projectId: resolved.project.id,
-    unitCode: resolved.unitCode,
-    task: resolved.abbr,
-    taskDefinitionId: resolved.taskDefId,
-    operationId: attempt.operationId,
-    ...(claim ? { idempotency: { replayed: false } } : {}),
-    state: attempt.state,
-    dryRun: false,
-    confirmed: true,
-    verification,
-    trigger: trigger ?? null,
-    files: safeFiles,
-    upload: { status: 'response_accepted' },
-    comment: !comment
-      ? { status: 'not_requested' }
-      : commentResult
-        ? { status: 'posted', id: commentResult.id }
-        : commentFailed
-          ? { status: 'failed' }
-          : { status: 'skipped_until_submission_observed' },
-  };
-  if (claim) {
-    await updateExecution(claim, command, executionInput, 'succeeded', output);
-  }
-
+  const { output } = outcome;
   if (hasFlag(args, '--json')) {
     printJson(output);
     return;
   }
 
   console.log(
-    `Submission response accepted for ${safeFiles.length} evidence slot(s) on ${resolved.unitCode ?? '-'} ${resolved.abbr} (project ${resolved.project.id}).`,
+    `Submission response accepted for ${output.files.length} evidence slot(s) on ${output.unitCode ?? '-'} ${output.task} (project ${output.projectId}).`,
   );
-  console.log(`Evidence slots: ${safeFiles.map((item) => item.key).join(', ')}`);
-  console.log(`Observed state: ${attempt.state} (${verification})`);
-  console.log(`Trigger: ${trigger ?? 'ready_for_feedback (server default)'}`);
-  if (commentResult) {
-    console.log(`Comment posted: ${commentResult.id ?? 'ok'}`);
-  } else if (commentFailed) {
+  console.log(`Evidence slots: ${output.files.map((item) => item.key).join(', ')}`);
+  console.log(`Observed state: ${output.state} (${output.verification})`);
+  console.log(`Trigger: ${output.trigger ?? 'ready_for_feedback (server default)'}`);
+  if (output.comment.status === 'posted') {
+    console.log(`Comment posted: ${output.comment.id ?? 'ok'}`);
+  } else if (output.comment.status === 'failed') {
     console.error(
       '[warn] Submission was observed, but the optional comment was not posted.',
     );
-  } else if (comment) {
+  } else if (output.comment.status === 'skipped_until_submission_observed') {
     console.error(
       '[warn] Optional comment was not posted because the submission could not yet be observed.',
     );
@@ -5047,452 +4583,6 @@ async function readAgentTaskShow(
     });
   }
   return output;
-}
-
-function positiveIntegerValue(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : undefined;
-}
-
-function nonEmptyStringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function hasOwnField(row: Record<string, unknown>, field: string): boolean {
-  return Object.prototype.hasOwnProperty.call(row, field);
-}
-
-/** Read paired prerequisite IDs without treating malformed aliases as absent. */
-function prerequisiteIdField(
-  row: Record<string, unknown>,
-  snakeCase: string,
-  camelCase: string,
-): number | undefined {
-  const fields = [snakeCase, camelCase].filter((field) => hasOwnField(row, field));
-  if (fields.length === 0) {
-    return undefined;
-  }
-  const values = fields.map((field) => positiveIntegerValue(row[field]));
-  if (values.some((value) => value === undefined)) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: 'The task prerequisite endpoint returned an invalid relationship id.',
-    });
-  }
-  const [first, ...rest] = values as number[];
-  if (rest.some((value) => value !== first)) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: 'The task prerequisite endpoint returned conflicting relationship ids.',
-    });
-  }
-  return first;
-}
-
-function prerequisiteStatusValue(row: Record<string, unknown>): string {
-  const fields = ['task_status', 'taskStatus'].filter((field) => hasOwnField(row, field));
-  if (fields.length === 0) {
-    return 'unknown';
-  }
-  const values = fields.map((field) => nonEmptyStringValue(row[field]));
-  if (values.some((value) => value === undefined) || values.some((value) => value!.length > 80)) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: 'The task prerequisite endpoint returned an invalid task status.',
-    });
-  }
-  const [first, ...rest] = values as string[];
-  if (rest.some((value) => value !== first)) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: 'The task prerequisite endpoint returned conflicting task statuses.',
-    });
-  }
-  return first;
-}
-
-function prerequisiteRelationshipId(row: Record<string, unknown>): number | null {
-  if (!hasOwnField(row, 'id')) {
-    return null;
-  }
-  const id = positiveIntegerValue(row.id);
-  if (id === undefined) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: 'The task prerequisite endpoint returned an invalid relationship record id.',
-    });
-  }
-  return id;
-}
-
-/** Read and normalize the direct per-definition prerequisite contract. */
-async function readAgentTaskPrerequisites(
-  input: AgentTaskPrerequisitesInput,
-  session: SessionData,
-): Promise<AgentTaskPrerequisitesOutput> {
-  const api = createAuthenticatedApi(session);
-  const projects = await loadProjectsWithTaskMetadata(
-    api,
-    session,
-    { projectId: input.project_id },
-    { strictMetadata: true },
-  );
-  const resolved = resolveTaskSelector(projects, {
-    projectId: input.project_id,
-    taskDefinitionId:
-      'task_definition_id' in input ? input.task_definition_id : undefined,
-    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
-  });
-  if (resolved.unitId === undefined) {
-    throw new AgentProtocolError({
-      code: 'INVALID_ARGUMENT',
-      summary: 'The selected task has no unit identity for prerequisite lookup.',
-    });
-  }
-
-  const rawRows = await api.listTaskPrerequisites(
-    session,
-    resolved.unitId,
-    resolved.taskDefId,
-  );
-  if (!Array.isArray(rawRows)) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: 'The task prerequisite endpoint returned an unexpected response shape.',
-    });
-  }
-  if (rawRows.length > MAX_AGENT_TASK_ITEMS) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: `OnTrack returned more than ${MAX_AGENT_TASK_ITEMS} prerequisite relationships for one task.`,
-    });
-  }
-
-  const prerequisites = rawRows.flatMap((raw) => {
-    if (typeof raw !== 'object' || raw === null) {
-      throw new AgentProtocolError({
-        code: 'REMOTE_UNAVAILABLE',
-        summary: 'The task prerequisite endpoint returned a malformed relationship row.',
-      });
-    }
-    const row = raw as Record<string, unknown>;
-    const dependentId = prerequisiteIdField(
-      row,
-      'task_definition_id',
-      'taskDefinitionId',
-    );
-    const prerequisiteId = prerequisiteIdField(
-      row,
-      'prerequisite_id',
-      'prerequisiteId',
-    );
-    if (dependentId !== undefined && dependentId !== resolved.taskDefId) {
-      return [];
-    }
-    if (prerequisiteId === undefined) {
-      throw new AgentProtocolError({
-        code: 'REMOTE_UNAVAILABLE',
-        summary: 'The task prerequisite endpoint returned a malformed relationship.',
-      });
-    }
-    return [
-      {
-        id: prerequisiteRelationshipId(row),
-        task_definition_id: resolved.taskDefId,
-        prerequisite_task_definition_id: prerequisiteId,
-        required_status: prerequisiteStatusValue(row),
-      },
-    ];
-  });
-
-  const output: AgentTaskPrerequisitesOutput = {
-    project_id: input.project_id,
-    unit_id: resolved.unitId,
-    task_definition_id: resolved.taskDefId,
-    count: prerequisites.length,
-    prerequisites,
-  };
-  if (
-    Buffer.byteLength(JSON.stringify(output), 'utf8') >
-    MAX_AGENT_TASK_OUTPUT_BYTES
-  ) {
-    throw new AgentProtocolError({
-      code: 'REMOTE_UNAVAILABLE',
-      summary: `OnTrack returned prerequisite data exceeding ${MAX_AGENT_TASK_OUTPUT_BYTES} bytes.`,
-    });
-  }
-  return output;
-}
-
-async function readAgentTaskResources(
-  input: AgentTaskResourcesInput,
-  session: SessionData,
-): Promise<AgentTaskResourcesOutput> {
-  const api = createAuthenticatedApi(session);
-  const projects = await loadProjectsWithTaskMetadata(
-    api,
-    session,
-    { projectId: input.project_id },
-    { strictMetadata: true },
-  );
-  const resolved = resolveTaskBatchSelector(projects, {
-    projectId: input.project_id,
-    taskDefinitionIds:
-      !('task_definition_id' in input) || input.task_definition_id === undefined
-        ? []
-        : [input.task_definition_id],
-    taskIds: [],
-    abbrs: 'abbreviation' in input ? input.abbreviation ?? [] : [],
-    allTasks: input.all_tasks,
-  });
-  if (resolved.length > MAX_AGENT_TASK_ITEMS) {
-    throw new AgentProtocolError({
-      code: 'INVALID_ARGUMENT',
-      summary: `task.resources selected more than ${MAX_AGENT_TASK_ITEMS} tasks; use a narrower selector.`,
-    });
-  }
-
-  const result = await downloadTaskResourceArtifacts(session, api, resolved, {
-    outDir: input.out_dir,
-    allowExternalDir: input.allow_external_dir,
-  });
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_AGENT_TASK_OUTPUT_BYTES) {
-    throw new AgentProtocolError({
-      code: 'INVALID_ARGUMENT',
-      summary: `task.resources response exceeds ${MAX_AGENT_TASK_OUTPUT_BYTES} bytes; use a narrower selector.`,
-    });
-  }
-  return {
-    ...result,
-    downloads: [...result.downloads],
-    unavailable: [...result.unavailable],
-  };
-}
-
-function buildAgentTaskPdfOutput(
-  resolved: ResolvedTaskSelector,
-  unitId: number,
-  download: DownloadResult,
-  filePath: string,
-  filename: string,
-): AgentTaskPdfOutput {
-  return {
-    project_id: resolved.project.id,
-    unit_id: unitId,
-    unit_code: resolved.unitCode
-      ? safeTextForHumanDisplay(resolved.unitCode, 'unit')
-      : null,
-    task_definition_id: resolved.taskDefId,
-    task_instance_id: resolved.taskInstanceId ?? null,
-    abbreviation: safeTextForHumanDisplay(resolved.abbr, String(resolved.taskDefId)),
-    instantiated: resolved.task.isInstantiated === true,
-    artifact: {
-      filename,
-      path: relative(process.cwd(), filePath) || filename,
-      bytes: download.buffer.byteLength,
-      content_type: safeTextForHumanDisplay(download.contentType, 'application/pdf'),
-      sha256: createHash('sha256').update(download.buffer).digest('hex'),
-    },
-  };
-}
-
-/** Download one Task Definition's task sheet through the strict native contract. */
-async function readAgentTaskPdf(
-  input: AgentTaskPdfInput,
-  session: SessionData,
-): Promise<AgentTaskPdfOutput> {
-  const api = createAuthenticatedApi(session);
-  const projects = await loadProjectsWithTaskMetadata(
-    api,
-    session,
-    { projectId: input.project_id },
-    { strictMetadata: true },
-  );
-  const resolved = resolveTaskSelector(projects, {
-    projectId: input.project_id,
-    taskDefinitionId:
-      'task_definition_id' in input ? input.task_definition_id : undefined,
-    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
-  });
-  const unitId = resolved.unitId;
-  if (unitId === undefined) {
-    throw new AgentProtocolError({
-      code: 'INVALID_ARGUMENT',
-      summary: 'The selected task has no unit identity for task PDF download.',
-    });
-  }
-  const download = await api.downloadTaskPdf(
-    session,
-    unitId,
-    resolved.taskDefId,
-  );
-  const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, 'task');
-  const filePath = await writeArtifactFile(download.buffer, filename, {
-    root: process.cwd(),
-    outDir: input.out_dir,
-    allowExternal: input.allow_external_dir,
-  });
-  return buildAgentTaskPdfOutput(resolved, unitId, download, filePath, filename);
-}
-
-function requireAgentSubmissionPdfReady(
-  resolved: ResolvedTaskSelector,
-  details: SubmissionDetails,
-): void {
-  if (details.pdfState === 'processing') {
-    throw new AgentProtocolError({
-      code: 'CONFLICT',
-      summary: 'The submission PDF is still processing.',
-      retryable: true,
-      nextActions: [
-        {
-          action: 'submission.status',
-          arguments: {
-            project_id: resolved.project.id,
-            task_definition_id: resolved.taskDefId,
-          },
-        },
-      ],
-    });
-  }
-  if (details.pdfState === 'unavailable') {
-    throw new AgentProtocolError({
-      code: 'NOT_FOUND',
-      summary: 'The submission PDF is not available.',
-    });
-  }
-}
-
-function buildAgentSubmissionPdfOutput(
-  resolved: ResolvedTaskSelector,
-  download: DownloadResult,
-  filePath: string,
-  filename: string,
-): AgentSubmissionPdfOutput {
-  return {
-    project_id: resolved.project.id,
-    unit_id: resolved.unitId ?? null,
-    unit_code: resolved.unitCode
-      ? safeTextForHumanDisplay(resolved.unitCode, 'unit')
-      : null,
-    task_definition_id: resolved.taskDefId,
-    task_instance_id: resolved.taskInstanceId ?? null,
-    abbreviation: safeTextForHumanDisplay(resolved.abbr, String(resolved.taskDefId)),
-    instantiated: resolved.task.isInstantiated === true,
-    has_pdf: true,
-    processing_pdf: false,
-    pdf_state: 'ready',
-    submission_observed: true,
-    artifact: {
-      filename,
-      path: relative(process.cwd(), filePath) || filename,
-      bytes: download.buffer.byteLength,
-      content_type: safeTextForHumanDisplay(download.contentType, 'application/pdf'),
-      sha256: createHash('sha256').update(download.buffer).digest('hex'),
-    },
-  };
-}
-
-/** Download one ready submission PDF through the strict native contract. */
-async function readAgentSubmissionPdf(
-  input: AgentSubmissionPdfInput,
-  session: SessionData,
-): Promise<AgentSubmissionPdfOutput> {
-  const api = createAuthenticatedApi(session);
-  const projects = await loadProjectsWithTaskMetadata(
-    api,
-    session,
-    { projectId: input.project_id },
-    { strictMetadata: true },
-  );
-  const resolved = resolveTaskSelector(projects, {
-    projectId: input.project_id,
-    taskDefinitionId:
-      'task_definition_id' in input ? input.task_definition_id : undefined,
-    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
-  });
-  const details = parseStrictSubmissionDetails(
-    await api.getSubmissionDetails(session, resolved.project.id, resolved.taskDefId),
-  );
-  requireAgentSubmissionPdfReady(resolved, details);
-  const download = await api.downloadSubmissionPdf(
-    session,
-    resolved.project.id,
-    resolved.taskDefId,
-  );
-  const filename = buildPdfFilename(resolved.unitCode, resolved.abbr, 'submission');
-  const filePath = await writeArtifactFile(download.buffer, filename, {
-    root: process.cwd(),
-    outDir: input.out_dir,
-    allowExternal: input.allow_external_dir,
-  });
-  return buildAgentSubmissionPdfOutput(resolved, download, filePath, filename);
-}
-
-async function readAgentSubmissionStatus(
-  input: AgentSubmissionStatusInput,
-  session: SessionData,
-): Promise<AgentSubmissionStatusOutput> {
-  const api = createAuthenticatedApi(session);
-  const projects = await loadProjectsWithTaskMetadata(
-    api,
-    session,
-    { projectId: input.project_id },
-    { strictMetadata: true },
-  );
-  const resolved = resolveTaskSelector(projects, {
-    projectId: input.project_id,
-    taskDefinitionId:
-      'task_definition_id' in input ? input.task_definition_id : undefined,
-    abbr: 'abbreviation' in input ? input.abbreviation : undefined,
-  });
-  const details = parseStrictSubmissionDetails(
-    await api.getSubmissionDetails(
-      session,
-      resolved.project.id,
-      resolved.taskDefId,
-    ),
-  );
-  return buildAgentSubmissionStatusOutput(resolved, details);
-}
-
-function buildAgentSubmissionStatusOutput(
-  resolved: ResolvedTaskSelector,
-  details: SubmissionDetails,
-): AgentSubmissionStatusOutput {
-  const output = {
-    project_id: resolved.project.id,
-    unit_id: resolved.unitId ?? null,
-    unit_code: resolved.unitCode ?? null,
-    task_definition_id: resolved.taskDefId,
-    task_instance_id: resolved.taskInstanceId ?? null,
-    abbreviation: resolved.abbr,
-    instantiated: resolved.task.isInstantiated === true,
-    has_pdf: details.hasPdf,
-    processing_pdf: details.processingPdf,
-    pdf_state: details.pdfState,
-    submission_date: details.submissionDate ?? null,
-    task_status: details.taskStatus ?? null,
-    submission_observed: isSubmissionObserved(details),
-  };
-  const parsedOutput = agentSubmissionStatusOutputSchema.safeParse(output);
-  if (!parsedOutput.success) {
-    throw new AgentProtocolError({
-      code: 'INTERNAL_ERROR',
-      summary: 'The submission.status output failed contract validation.',
-    });
-  }
-  if (
-    Buffer.byteLength(JSON.stringify(parsedOutput.data), 'utf8') >
-    MAX_AGENT_SUBMISSION_STATUS_OUTPUT_BYTES
-  ) {
-    throw new AgentProtocolError({
-      code: 'INTERNAL_ERROR',
-      summary: 'The submission.status output exceeded its safety limit.',
-    });
-  }
-  return parsedOutput.data;
 }
 
 function createNativeAgentExecutionEngine() {

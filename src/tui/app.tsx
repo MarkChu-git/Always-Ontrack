@@ -7,6 +7,13 @@ import { bucketStatus, type LoadState, type TaskLoader } from './data';
 import { LoginWizard } from './login';
 import { runSetStatus, type SetStatusRunner } from './status';
 import { isFilesRequiredRejection } from '../lib/set-task-status';
+import { PRODUCTION_SUBMIT_ACTIONS, type SubmitActions } from './submit';
+import { SubmitWizard } from './submit-wizard';
+import {
+  PRODUCTION_TASK_EXTRAS,
+  type SubmissionStatusInfo,
+  type TaskExtrasActions,
+} from './task-extras';
 import { darkTheme, lightTheme, type Theme } from './theme';
 import {
   STATUS_ICON,
@@ -17,7 +24,7 @@ import {
   type TuiTask,
 } from './tasks';
 
-type Mode = 'main' | 'detail' | 'palette' | 'login';
+type Mode = 'main' | 'detail' | 'palette' | 'login' | 'submit';
 type TabId = 'all' | 'active' | 'ready' | 'done';
 
 const TABS: { id: TabId; label: string; match: (t: TuiTask) => boolean }[] = [
@@ -374,10 +381,14 @@ export function App({
   load,
   auth = DEFAULT_TUI_AUTH,
   setStatus = runSetStatus,
+  extras = PRODUCTION_TASK_EXTRAS,
+  submit = PRODUCTION_SUBMIT_ACTIONS,
 }: {
   load: TaskLoader;
   auth?: TuiAuthActions;
   setStatus?: SetStatusRunner;
+  extras?: TaskExtrasActions;
+  submit?: SubmitActions;
 }) {
   const renderer = useRenderer();
   const [theme, setTheme] = useState<Theme>(darkTheme);
@@ -395,6 +406,8 @@ export function App({
   const [toast, setToast] = useState<string | null>(null);
   /** Trigger selected in the detail pane, awaiting an explicit confirm. */
   const [pendingTrigger, setPendingTrigger] = useState<StudentStatusTrigger | null>(null);
+  /** Latest submission-status read per task id, shown on the detail pane. */
+  const [submissionInfo, setSubmissionInfo] = useState<Record<string, SubmissionStatusInfo>>({});
   const inputRef = useRef<InputRenderable>(null);
   const paletteInputRef = useRef<InputRenderable>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -402,6 +415,8 @@ export function App({
   // within 4s executes. Ref (not state) so the memoized command sees it.
   const logoutArmed = useRef(false);
   const logoutArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Detail extras are fetched once per task until a write invalidates them. */
+  const extrasRequested = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let live = true;
@@ -474,6 +489,53 @@ export function App({
     );
   };
 
+  /** Patch one task row with prerequisite display names from the read path. */
+  const patchTaskPrerequisites = (taskId: string, names: string[]) => {
+    setScreen((prev) =>
+      prev.kind === 'ready'
+        ? {
+            ...prev,
+            tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, prerequisites: names } : t)),
+          }
+        : prev,
+    );
+  };
+
+  /** Any action answering auth_required drops the app to the sign-in screen. */
+  const handleAuthRequired = () => {
+    setMode('main');
+    setScreen({ kind: 'auth_required' });
+    showToast('session expired — sign in again');
+  };
+
+  /** Run one detail-pane artifact download and report the saved path. */
+  const runDownload = (kind: 'taskPdf' | 'resources' | 'submissionPdf', task: TuiTask) => {
+    showToast('downloading…');
+    const promise =
+      kind === 'taskPdf'
+        ? extras.downloadTaskPdf(task)
+        : kind === 'resources'
+          ? extras.downloadResources(task)
+          : extras.downloadSubmissionPdf(task);
+    void promise
+      .then((result) => {
+        if (result.kind === 'auth_required') {
+          handleAuthRequired();
+          return;
+        }
+        if (result.kind === 'error') {
+          showToast(result.message);
+          return;
+        }
+        if (result.value === null) {
+          showToast('no resource archive for this task');
+          return;
+        }
+        showToast(`saved → ${result.value.path}`);
+      })
+      .catch(() => showToast('download failed'));
+  };
+
   const applyTrigger = (task: TuiTask, trigger: StudentStatusTrigger) => {
     setPendingTrigger(null);
     showToast(`setting ${humanizeStatus(trigger)}…`);
@@ -504,9 +566,7 @@ export function App({
             showToast('outcome unknown — not retried; reopen the task to verify');
             break;
           case 'auth_required':
-            setMode('main');
-            setScreen({ kind: 'auth_required' });
-            showToast('session expired — sign in again');
+            handleAuthRequired();
             break;
         }
       })
@@ -556,6 +616,65 @@ export function App({
     return counts;
   }, [tasks]);
 
+  const selectedInfo = selectedTask ? submissionInfo[selectedTask.id] : undefined;
+  // Ref mirrors for the keyboard/palette paths that can observe stale closures.
+  const selectedTaskRef = useRef(selectedTask);
+  selectedTaskRef.current = selectedTask;
+  const selectedInfoRef = useRef(selectedInfo);
+  selectedInfoRef.current = selectedInfo;
+
+  // Lazily pull prerequisites + submission status when a detail pane opens;
+  // a write (submit) invalidates the entry so the next open refetches.
+  useEffect(() => {
+    if (mode !== 'detail' || !selectedTask) return;
+    const task = selectedTask;
+    const taskId = task.id;
+    if (extrasRequested.current.has(taskId)) return;
+    extrasRequested.current.add(taskId);
+    void extras.prerequisites(task).then((result) => {
+      if (result.kind === 'auth_required') {
+        handleAuthRequired();
+        return;
+      }
+      if (result.kind !== 'ok') return; // keep whatever the catalogue provided
+      const names = result.value.map((p) => {
+        const match = tasks.find(
+          (t) => t.projectId === task.projectId && t.taskDefinitionId === p.taskDefinitionId,
+        );
+        const label = match ? match.title : `#${p.taskDefinitionId}`;
+        return p.requiredStatus === 'unknown' ? label : `${label} (${p.requiredStatus})`;
+      });
+      patchTaskPrerequisites(taskId, names);
+    });
+    void extras.submissionStatus(task).then((result) => {
+      if (result.kind === 'auth_required') {
+        handleAuthRequired();
+        return;
+      }
+      if (result.kind !== 'ok') return;
+      setSubmissionInfo((prev) => ({ ...prev, [taskId]: result.value }));
+    });
+  }, [mode, selectedTask?.id]);
+
+  // A processing submission PDF is polled until the server finishes rendering.
+  useEffect(() => {
+    if (mode !== 'detail' || !selectedTask) return;
+    if (selectedInfo?.pdfState !== 'processing') return;
+    const task = selectedTask;
+    const taskId = task.id;
+    const timer = setInterval(() => {
+      void extras.submissionStatus(task).then((result) => {
+        if (result.kind === 'auth_required') {
+          handleAuthRequired();
+          return;
+        }
+        if (result.kind !== 'ok') return; // keep polling on the next tick
+        setSubmissionInfo((prev) => ({ ...prev, [taskId]: result.value }));
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [mode, selectedTask?.id, selectedInfo?.pdfState]);
+
   // Command closures only touch stable refs/setters, so memoize once and keep
   // visibleCommands' dependency list honest.
   const commands = useMemo<Command[]>(
@@ -594,7 +713,13 @@ export function App({
       {
         name: 'submit',
         description: 'Submit files for the selected task',
-        run: () => showToast('submission wizard lands in phase 4'),
+        run: () => {
+          if (!selectedTaskRef.current) {
+            showToast('no task selected');
+            return;
+          }
+          setMode('submit');
+        },
       },
       { name: 'watch', description: 'Toggle watch mode', run: toggleWatch },
       {
@@ -637,8 +762,8 @@ export function App({
   };
 
   useKeyboard((key) => {
-    // The login wizard owns the keyboard while mounted (self-drawn fields).
-    if (mode === 'login') return;
+    // The wizards own the keyboard while mounted (self-drawn fields).
+    if (mode === 'login' || mode === 'submit') return;
     if (key.ctrl && key.name === 'k') {
       setMode((m) => (m === 'palette' ? 'main' : 'palette'));
       setPaletteQuery('');
@@ -672,6 +797,26 @@ export function App({
     if (mode === 'detail' && selectedTask) {
       if (key.name === 'return' && pendingTrigger) {
         applyTrigger(selectedTask, pendingTrigger);
+        return;
+      }
+      if (key.name === 's') {
+        setMode('submit');
+        return;
+      }
+      if (key.name === 'd') {
+        runDownload('taskPdf', selectedTask);
+        return;
+      }
+      if (key.name === 'z') {
+        runDownload('resources', selectedTask);
+        return;
+      }
+      if (key.name === 'u') {
+        if (selectedInfoRef.current?.pdfState === 'ready') {
+          runDownload('submissionPdf', selectedTask);
+        } else {
+          showToast('submission PDF is not ready yet');
+        }
         return;
       }
       const trigger = TRIGGER_ACTIONS.find((a) => a.key === key.sequence)?.trigger;
@@ -888,6 +1033,70 @@ export function App({
             <strong fg={theme.fg}>{selectedTask.title}</strong>
           </text>
           <TaskDetailBody task={selectedTask} theme={theme} />
+          <text>
+            <span fg={theme.muted}>Submission </span>
+            {selectedInfo ? (
+              <>
+                <span fg={selectedInfo.submissionObserved ? theme.status.complete : theme.muted}>
+                  {selectedInfo.submissionObserved ? 'observed' : 'none yet'}
+                </span>
+                <span fg={theme.muted}> · pdf </span>
+                <span
+                  fg={
+                    selectedInfo.pdfState === 'ready'
+                      ? theme.status.complete
+                      : selectedInfo.pdfState === 'processing'
+                        ? theme.soon
+                        : theme.muted
+                  }
+                >
+                  {selectedInfo.pdfState}
+                </span>
+                {selectedInfo.submissionDate ? (
+                  <span fg={theme.muted}> · {selectedInfo.submissionDate}</span>
+                ) : null}
+              </>
+            ) : (
+              <span fg={theme.muted}>checking…</span>
+            )}
+          </text>
+          <box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 1 }}>
+            {(
+              [
+                { keyLabel: 's', label: 'Submit files', run: () => setMode('submit') },
+                { keyLabel: 'd', label: 'Task PDF', run: () => runDownload('taskPdf', selectedTask) },
+                { keyLabel: 'z', label: 'Resources', run: () => runDownload('resources', selectedTask) },
+                ...(selectedInfo?.pdfState === 'ready'
+                  ? [
+                      {
+                        keyLabel: 'u',
+                        label: 'Submission PDF',
+                        run: () => runDownload('submissionPdf', selectedTask),
+                      },
+                    ]
+                  : []),
+              ] as const
+            ).map((action) => (
+              <box
+                key={action.keyLabel}
+                onMouseDown={(event) => {
+                  // Keep the click from reaching the pane's close-on-click.
+                  event.stopPropagation();
+                  action.run();
+                }}
+                style={{
+                  backgroundColor: theme.hover,
+                  paddingLeft: 1,
+                  paddingRight: 1,
+                }}
+              >
+                <text>
+                  <span fg={theme.accent}>[{action.keyLabel}] </span>
+                  <span fg={theme.fg}>{action.label}</span>
+                </text>
+              </box>
+            ))}
+          </box>
           <box style={{ flexDirection: 'column', gap: 0 }}>
             <text fg={theme.muted}>Set status:</text>
             <box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 1 }}>
@@ -1021,6 +1230,31 @@ export function App({
             setReloadTick((n) => n + 1);
           }}
           onCancel={() => setMode('main')}
+        />
+      ) : null}
+
+      {mode === 'submit' && selectedTask ? (
+        <SubmitWizard
+          theme={theme}
+          task={selectedTask}
+          submit={submit}
+          loadStatus={() => extras.submissionStatus(selectedTask)}
+          onAuthRequired={handleAuthRequired}
+          onClose={(submitted) => {
+            // A finished write invalidates the cached extras for this task.
+            extrasRequested.current.delete(selectedTask.id);
+            if (submitted) {
+              setSubmissionInfo((prev) => {
+                const next = { ...prev };
+                delete next[selectedTask.id];
+                return next;
+              });
+              setMode('main');
+              setReloadTick((n) => n + 1);
+            } else {
+              setMode('detail');
+            }
+          }}
         />
       ) : null}
     </box>

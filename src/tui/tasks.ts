@@ -11,6 +11,11 @@ export type TaskStatus =
   | 'assess_in_portfolio'
   | 'complete';
 
+export interface UploadSlot {
+  key: string;
+  name: string;
+}
+
 export interface TuiTask {
   id: string;
   /** Owning project/task-definition ids, needed by the write paths. */
@@ -27,6 +32,8 @@ export interface TuiTask {
   dateSource: 'unit default' | 'personal override';
   description: string;
   prerequisites: string[];
+  /** Evidence slots the server expects for a submission; empty means free-form. */
+  uploadRequirements: UploadSlot[];
 }
 
 /** Humanize a raw OnTrack status ('fix_and_resubmit' → 'Fix and resubmit'). */
@@ -77,6 +84,10 @@ export const FAKE_TASKS: TuiTask[] = [
     description:
       'Design and document an algorithm for the P1 scenario. Submit the workbook PDF plus evidence of test runs.',
     prerequisites: [],
+    uploadRequirements: [
+      { key: 'file0', name: 'Workbook PDF' },
+      { key: 'file1', name: 'Test run evidence' },
+    ],
   },
   {
     id: '2',
@@ -90,6 +101,7 @@ export const FAKE_TASKS: TuiTask[] = [
     dateSource: 'personal override',
     description: 'Trace the provided Python modules and answer the comprehension questions on Moodle.',
     prerequisites: ['P1: Algorithm design workbook'],
+    uploadRequirements: [],
   },
   {
     id: '3',
@@ -104,6 +116,7 @@ export const FAKE_TASKS: TuiTask[] = [
     description:
       'Implement the core game loop with your assigned partner. Both partners must be recorded in the submission sheet.',
     prerequisites: ['H1: Code reading homework'],
+    uploadRequirements: [],
   },
   {
     id: '4',
@@ -117,6 +130,7 @@ export const FAKE_TASKS: TuiTask[] = [
     dateSource: 'unit default',
     description: 'Online quiz covering lists, dictionaries, and complexity basics. Opens 48h before the deadline.',
     prerequisites: [],
+    uploadRequirements: [],
   },
   {
     id: '5',
@@ -130,6 +144,7 @@ export const FAKE_TASKS: TuiTask[] = [
     dateSource: 'unit default',
     description: 'Assemble a draft of your learning portfolio for the mid-semester check.',
     prerequisites: ['P2: Pair programming milestone'],
+    uploadRequirements: [],
   },
   {
     id: '6',
@@ -143,6 +158,7 @@ export const FAKE_TASKS: TuiTask[] = [
     dateSource: 'unit default',
     description: 'In-lab practical test held during week 4 workshops.',
     prerequisites: [],
+    uploadRequirements: [],
   },
   {
     id: '7',
@@ -156,5 +172,6 @@ export const FAKE_TASKS: TuiTask[] = [
     dateSource: 'personal override',
     description: 'Short written reflection on the week 5 studio activity.',
     prerequisites: [],
+    uploadRequirements: [],
   },
 ];

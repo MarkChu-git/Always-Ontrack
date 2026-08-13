@@ -14,7 +14,7 @@ import {
 import { buildStudentTaskViews, type StudentTaskView } from '../lib/student-task-view';
 import { redactSensitiveText, normalizeBaseUrl } from '../lib/utils';
 import { toWhoAmIView, type WhoAmIView } from '../lib/whoami';
-import type { TaskStatus, TuiTask } from './tasks';
+import type { TaskStatus, TuiTask, UploadSlot } from './tasks';
 
 export type LoadState =
   | { kind: 'loading' }
@@ -91,7 +91,28 @@ export function viewToTuiTask(view: StudentTaskView): TuiTask {
     dateSource: view.dates.instanceDue ? 'personal override' : 'unit default',
     description: typeof description === 'string' ? description : '',
     prerequisites: [],
+    uploadRequirements: uploadSlots(view),
   };
+}
+
+/** Map the definition's upload requirements onto the wizard's slot model. */
+function uploadSlots(view: StudentTaskView): UploadSlot[] {
+  const raw =
+    view.definition.uploadRequirements ?? view.definition.upload_requirements;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((requirement, index) => {
+    if (typeof requirement !== 'object' || requirement === null) return [];
+    const record = requirement as { key?: unknown; name?: unknown };
+    const key =
+      typeof record.key === 'string' && record.key.trim()
+        ? record.key.trim()
+        : `file${index}`;
+    const name =
+      typeof record.name === 'string' && record.name.trim()
+        ? record.name.trim()
+        : key;
+    return [{ key, name }];
+  });
 }
 
 export const loadOnTrackTasks: TaskLoader = async () => {

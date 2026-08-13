@@ -844,6 +844,23 @@ export interface ResolvedTaskSelector {
   unitCode?: string;
 }
 
+/** Flatten a resolved task into the JSON identity fields shared by artifact outputs. */
+export function taskIdentityJson(
+  resolved: Pick<ResolvedTaskSelector, 'taskDefId' | 'taskInstanceId'>,
+): {
+  taskDefinitionId: number;
+  taskInstanceId?: number;
+  taskId: number;
+  taskDefId: number;
+} {
+  return {
+    taskDefinitionId: resolved.taskDefId,
+    taskInstanceId: resolved.taskInstanceId,
+    taskId: resolved.taskInstanceId ?? resolved.taskDefId,
+    taskDefId: resolved.taskDefId,
+  };
+}
+
 /** Parse one or more values from repeated/comma-separated task selector flags. */
 function parseSelectorValues(
   args: string[],
