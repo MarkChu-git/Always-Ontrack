@@ -12,6 +12,7 @@
 import { testRender } from '@opentui/react/test-utils';
 import { act } from 'react';
 import { AgentProtocolError } from '../src/lib/agent-protocol';
+import { OnTrackHttpError } from '../src/lib/auth';
 import { App } from '../src/tui/app';
 import type { GuidedLoginRunner } from '../src/tui/auth';
 import type { LoadState } from '../src/tui/data';
@@ -874,6 +875,161 @@ check('unknown outcome is surfaced without a retry', unknownSetup.captureCharFra
 ]);
 await act(async () => {
   unknownSetup.renderer.destroy();
+});
+
+// Scenario K: ESC during the wizard's loading stage abandons the status read.
+const hangingExtras: TaskExtrasActions = {
+  ...stubExtras,
+  submissionStatus: () => new Promise(() => {}),
+};
+const hangingSetup = await testRender(
+  <App load={readyLoad} extras={hangingExtras} submit={okSubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check(
+  'wizard waits on the loading stage while the status read hangs',
+  hangingSetup.captureCharFrame(),
+  ['reading the current submission state'],
+);
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('ESCAPE');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('ESC during loading abandons the wizard', hangingSetup.captureCharFrame(), [
+  '[s] Submit files',
+  'esc / click to close',
+]);
+await act(async () => {
+  hangingSetup.renderer.destroy();
+});
+
+// Scenario L: a rejection followed by a re-dispatch mints a fresh claim key.
+const attemptKeys: string[] = [];
+let rejected = false;
+const retrySubmit: SubmitActions = {
+  inspect: async () => ({ size: 2048 }),
+  run: async (request) => {
+    attemptKeys.push(request.idempotencyKey);
+    if (!rejected) {
+      rejected = true;
+      throw new OnTrackHttpError(422, 'files rejected');
+    }
+    return {
+      kind: 'completed',
+      output: {
+        command: 'submission upload',
+        projectId: 101,
+        unitCode: 'FIT1045',
+        task: 'P1',
+        taskDefinitionId: 1001,
+        operationId: 'op_fixture',
+        state: 'succeeded',
+        dryRun: false,
+        confirmed: true,
+        verification: 'observed',
+        trigger: 'ready_for_feedback',
+        files: request.files.map((f) => ({ key: f.key ?? 'file0', bytes: 2048 })),
+        upload: { status: 'response_accepted' },
+        comment: { status: 'not_requested' },
+      },
+    };
+  },
+};
+const retrySetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={retrySubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await retrySetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKeys(['.', '/', 'a', '.', 'p', 'd', 'f']);
+  await settle();
+  await retrySetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+  await retrySetup.mockInput.pressKeys(['.', '/', 'b', '.', 'p', 'd', 'f']);
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// Validation (inspect) resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('a definitive rejection lands on the failed stage', retrySetup.captureCharFrame(), [
+  'rejected by the server (HTTP 422)',
+  'r back to files',
+]);
+await act(async () => {
+  await retrySetup.mockInput.pressKey('r');
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('the retry lands on the receipt', retrySetup.captureCharFrame(), ['✓ response accepted']);
+if (
+  attemptKeys.length !== 2 ||
+  !attemptKeys.every((key) => key.startsWith('tui:')) ||
+  attemptKeys[0] === attemptKeys[1]
+) {
+  failures += 1;
+  console.error(`FAIL retry attempt keys ${JSON.stringify(attemptKeys)}`);
+} else {
+  console.log('ok   re-dispatch after a rejection mints a fresh idempotency key');
+}
+await act(async () => {
+  retrySetup.renderer.destroy();
 });
 
 if (failures > 0) {

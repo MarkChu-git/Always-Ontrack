@@ -8,9 +8,10 @@
  * never through render closures.
  *
  * Write-path rules inherited from the shared lib: the dispatch fires exactly
- * once per wizard attempt (guarded by the stage machine and one idempotency
- * key), and an unknown transport outcome is never auto-retried — the wizard
- * shows the journal key and points at the detail pane's status line instead.
+ * once per wizard attempt (guarded by the stage machine and a fresh
+ * idempotency key minted as each preflight opens), and an unknown transport outcome
+ * is never auto-retried — the wizard shows the journal key and points at the
+ * detail pane's status line instead.
  */
 import { useEffect, useRef, useState } from 'react';
 import { randomUUID } from 'node:crypto';
@@ -117,7 +118,7 @@ export function SubmitWizard({
     setTriggerIdxState(triggerIdxRef.current);
   };
 
-  /** Minted once per wizard attempt; the dispatch claim key. */
+  /** Current attempt's dispatch claim key; re-minted on every preflight entry. */
   const operationIdRef = useRef(`tui:${randomUUID()}`);
   const liveRef = useRef(true);
   const onCloseRef = useRef(onClose);
@@ -239,7 +240,13 @@ export function SubmitWizard({
 
   useKeyboard((key) => {
     const current = stageRef.current;
-    if (current.kind === 'loading' || current.kind === 'dispatching') {
+    if (current.kind === 'loading') {
+      // Only the status read is in flight — safe to abandon; the load
+      // effect's cancelled flag swallows the late resolution.
+      if (key.name === 'escape') close(false);
+      return;
+    }
+    if (current.kind === 'dispatching') {
       return; // never interrupt an in-flight dispatch
     }
     if (key.name === 'escape') {
@@ -283,7 +290,14 @@ export function SubmitWizard({
     }
     if (key.name === 'return') {
       void validateAll().then((ok) => {
-        if (ok && liveRef.current) setStage({ kind: 'preflight' });
+        if (ok && liveRef.current) {
+          // Fresh claim key per attempt, minted as preflight opens so the
+          // displayed key is the one dispatch claims; retrying after a
+          // definitive rejection must not collide with the previous key's
+          // fingerprint in the execution journal.
+          operationIdRef.current = `tui:${randomUUID()}`;
+          setStage({ kind: 'preflight' });
+        }
       });
       return;
     }

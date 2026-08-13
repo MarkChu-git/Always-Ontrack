@@ -124,9 +124,10 @@ UI 显示响应里的最终状态而非乐观值）。
   （`applySubmissionUpload`，dry-run/claim/单发派送/回执分类与 CLI 逐字节
   一致），agent 读路径（prerequisites/resources/task PDF/submission PDF/
   submission status）提取为 `src/lib/agent-task-reads.ts`；456 项测试不回归。
-- 向导每个 attempt 铸一个幂等键（`tui:<uuid>`）：重复确认走 replay 而不是
-  二次派送；已观察提交自动切 `upload-new-files` 模式。冒烟增至 48 项断言
-  （extras 渲染/下载 toast/向导全流程/unknown 不重试）。
+- 向导每个 attempt 铸一个幂等键（`tui:<uuid>`，进入 preflight 时铸造，与
+  显示一致）：重复确认走 replay 而不是二次派送；已观察提交自动切
+  `upload-new-files` 模式。冒烟增至 54 项断言（extras 渲染/下载 toast/
+  向导全流程/unknown 不重试/loading 可 ESC 取消/拒绝后重试铸新键）。
 
 ### Phase 5 — Watch 实时面板
 

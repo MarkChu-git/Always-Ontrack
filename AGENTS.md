@@ -33,7 +33,8 @@ without auto-retry.
   focus effect only flushes at an act boundary (split palette interactions
   into separate `act` blocks); the detail pane's lazy extras fetch resolves
   outside the act batch (add one more `act` settle after opening it, or
-  React prints a "not wrapped in act" warning).
+  React prints a "not wrapped in act" warning; a few residual warnings from
+  spinner/poll intervals firing outside `act` are cosmetic and tolerated).
 - In `src/tui`, focus inputs imperatively via refs on mode changes; the
   `focused` prop alone races when overlays mount/unmount. OpenTUI inputs
   have no secure-echo mode, so password-style fields are self-drawn.
