@@ -173,6 +173,11 @@ export function LoginWizard({
 
   const cancel = () => {
     cancelledRef.current = true;
+    // Parked MFA callbacks are released so the runner can unwind, but the
+    // headless browser flow itself is not abortable — it keeps running in the
+    // background until it settles or hits the SSO timeout. Its late result is
+    // ignored via the cancelled gate; a session it may have persisted simply
+    // becomes usable on the next load.
     mfaSelectResolver.current?.(null);
     mfaCodeResolver.current?.(null);
     onCancelRef.current();

@@ -22,6 +22,7 @@ import {
   OnTrackHttpError,
   OnTrackTransportError,
   sessionUsability,
+  ssoRedirectUrl,
 } from './lib/auth.js';
 import { toWhoAmIView } from './lib/whoami.js';
 import {
@@ -41,6 +42,7 @@ import {
   sessionFromAccessTokenCapture,
   signInAndPersistRefreshCookie,
 } from './lib/login-finalize.js';
+import { signOutEverywhere } from './lib/sign-out.js';
 import type { RefreshCookieMaterial } from './lib/types.js';
 import {
   MAX_DISCOVERY_PROBE_REQUEST_BUDGET,
@@ -1786,9 +1788,10 @@ async function handleLogin(args: string[]): Promise<void> {
   // Only perform SSO flow when direct credentials were not supplied.
   if (!authToken || !username) {
     const method = await api.getAuthMethod();
+    const ssoUrl = ssoRedirectUrl(method);
 
-    if (typeof method.redirect_to === 'string' && method.redirect_to.trim()) {
-      const redirectTo = method.redirect_to;
+    if (ssoUrl) {
+      const redirectTo = ssoUrl;
       const manualRedirectTo = safeUrlForManualDisplay(redirectTo);
       console.log(
         `OnTrack uses ${safeTextForHumanDisplay(method.method, 'SSO')} for authentication.`,
@@ -2139,20 +2142,8 @@ async function handleLogout(args: string[] = []): Promise<void> {
     }
     return;
   }
-  const api = createAuthenticatedApi(session);
-  let remoteSignOutError: unknown;
-
-  try {
-    await api.signOut(session);
-  } catch (error) {
-    remoteSignOutError = error;
-  }
-
-  await Promise.all([
-    clearSession(),
-    Promise.resolve().then(() => clearAllBrowserSessionState()),
-  ]);
-  if (remoteSignOutError) {
+  const { remoteSignOutFailed } = await signOutEverywhere();
+  if (remoteSignOutFailed) {
     console.error('[warn] Local session was cleared, but remote sign-out failed. Re-authenticate if needed.');
   }
   if (hasFlag(args, '--json')) {

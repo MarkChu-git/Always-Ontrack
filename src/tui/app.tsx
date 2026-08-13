@@ -407,6 +407,14 @@ export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?
     [],
   );
 
+  // Re-render once a minute so the header's token-lifetime pill decays while
+  // the app idles (the pill is computed from the load-time expiresAt snapshot).
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setClockTick((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const showToast = (msg: string) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);

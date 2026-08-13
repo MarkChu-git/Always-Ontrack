@@ -1,4 +1,4 @@
-import type { AccessTokenResponse, CredentialSource, SessionData } from './types.js';
+import type { AccessTokenResponse, AuthMethodResponse, CredentialSource, SessionData } from './types.js';
 
 export type AuthFailureKind = 'unauthorized' | 'expired' | 'other';
 export type SessionUsability =
@@ -32,6 +32,13 @@ export function classifyAuthFailure(status: number): AuthFailureKind {
   if (status === 401) return 'unauthorized';
   if (status === 419) return 'expired';
   return 'other';
+}
+
+/** Extract the advertised SSO redirect URL from an auth-method response. */
+export function ssoRedirectUrl(method: AuthMethodResponse): string | null {
+  return typeof method.redirect_to === 'string' && method.redirect_to.trim()
+    ? method.redirect_to
+    : null;
 }
 
 /** Read legacy records safely without rewriting their credential values. */

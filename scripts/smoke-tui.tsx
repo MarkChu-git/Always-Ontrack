@@ -204,18 +204,33 @@ function wizardLoader() {
   };
 }
 
-/** Type credentials into the wizard's self-drawn fields and submit. */
-async function fillCredentials(
-  mockInput: (typeof authSetup)['mockInput'],
-  user: string,
-  pass: string,
-) {
+type TuiSetup = Awaited<ReturnType<typeof testRender>>;
+
+/** Warm up, wait for the signed-out screen to paint, then open the wizard. */
+async function openWizard(setup: TuiSetup) {
   await act(async () => {
-    await mockInput.pressKeys(user.split(''));
+    await setup.mockInput.pressKey('ARROW_DOWN');
     await settle();
-    await mockInput.pressKey('ARROW_DOWN'); // switch to the password field
+  });
+  // The async loader resolves outside the act batch; one more tick paints
+  // the auth_required screen before l can open the wizard.
+  await act(async () => {
     await settle();
-    await mockInput.pressKeys(pass.split(''));
+  });
+  await act(async () => {
+    await setup.mockInput.pressKey('l');
+    await settle();
+  });
+}
+
+/** Type credentials into the wizard's self-drawn fields (password second). */
+async function fillCredentials(setup: TuiSetup, user: string, pass: string) {
+  await act(async () => {
+    await setup.mockInput.pressKeys(user.split(''));
+    await settle();
+    await setup.mockInput.pressKey('ARROW_DOWN'); // switch to the password field
+    await settle();
+    await setup.mockInput.pressKeys(pass.split(''));
     await settle();
   });
 }
@@ -238,26 +253,14 @@ const wizardSetup = await testRender(
   <App load={wizardLoader()} auth={{ login: happyRunner, logout: async () => {} }} />,
   { width: 100, height: 32 },
 );
-await act(async () => {
-  await wizardSetup.mockInput.pressKey('ARROW_DOWN');
-  await settle();
-});
-// The async loader resolves outside the act batch; one more tick paints
-// the auth_required screen before l can open the wizard.
-await act(async () => {
-  await settle();
-});
-await act(async () => {
-  await wizardSetup.mockInput.pressKey('l');
-  await settle();
-});
+await openWizard(wizardSetup);
 check('l opens the login wizard', wizardSetup.captureCharFrame(), [
   'Sign in to OnTrack',
   'Username',
   'Password',
 ]);
 
-await fillCredentials(wizardSetup.mockInput, 'jdoe', 'hunter2');
+await fillCredentials(wizardSetup, 'jdoe', 'hunter2');
 check('password is masked', wizardSetup.captureCharFrame(), ['jdoe', '••••••']);
 
 await act(async () => {
@@ -305,18 +308,8 @@ const selectSetup = await testRender(
   <App load={wizardLoader()} auth={{ login: selectRunner, logout: async () => {} }} />,
   { width: 100, height: 32 },
 );
-await act(async () => {
-  await selectSetup.mockInput.pressKey('ARROW_DOWN');
-  await settle();
-});
-await act(async () => {
-  await settle();
-});
-await act(async () => {
-  await selectSetup.mockInput.pressKey('l');
-  await settle();
-});
-await fillCredentials(selectSetup.mockInput, 'jdoe', 'hunter2');
+await openWizard(selectSetup);
+await fillCredentials(selectSetup, 'jdoe', 'hunter2');
 await act(async () => {
   await selectSetup.mockInput.pressKey('RETURN');
   await settle();
@@ -356,18 +349,8 @@ const codeSetup = await testRender(
   <App load={wizardLoader()} auth={{ login: codeRunner, logout: async () => {} }} />,
   { width: 100, height: 32 },
 );
-await act(async () => {
-  await codeSetup.mockInput.pressKey('ARROW_DOWN');
-  await settle();
-});
-await act(async () => {
-  await settle();
-});
-await act(async () => {
-  await codeSetup.mockInput.pressKey('l');
-  await settle();
-});
-await fillCredentials(codeSetup.mockInput, 'jdoe', 'hunter2');
+await openWizard(codeSetup);
+await fillCredentials(codeSetup, 'jdoe', 'hunter2');
 await act(async () => {
   await codeSetup.mockInput.pressKey('RETURN');
   await settle();
@@ -407,18 +390,8 @@ const failSetup = await testRender(
   <App load={wizardLoader()} auth={{ login: failRunner, logout: async () => {} }} />,
   { width: 100, height: 32 },
 );
-await act(async () => {
-  await failSetup.mockInput.pressKey('ARROW_DOWN');
-  await settle();
-});
-await act(async () => {
-  await settle();
-});
-await act(async () => {
-  await failSetup.mockInput.pressKey('l');
-  await settle();
-});
-await fillCredentials(failSetup.mockInput, 'jdoe', 'hunter2');
+await openWizard(failSetup);
+await fillCredentials(failSetup, 'jdoe', 'hunter2');
 await act(async () => {
   await failSetup.mockInput.pressKey('RETURN');
   await settle();
