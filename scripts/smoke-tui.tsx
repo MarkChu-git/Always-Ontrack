@@ -12,6 +12,7 @@
 import { testRender } from '@opentui/react/test-utils';
 import { act } from 'react';
 import { App } from '../src/tui/app';
+import type { GuidedLoginRunner } from '../src/tui/auth';
 import type { LoadState } from '../src/tui/data';
 import { FAKE_TASKS } from '../src/tui/tasks';
 
@@ -42,7 +43,8 @@ function locate(frame: string, text: string): { x: number; y: number } {
 
 const readyLoad = async (): Promise<LoadState> => ({
   kind: 'ready',
-  username: 'alice.zhang',
+  identity: { username: 'alice.zhang', savedAt: '2026-08-12T00:00:00.000Z' },
+  expiresAt: new Date(Date.now() + 5.5 * 86_400_000).toISOString(),
   tasks: FAKE_TASKS,
 });
 
@@ -58,6 +60,7 @@ await act(async () => {
 });
 check('initial frame', captureCharFrame(), [
   'alice.zhang',
+  '5d left',
   'FIT1045',
   'Tasks (7)',
   'P1: Algorithm design',
@@ -160,7 +163,7 @@ await act(async () => {
   await authSetup.mockInput.pressKey('ARROW_DOWN');
   await settle();
 });
-check('auth screen', authSetup.captureCharFrame(), ['Not signed in', 'ontrack login', 'r retry']);
+check('auth screen', authSetup.captureCharFrame(), ['Not signed in', 'l sign in', 'r retry']);
 await act(async () => {
   authSetup.renderer.destroy();
 });
@@ -188,6 +191,290 @@ await act(async () => {
 check('r retries after error', errSetup.captureCharFrame(), ['Tasks (7)']);
 await act(async () => {
   errSetup.renderer.destroy();
+});
+
+// --- Login wizard scenarios (fixture runners, no browser) -------------------
+
+/** Loader that starts signed-out and becomes ready after the wizard succeeds. */
+function wizardLoader() {
+  let calls = 0;
+  return async (): Promise<LoadState> => {
+    calls += 1;
+    return calls === 1 ? { kind: 'auth_required' } : readyLoad();
+  };
+}
+
+type TuiSetup = Awaited<ReturnType<typeof testRender>>;
+
+/** Warm up, wait for the signed-out screen to paint, then open the wizard. */
+async function openWizard(setup: TuiSetup) {
+  await act(async () => {
+    await setup.mockInput.pressKey('ARROW_DOWN');
+    await settle();
+  });
+  // The async loader resolves outside the act batch; one more tick paints
+  // the auth_required screen before l can open the wizard.
+  await act(async () => {
+    await settle();
+  });
+  await act(async () => {
+    await setup.mockInput.pressKey('l');
+    await settle();
+  });
+}
+
+/** Type credentials into the wizard's self-drawn fields (password second). */
+async function fillCredentials(setup: TuiSetup, user: string, pass: string) {
+  await act(async () => {
+    await setup.mockInput.pressKeys(user.split(''));
+    await settle();
+    await setup.mockInput.pressKey('ARROW_DOWN'); // switch to the password field
+    await settle();
+    await setup.mockInput.pressKeys(pass.split(''));
+    await settle();
+  });
+}
+
+// Scenario A: happy path with an Okta Verify number challenge.
+let seenCreds: { username: string; password: string } | null = null;
+let releaseMfaWait: (() => void) | null = null;
+const happyRunner: GuidedLoginRunner = async (creds, hooks) => {
+  seenCreds = creds;
+  hooks.onStep('username');
+  hooks.onStep('password');
+  hooks.onStep('mfa_wait');
+  hooks.onMfaNumberChallenge(['42', '17', '93']);
+  await new Promise<void>((resolve) => {
+    releaseMfaWait = resolve;
+  });
+  return creds.username;
+};
+const wizardSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: happyRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(wizardSetup);
+check('l opens the login wizard', wizardSetup.captureCharFrame(), [
+  'Sign in to OnTrack',
+  'Username',
+  'Password',
+]);
+
+await fillCredentials(wizardSetup, 'jdoe', 'hunter2');
+check('password is masked', wizardSetup.captureCharFrame(), ['jdoe', '••••••']);
+
+await act(async () => {
+  await wizardSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+check('mfa wait shows the number challenge', wizardSetup.captureCharFrame(), [
+  'Approve the request in Okta Verify',
+  'Tap',
+  '42',
+]);
+
+await act(async () => {
+  releaseMfaWait!();
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('successful login reloads into the task view', wizardSetup.captureCharFrame(), [
+  'alice.zhang',
+  'Tasks (7)',
+]);
+if (seenCreds?.username !== 'jdoe' || seenCreds?.password !== 'hunter2') {
+  failures += 1;
+  console.error('FAIL runner received the typed credentials');
+} else {
+  console.log('ok   runner received the typed credentials');
+}
+await act(async () => {
+  wizardSetup.renderer.destroy();
+});
+
+// Scenario B: MFA method selection resolves the parked callback.
+let chosenMfaId: number | null = null;
+const selectRunner: GuidedLoginRunner = async (creds, hooks) => {
+  hooks.onStep('mfa_select');
+  chosenMfaId = await hooks.chooseMfaMethod([
+    { id: 1, label: 'Okta Verify', recommended: true },
+    { id: 2, label: 'SMS' },
+  ]);
+  return creds.username;
+};
+const selectSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: selectRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(selectSetup);
+await fillCredentials(selectSetup, 'jdoe', 'hunter2');
+await act(async () => {
+  await selectSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+check('mfa select lists the methods', selectSetup.captureCharFrame(), [
+  'Choose a security method',
+  'Okta Verify',
+  '(Recommended)',
+  'SMS',
+]);
+await act(async () => {
+  await selectSetup.mockInput.pressKey('2');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('mfa choice completes the login', selectSetup.captureCharFrame(), ['Tasks (7)']);
+if (chosenMfaId !== 2) {
+  failures += 1;
+  console.error(`FAIL mfa choice resolved with ${chosenMfaId}, expected 2`);
+} else {
+  console.log('ok   mfa choice resolved with id 2');
+}
+await act(async () => {
+  selectSetup.renderer.destroy();
+});
+
+// Scenario C: MFA code entry resolves the parked callback.
+let seenMfaCode: string | null = null;
+const codeRunner: GuidedLoginRunner = async (creds, hooks) => {
+  hooks.onStep('mfa_code');
+  seenMfaCode = await hooks.requestMfaCode('Okta Verify');
+  return creds.username;
+};
+const codeSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: codeRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(codeSetup);
+await fillCredentials(codeSetup, 'jdoe', 'hunter2');
+await act(async () => {
+  await codeSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+check('mfa code prompt renders', codeSetup.captureCharFrame(), [
+  'Okta Verify: enter the current code',
+]);
+await act(async () => {
+  await codeSetup.mockInput.pressKeys(['1', '2', '3', '4', '5', '6']);
+  await settle();
+  await codeSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('mfa code completes the login', codeSetup.captureCharFrame(), ['Tasks (7)']);
+if (seenMfaCode !== '123456') {
+  failures += 1;
+  console.error(`FAIL mfa code resolved with ${seenMfaCode}, expected 123456`);
+} else {
+  console.log('ok   mfa code resolved with 123456');
+}
+await act(async () => {
+  codeSetup.renderer.destroy();
+});
+
+// Scenario D: classified failure renders, r returns to credentials.
+const failRunner: GuidedLoginRunner = async () => {
+  throw {
+    reason: 'timeout',
+    step: 'mfa_wait',
+    message: 'Timed out while waiting for the browser authentication flow.',
+  };
+};
+const failSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: failRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(failSetup);
+await fillCredentials(failSetup, 'jdoe', 'hunter2');
+await act(async () => {
+  await failSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+check('classified failure renders', failSetup.captureCharFrame(), [
+  'Timed out waiting for the SSO flow',
+  'r retry',
+]);
+await act(async () => {
+  await failSetup.mockInput.pressKey('r');
+  await settle();
+});
+check('r after failure returns to credentials', failSetup.captureCharFrame(), ['Password']);
+await act(async () => {
+  await failSetup.mockInput.pressKey('ESCAPE');
+  await settle();
+});
+check('esc leaves the wizard', failSetup.captureCharFrame(), ['Not signed in']);
+await act(async () => {
+  failSetup.renderer.destroy();
+});
+
+// Scenario E: /logout needs a second confirm, then clears back to signed-out.
+let logoutCalls = 0;
+const logoutSetup = await testRender(
+  <App
+    load={readyLoad}
+    auth={{
+      login: happyRunner,
+      logout: async () => {
+        logoutCalls += 1;
+      },
+    }}
+  />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await logoutSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+// Palette interactions split across act boundaries: the palette input's focus
+// effect only flushes at an act edge under testRender (same rhythm as the
+// /theme scenario above).
+await act(async () => {
+  await logoutSetup.mockInput.pressKey('k', { ctrl: true });
+  await settle();
+});
+await act(async () => {
+  await logoutSetup.mockInput.pressKeys(['l', 'o', 'g', 'o', 'u', 't']);
+  await settle();
+});
+await act(async () => {
+  await logoutSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+check('first /logout only arms the confirm', logoutSetup.captureCharFrame(), [
+  'run /logout again',
+  'Tasks (7)',
+]);
+await act(async () => {
+  await logoutSetup.mockInput.pressKey('k', { ctrl: true });
+  await settle();
+});
+await act(async () => {
+  await logoutSetup.mockInput.pressKeys(['l', 'o', 'g', 'o', 'u', 't']);
+  await settle();
+});
+await act(async () => {
+  await logoutSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('second /logout signs out', logoutSetup.captureCharFrame(), ['Not signed in']);
+if (logoutCalls !== 1) {
+  failures += 1;
+  console.error(`FAIL logout ran ${logoutCalls} times, expected 1`);
+} else {
+  console.log('ok   logout ran exactly once');
+}
+await act(async () => {
+  logoutSetup.renderer.destroy();
 });
 
 if (failures > 0) {

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InputRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer } from '@opentui/react';
+import { DEFAULT_TUI_AUTH, type TuiAuthActions } from './auth';
 import type { LoadState, TaskLoader } from './data';
+import { LoginWizard } from './login';
 import { darkTheme, lightTheme, type Theme } from './theme';
 import {
   STATUS_ICON,
@@ -12,7 +14,7 @@ import {
   type TuiTask,
 } from './tasks';
 
-type Mode = 'main' | 'detail' | 'palette';
+type Mode = 'main' | 'detail' | 'palette' | 'login';
 type TabId = 'all' | 'active' | 'ready' | 'done';
 
 const TABS: { id: TabId; label: string; match: (t: TuiTask) => boolean }[] = [
@@ -68,6 +70,19 @@ function dueBadge(task: TuiTask, theme: Theme): { text: string; fg: string } {
   return { text: `in ${days}d`, fg: theme.muted };
 }
 
+/** Colour-coded session-token lifetime pill for the header. */
+function tokenBadge(expiresAt: string | null, theme: Theme): { text: string; fg: string } | null {
+  if (!expiresAt) return null;
+  const ms = Date.parse(expiresAt) - Date.now();
+  if (!Number.isFinite(ms)) return null;
+  if (ms <= 0) return { text: 'token expired', fg: theme.urgent };
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return { text: `${Math.max(1, minutes)}m left`, fg: theme.soon };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { text: `${hours}h left`, fg: theme.soon };
+  return { text: `${Math.floor(hours / 24)}d left`, fg: theme.status.complete };
+}
+
 function StatusPill({ task, theme }: { task: TuiTask; theme: Theme }) {
   // Colour comes from the bucket; the label stays the honest raw status.
   const label = task.statusRaw ? humanizeStatus(task.statusRaw) : STATUS_LABEL[task.status];
@@ -94,6 +109,7 @@ function Header({
   watchOn,
   onToggleWatch,
   username,
+  expiresAt,
   unitLabel,
   onCycleUnit,
 }: {
@@ -101,9 +117,11 @@ function Header({
   watchOn: boolean;
   onToggleWatch: () => void;
   username: string | null;
+  expiresAt: string | null;
   unitLabel: string;
   onCycleUnit: () => void;
 }) {
+  const token = tokenBadge(expiresAt, theme);
   return (
     <box
       style={{
@@ -121,6 +139,12 @@ function Header({
           <text>
             <span fg={username ? theme.status.complete : theme.muted}>● </span>
             <span fg={theme.fg}>{username ?? 'not signed in'}</span>
+            {token ? (
+              <>
+                <span fg={theme.muted}> · </span>
+                <span fg={token.fg}>{token.text}</span>
+              </>
+            ) : null}
             <span fg={theme.muted}> · </span>
           </text>
           <text onMouseDown={onCycleUnit}>
@@ -334,7 +358,7 @@ function NoticeScreen({
   );
 }
 
-export function App({ load }: { load: TaskLoader }) {
+export function App({ load, auth = DEFAULT_TUI_AUTH }: { load: TaskLoader; auth?: TuiAuthActions }) {
   const renderer = useRenderer();
   const [theme, setTheme] = useState<Theme>(darkTheme);
   const [screen, setScreen] = useState<LoadState>({ kind: 'loading' });
@@ -352,6 +376,10 @@ export function App({ load }: { load: TaskLoader }) {
   const inputRef = useRef<InputRenderable>(null);
   const paletteInputRef = useRef<InputRenderable>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Double-invoke guard for destructive-ish /logout: first run arms, second
+  // within 4s executes. Ref (not state) so the memoized command sees it.
+  const logoutArmed = useRef(false);
+  const logoutArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -374,9 +402,18 @@ export function App({ load }: { load: TaskLoader }) {
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (logoutArmTimer.current) clearTimeout(logoutArmTimer.current);
     },
     [],
   );
+
+  // Re-render once a minute so the header's token-lifetime pill decays while
+  // the app idles (the pill is computed from the load-time expiresAt snapshot).
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setClockTick((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -444,7 +481,33 @@ export function App({ load }: { load: TaskLoader }) {
       {
         name: 'login',
         description: 'Sign in with Monash SSO',
-        run: () => showToast('login wizard lands in phase 2 — run `ontrack login` in a terminal'),
+        run: () => setMode('login'),
+      },
+      {
+        name: 'logout',
+        description: 'Sign out and clear the local session (run twice to confirm)',
+        run: () => {
+          if (!logoutArmed.current) {
+            logoutArmed.current = true;
+            showToast('run /logout again within 4s to confirm');
+            if (logoutArmTimer.current) clearTimeout(logoutArmTimer.current);
+            logoutArmTimer.current = setTimeout(() => {
+              logoutArmed.current = false;
+            }, 4000);
+            return;
+          }
+          logoutArmed.current = false;
+          if (logoutArmTimer.current) clearTimeout(logoutArmTimer.current);
+          showToast('signing out…');
+          void auth
+            .logout()
+            .catch(() => undefined) // local cleanup is best-effort too
+            .then(() => {
+              setScreen({ kind: 'auth_required' });
+              setMode('main');
+              showToast('signed out');
+            });
+        },
       },
       {
         name: 'submit',
@@ -472,7 +535,7 @@ export function App({ load }: { load: TaskLoader }) {
         },
       },
     ],
-    [],
+    [auth],
   );
 
   const visibleCommands = useMemo(() => {
@@ -492,6 +555,8 @@ export function App({ load }: { load: TaskLoader }) {
   };
 
   useKeyboard((key) => {
+    // The login wizard owns the keyboard while mounted (self-drawn fields).
+    if (mode === 'login') return;
     if (key.ctrl && key.name === 'k') {
       setMode((m) => (m === 'palette' ? 'main' : 'palette'));
       setPaletteQuery('');
@@ -500,6 +565,7 @@ export function App({ load }: { load: TaskLoader }) {
     }
     if (screen.kind === 'error' || screen.kind === 'auth_required') {
       if (key.name === 'r') setReloadTick((n) => n + 1);
+      if (key.name === 'l' && screen.kind === 'auth_required') setMode('login');
       return;
     }
     if (key.ctrl && (key.name === 'right' || key.name === 'left')) {
@@ -555,7 +621,8 @@ export function App({ load }: { load: TaskLoader }) {
         theme={theme}
         watchOn={watchOn}
         onToggleWatch={toggleWatch}
-        username={screen.kind === 'ready' ? screen.username : null}
+        username={screen.kind === 'ready' ? screen.identity.username : null}
+        expiresAt={screen.kind === 'ready' ? screen.expiresAt : null}
         unitLabel={unitLabel}
         onCycleUnit={cycleUnit}
       />
@@ -576,12 +643,17 @@ export function App({ load }: { load: TaskLoader }) {
               : screen.kind === 'auth_required'
                 ? [
                     'The TUI needs a stored OnTrack session.',
-                    'Run `ontrack login` in another terminal, then come back.',
-                    '(The in-TUI SSO wizard lands in phase 2.)',
+                    'Press l to sign in with Monash SSO (guided, hidden browser).',
                   ]
                 : [screen.message]
           }
-          hint={screen.kind === 'loading' ? '' : 'r retry · ctrl+c quit'}
+          hint={
+            screen.kind === 'loading'
+              ? ''
+              : screen.kind === 'auth_required'
+                ? 'l sign in · r retry · ctrl+c quit'
+                : 'r retry · ctrl+c quit'
+          }
         />
       ) : (
         <>
@@ -797,6 +869,19 @@ export function App({ load }: { load: TaskLoader }) {
         >
           <text fg={theme.fg}>{toast}</text>
         </box>
+      ) : null}
+
+      {mode === 'login' ? (
+        <LoginWizard
+          theme={theme}
+          run={auth.login}
+          onSignedIn={(name) => {
+            setMode('main');
+            showToast(`signed in as ${name}`);
+            setReloadTick((n) => n + 1);
+          }}
+          onCancel={() => setMode('main')}
+        />
       ) : null}
     </box>
   );

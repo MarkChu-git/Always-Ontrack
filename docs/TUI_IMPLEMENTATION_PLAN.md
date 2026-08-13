@@ -1,6 +1,7 @@
 # OnTrack TUI 全面实施计划
 
-状态：TUI 骨架（OpenTUI + React，假数据）已完成并通过 10/10 无头冒烟；本计划覆盖全功能接入
+状态：Phase 0（骨架，PR #53）与 Phase 1（只读数据接入，PR #54）已合并；
+Phase 2（认证向导）实施完成，自审后合并
 骨架分支：`feat/tui-skeleton`（PR #53）
 协议目标：TUI 不引入新业务行为，只做 `src/lib/` 能力的人类渲染层
 
@@ -81,15 +82,16 @@ UI 显示响应里的最终状态而非乐观值）。
   （需要多任务、多状态覆盖交互路径）；真实账号手动验证（`smoke:real`
   流程不回归）。
 
-### Phase 2 — 认证向导
+### Phase 2 — 认证向导（已完成）
 
-- 登录向导封装 `captureSsoCredentialsWithGuidedLogin`：分步界面（SSO 跳转
-  提示 → Okta Verify push/number → 结果确认），MFA 选项来自
-  `MfaMethodOption`；失败分类沿用 `classifySsoFallback`。
-- 顶栏显示 Security Identity（`toWhoAmIView`）与 token 有效期；过期/即将
-  过期给出色态变化；`logout` 清 session 并回到引导屏。
-- 验收：认证相关现有测试不回归；向导的每一步在无头冒烟中以 fixture 驱动
-  到可见状态。
+- 登录向导封装 `captureSsoCredentialsWithGuidedLogin`：分步界面（凭据 →
+  SSO 步骤 → MFA 选择/代码 → Okta Verify 数字挑战 → 结果），MFA 选项来自
+  `MfaMethodOption`；失败分类沿用 `classifySsoFallback`。会话落盘走
+  `src/lib/login-finalize.ts`（从 cli.ts 提取，CLI/TUI 共用同一路径）。
+- 顶栏显示 identity（`toWhoAmIView`）与 token 有效期药丸（<1h/<24h 警告
+  色，已过期红色）；`/logout` 双次确认后清 session 并回到引导屏。
+- 验收达成：456 项现有测试不回归；向导每一步（凭据/MFA 选择/MFA 代码/
+  数字挑战/失败分类/登出）由 fixture runner 在无头冒烟驱动（31 项断言）。
 
 ### Phase 3 — 状态变更（第一个写操作）
 

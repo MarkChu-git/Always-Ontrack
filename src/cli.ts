@@ -22,6 +22,7 @@ import {
   OnTrackHttpError,
   OnTrackTransportError,
   sessionUsability,
+  ssoRedirectUrl,
 } from './lib/auth.js';
 import { toWhoAmIView } from './lib/whoami.js';
 import {
@@ -36,6 +37,12 @@ import {
 } from "./lib/auto-login.js";
 import type { MfaMethodOption } from "./lib/auto-login.js";
 import type { LoginCredentials } from './lib/auto-login.js';
+import {
+  finalizeCapturedLogin,
+  sessionFromAccessTokenCapture,
+  signInAndPersistRefreshCookie,
+} from './lib/login-finalize.js';
+import { signOutEverywhere } from './lib/sign-out.js';
 import type { RefreshCookieMaterial } from './lib/types.js';
 import {
   MAX_DISCOVERY_PROBE_REQUEST_BUDGET,
@@ -246,50 +253,6 @@ const MAX_AGENT_TASK_ITEMS = 200;
 const MAX_AGENT_TASK_OUTPUT_BYTES = 512 * 1024;
 const MAX_AGENT_SUBMISSION_STATUS_OUTPUT_BYTES = 16 * 1024;
 const MAX_TASK_RESOURCE_BATCH_BYTES = MAX_DOWNLOAD_BYTES * 4;
-
-/** Convert a credential captured from the verified access-token response into a session. */
-function sessionFromAccessTokenCapture(
-  baseUrl: string,
-  captured: LoginCredentials,
-  savedAt: string,
-): SessionData {
-  if (captured.contract !== 'access-token' || !captured.expiresAt) {
-    throw new Error(
-      'The observed access-token response is missing its required expiry.',
-    );
-  }
-  return createSessionFromAccessToken(
-    baseUrl,
-    captured.username,
-    {
-      auth_token: captured.authToken,
-      auth_token_expiry: captured.expiresAt,
-      user: { username: captured.username },
-    },
-    savedAt,
-  );
-}
-
-/**
- * Exchange a legacy captured credential through the observed `/auth` contract
- * and persist any refresh cookie the server issues for the persistent session.
- */
-async function signInAndPersistRefreshCookie(
-  api: OnTrackApiClient,
-  payload: { auth_token: string; username: string; remember: boolean },
-): Promise<SignInResponse> {
-  const result = await api.signInWithCookieCapture(payload);
-  if (result.refreshCookie) {
-    try {
-      persistRefreshCookie(result.refreshCookie, {
-        targetOrigin: new URL(api.base).origin,
-      });
-    } catch {
-      // Refresh-cookie persistence is best effort; the session itself is valid.
-    }
-  }
-  return result.response;
-}
 
 /** Print command help and high-level behavioral notes. */
 function help(): void {
@@ -1825,9 +1788,10 @@ async function handleLogin(args: string[]): Promise<void> {
   // Only perform SSO flow when direct credentials were not supplied.
   if (!authToken || !username) {
     const method = await api.getAuthMethod();
+    const ssoUrl = ssoRedirectUrl(method);
 
-    if (typeof method.redirect_to === 'string' && method.redirect_to.trim()) {
-      const redirectTo = method.redirect_to;
+    if (ssoUrl) {
+      const redirectTo = ssoUrl;
       const manualRedirectTo = safeUrlForManualDisplay(redirectTo);
       console.log(
         `OnTrack uses ${safeTextForHumanDisplay(method.method, 'SSO')} for authentication.`,
@@ -2133,59 +2097,15 @@ async function handleLogin(args: string[]): Promise<void> {
     throw new Error('Unable to obtain login credentials. Retry login with --sso, --auto, or --redirect-url.');
   }
 
-  const savedAt = new Date().toISOString();
-  const session =
-    credentialContract === 'access-token'
-      ? sessionFromAccessTokenCapture(
-          api.base,
-          {
-            authToken,
-            username,
-            expiresAt: credentialExpiresAt,
-            source: 'auth_response',
-            contract: credentialContract,
-          },
-          savedAt,
-        )
-      : await (async (): Promise<SessionData> => {
-          // Manual/legacy captures use the older exchange contract. Browser
-          // access-token responses are already API credentials and never come here.
-          const response = await signInAndPersistRefreshCookie(api, {
-            auth_token: authToken,
-            username,
-            remember: true,
-          });
-          return {
-            baseUrl: api.base,
-            username,
-            authToken: response.auth_token,
-            user: response.user,
-            savedAt,
-            expiresAt:
-              response.auth_token_expiry ??
-              (response.auth_token === authToken
-                ? credentialExpiresAt
-                : undefined),
-            source: credentialSource,
-            refreshedAt: savedAt,
-          };
-        })();
+  const session = await finalizeCapturedLogin(api, {
+    authToken,
+    username,
+    expiresAt: credentialExpiresAt,
+    contract: credentialContract,
+    refreshCookie: capturedRefreshCookie,
+    source: credentialSource,
+  });
 
-  // Persist session for subsequent CLI commands.
-  await saveSession(session);
-
-  // The browser-context capture paths (auto/guided SSO) never re-exchange over
-  // HTTP, so persist their observed refresh cookie explicitly; the legacy
-  // exchange path already persisted its own Set-Cookie pair above.
-  if (capturedRefreshCookie) {
-    try {
-      persistRefreshCookie(capturedRefreshCookie, {
-        targetOrigin: new URL(api.base).origin,
-      });
-    } catch {
-      // Refresh-cookie persistence is best effort; the session itself is valid.
-    }
-  }
   if (!readStoredRefreshCookie({ targetOrigin: new URL(api.base).origin })) {
     console.log(
       '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.',
@@ -2222,20 +2142,8 @@ async function handleLogout(args: string[] = []): Promise<void> {
     }
     return;
   }
-  const api = createAuthenticatedApi(session);
-  let remoteSignOutError: unknown;
-
-  try {
-    await api.signOut(session);
-  } catch (error) {
-    remoteSignOutError = error;
-  }
-
-  await Promise.all([
-    clearSession(),
-    Promise.resolve().then(() => clearAllBrowserSessionState()),
-  ]);
-  if (remoteSignOutError) {
+  const { remoteSignOutFailed } = await signOutEverywhere();
+  if (remoteSignOutFailed) {
     console.error('[warn] Local session was cleared, but remote sign-out failed. Re-authenticate if needed.');
   }
   if (hasFlag(args, '--json')) {

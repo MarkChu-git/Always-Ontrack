@@ -3,20 +3,27 @@
 An OpenTUI/React TUI lives in `src/tui/` (separate from the agent-first CLI
 core in `src/lib/`). It loads the real Student Task View through
 `src/tui/data.ts` (auth broker + API client + `buildStudentTaskViews`),
-falls back to sign-in/error screens when no usable session exists, and is
-not yet wired into the `ontrack` entry point.
+has an in-TUI guided SSO login wizard (`src/tui/login.tsx`, driver in
+`src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts` and
+`src/lib/login-finalize.ts`), and is not yet wired into the `ontrack` entry
+point.
 
 - `bun run tui` starts it; `bun run typecheck:tui` type-checks it against
   `tsconfig.tui.json` (the main `tsconfig.json` excludes `src/tui`, so the
   published `dist/` build is unaffected).
-- `bun scripts/smoke-tui.tsx` is the headless smoke test; it injects a
-  fixture loader, so no network or session is needed. Quirks it
+- `bun scripts/smoke-tui.tsx` is the headless smoke test; it injects fixture
+  loaders/auth drivers, so no network or session is needed. Quirks it
   encapsulates: capture before first paint returns an uninitialized buffer;
   under `testRender` a state update needs a short settle before input typing
   works again; a lone ESC byte needs a beat for the key parser; an async
-  loader resolution needs one extra act tick to paint.
+  loader resolution needs one extra act tick to paint; a `useKeyboard`
+  handler can observe a stale render closure under `testRender` (read state
+  through ref mirrors instead, like `src/tui/login.tsx` does); a mode-change
+  focus effect only flushes at an act boundary (split palette interactions
+  into separate `act` blocks).
 - In `src/tui`, focus inputs imperatively via refs on mode changes; the
-  `focused` prop alone races when overlays mount/unmount.
+  `focused` prop alone races when overlays mount/unmount. OpenTUI inputs
+  have no secure-echo mode, so password-style fields are self-drawn.
 
 ## Pull request workflow
 
