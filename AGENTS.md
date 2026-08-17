@@ -9,9 +9,10 @@ teaching-period `end_date` excludes the unit).
 has an in-TUI login wizard with no credential fields (`src/tui/login.tsx`,
 driver in `src/tui/auth.ts` — both thin compositions over
 `src/lib/auto-login.ts`, `src/lib/pair-login.ts`, and
-`src/lib/login-finalize.ts`): it pops a visible browser for SSO sign-in on
-machines with a display, and runs the pairing-relay flow (pairing link +
-code rendered in the wizard) on headless environments. It is not yet wired
+`src/lib/login-finalize.ts`): it runs the pairing-relay flow first on every
+environment (pairing link + code rendered in the wizard, reusing any
+existing OnTrack session in the user's own browser), and falls back to a
+controlled browser window only when pairing is disabled. It is not yet wired
 into the `ontrack` entry point.
 
 Interactive write/read actions are injectable props with production

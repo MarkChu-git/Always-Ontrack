@@ -280,7 +280,7 @@ const wizardSetup = await testRender(
 await openWizard(wizardSetup);
 check('l opens the login wizard', wizardSetup.captureCharFrame(), [
   'Sign in to OnTrack',
-  'Complete sign-in in the opened browser window',
+  'Preparing sign-in',
 ]);
 
 await act(async () => {

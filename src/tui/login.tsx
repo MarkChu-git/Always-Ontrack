@@ -159,7 +159,7 @@ export function LoginWizard({
               <span fg={theme.fg}>
                 {stage.pairing
                   ? 'Waiting for pairing sign-in…'
-                  : 'Complete sign-in in the opened browser window…'}
+                  : 'Preparing sign-in…'}
               </span>
             </text>
             {stage.pairing ? (

@@ -52,7 +52,7 @@ engine.
   - structured human handoff only when Monash requires verification
   - local `ontrack-auth-mcp` control plane
   - browser-window SSO capture (no credentials typed into the terminal)
-  - pairing-relay sign-in on headless environments
+  - pairing-relay sign-in (default on every environment, works from your own browser)
   - manual redirect URL login
   - direct `auth token + username` login
 - Read access for account, unit, project, and task data
@@ -380,16 +380,16 @@ are bounded and rejected when they contain terminal control characters.
 
 ### 2. Sign in
 
-Recommended (opens a browser window locally, pairs on headless environments):
+Recommended (pairing link, works from your own browser on any device):
 
 ```bash
 ontrack login
 ```
 
-Force a hidden browser capture (e.g. headless with pairing disabled):
+Opt into controlled-browser capture instead (visible window locally):
 
 ```bash
-ontrack login --hide-browser --no-pair
+ontrack login --auto
 ```
 
 ### 3. Confirm the cached account
@@ -519,8 +519,8 @@ ontrack login
 This flow:
 
 1. first probes the CLI's previously saved, OnTrack-only browser state and reuses it when valid
-2. on machines with a display, pops up a visible browser window — you sign in through the real Monash SSO pages (password and MFA never touch the terminal)
-3. on headless environments (CI/SSH/no display), prints a one-time pairing link instead — you sign in on any device and the credential arrives end-to-end encrypted (see the pairing section below)
+2. prints a one-time pairing link — you sign in in your own browser on any device, reusing an existing OnTrack session if you have one, and the credential arrives end-to-end encrypted (see the pairing section below)
+3. `--auto` opts into controlled-browser capture instead: a visible browser window on machines with a display
 4. captures the resulting credentials and signs in through `/api/auth`
 5. stores a local session cache
 6. tells you how to install a browser runtime manually if one is missing
@@ -551,10 +551,9 @@ The capture implementation can read credentials from:
 - `localStorage`
 - cookies
 
-### Pairing sign-in on headless environments (VPS / SSH / CI)
+### Pairing sign-in (default on every environment)
 
-On environments without a display (CI, SSH sessions, headless Linux), `ontrack login`
-defaults to pairing mode instead of asking for your password in the terminal:
+`ontrack login` defaults to pairing mode instead of any terminal credential entry:
 
 ```text
 $ ontrack login
@@ -573,7 +572,7 @@ browser to a one-time key only the CLI holds, and travels through a blind
 relay mailbox that only ever sees ciphertext. The CLI polls the mailbox,
 decrypts locally, and completes the usual session exchange.
 
-- `--pair` / `--no-pair`: force pairing on/off (off means the browser-capture/manual flows).
+- `--pair` / `--no-pair`: force pairing on/off (off means the --auto browser-capture/manual flows).
 - `--relay-url URL` or `ONTRACK_RELAY_URL`: point at another relay (self-hosters);
   set it empty to disable pairing entirely.
 - `--pair-timeout-sec N`: pairing wait budget (default 300, minimum 60).
@@ -648,12 +647,12 @@ ontrack logout
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
 | `ontrack auth status --output agent-json` | Read credential lifecycle metadata | Never returns a credential or identity |
 | `ontrack auth ensure --output agent-json` | Ensure a usable credential | Silent by default; structured handoff when required |
-| `ontrack login` | Pop a visible browser for SSO sign-in (pairing on headless) | Primary login command; no credentials typed into the terminal |
-| `ontrack login --show-browser` | Force visible browser mode | Explicit override (default on machines with a display) |
+| `ontrack login` | Print a one-time pairing link; sign in in your own browser | Primary login command; no credentials typed into the terminal |
+| `ontrack login --show-browser` | Force visible browser mode with --auto | Explicit override |
 | `ontrack login --hide-browser` | Force hidden browser capture | Headless environments, typically with --no-pair |
 | `ontrack login --auto` | Explicit browser-capture mode | Alias of the default capture behavior |
-| `ontrack login --pair` | Force pairing-relay sign-in (default on headless environments) | Sign in on any device; credential arrives E2E-encrypted |
-| `ontrack login --no-pair` | Opt out of pairing on headless environments | Falls back to browser-capture/manual flows |
+| `ontrack login --pair` | Force pairing-relay sign-in (already the default) | Sign in on any device; credential arrives E2E-encrypted |
+| `ontrack login --no-pair` | Opt out of pairing | Falls back to --auto browser-capture/manual flows |
 | `ontrack logout` | Clear local session and browser refresh state | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
 | `ontrack doctor` | Probe key endpoints | Quickly identify session or permission issues |
@@ -891,7 +890,7 @@ The default output mode is a colored terminal table. Important fields are highli
 
 `ontrack login` renders sign-in progress with styled terminal panels and event lines:
 
-- pairing sign-in panel with the one-time link and pairing code (headless environments)
+- pairing sign-in panel with the one-time link and pairing code
 - login success panel with account, role, and suggested next commands
 
 ### Force colors on or off
@@ -952,7 +951,7 @@ validated RFC 3339 instants. Bare `--json` remains the legacy stream shape.
 | Variable | Purpose | Notes |
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | Override the default API base URL | Defaults to Monash OnTrack API |
-| `ONTRACK_RELAY_URL` | Override the pairing-relay base URL for headless sign-in | Set empty to disable pairing; https required except loopback |
+| `ONTRACK_RELAY_URL` | Override the pairing-relay base URL | Set empty to disable pairing; https required except loopback |
 | `ONTRACK_BROWSER_PATH` | Set the Chromium-family browser executable path for SSO automation | Used unless the explicit Lightpanda experiment is enabled |
 | `ONTRACK_BROWSER` | Set to `lightpanda` only with the two Lightpanda gates below | Credential-free compatibility spike; real login fails closed |
 | `ONTRACK_EXPERIMENTAL_LIGHTPANDA` | Set to `1` to acknowledge the Lightpanda experiment | Required together with `ONTRACK_BROWSER=lightpanda` |

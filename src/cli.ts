@@ -297,12 +297,13 @@ Notes:
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
   - --task-definition-id is the unambiguous selector. Deprecated --task-id remains available for legacy definition/instance ids.
-  - "ontrack login" opens a visible browser window on machines with a display: you sign in through the real SSO pages (password and MFA never touch the terminal) and the CLI captures the resulting credentials. Credentials are never typed into the CLI.
-  - On headless environments (CI/SSH/no display), login defaults to pairing mode: it prints a one-time pairing link, you sign in through the real SSO pages on any device, and the credential arrives end-to-end encrypted via a blind relay. Use --no-pair to opt out, --relay-url or ONTRACK_RELAY_URL to point at another relay.
+  - "ontrack login" defaults to pairing mode on every environment: it prints a one-time pairing link, you sign in in your own browser on any device (reusing an existing OnTrack session if you have one), and the credential arrives end-to-end encrypted via a blind relay. Passwords and MFA never touch the terminal.
+  - Use "ontrack login --auto" to opt into controlled-browser capture instead: on machines with a display it pops a visible browser window and passively captures the resulting credentials.
+  - Use --no-pair to opt out of pairing, --relay-url or ONTRACK_RELAY_URL to point at another relay (empty disables pairing).
   - Before opening a browser, login reuses only its saved OnTrack browser state. Live system browser-profile reuse is disabled unless ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1.
-  - Use --show-browser to force a visible browser, or --hide-browser to force a hidden capture (e.g. headless with --no-pair).
+  - Use --show-browser to force a visible browser, or --hide-browser to force a hidden capture (only meaningful with --auto).
   - If Chromium runtime is missing, install it manually through a reviewed dependency-management workflow.
-  - Manual redirect URL paste is backup-only, used when browser capture falls back or when --redirect-url is provided.
+  - Manual redirect URL paste is backup-only (copy the sign_in?authToken=... entry from your browser history), used when pairing and browser capture fall back or when --redirect-url is provided.
   - PDF and task-resource commands save files into ./downloads by default.
   - Download output directories are workspace-scoped and symlink-safe by default; use --allow-external-dir only for explicit external output.
   - Batch selectors support repeated flags and comma-separated values, e.g. --abbr P1 --abbr D4 or --abbr P1,D4.
@@ -1688,10 +1689,12 @@ async function handleLogin(args: string[]): Promise<void> {
   if (pairFlag && !relayUrl) {
     throw new Error('Pairing is disabled because the relay URL is empty; unset --pair or configure --relay-url/ONTRACK_RELAY_URL.');
   }
-  const pairingApplies =
-    !auto &&
-    Boolean(relayUrl) &&
-    (pairFlag || (!noPairFlag && isHeadlessServerEnvironment()));
+  // Pairing is the default sign-in on every environment: it runs in the
+  // user's own browser with their existing OnTrack session state, so there is
+  // no controlled browser to crash and no stale-profile auth loop. --auto
+  // opts into the controlled-browser capture; --no-pair or an empty relay
+  // opts out of pairing.
+  const pairingApplies = !auto && Boolean(relayUrl) && !noPairFlag;
 
   // Direct credential flags are accepted for advanced/manual flows.
   let authToken = getFlagValue(args, '--auth-token');
@@ -1785,7 +1788,10 @@ async function handleLogin(args: string[]): Promise<void> {
 
       // Last-resort fallback retained for edge MFA/captcha/selector issues.
       const manualRedirectCapture = async (): Promise<void> => {
-        console.log('Complete login in your browser, then paste the final redirected URL from the address bar.');
+        // The sign_in?authToken=... URL only lives in the address bar for a
+        // split second before the app routes away, so copying it after landing
+        // is impossible. It stays in the browser history, which is reachable.
+        console.log('Complete login in your browser. After landing in OnTrack, open your browser history, find the entry starting with "sign_in?authToken=", and copy its URL.');
         const printManualTarget = (): void => {
           if (manualRedirectTo) {
             console.log(`Open this URL manually:\n${manualRedirectTo}`);
@@ -1803,14 +1809,15 @@ async function handleLogin(args: string[]): Promise<void> {
         } else {
           printManualTarget();
         }
-        const pasted = await prompt('Paste final redirect URL: ');
+        const pasted = await prompt('Paste the sign_in URL from your browser history: ');
         ({ authToken, username } = parseSsoRedirectUrl(pasted));
       };
 
-      // Pairing-relay mode: default on headless environments. The user signs in
-      // through the real SSO pages in their own browser; the credential arrives
-      // end-to-end encrypted via a blind relay mailbox. Falls back to the
-      // manual redirect paste when pairing fails or the relay is unreachable.
+      // Pairing-relay mode: the default on every environment. The user signs in
+      // in their own browser (reusing any existing OnTrack session); the
+      // credential arrives end-to-end encrypted via a blind relay mailbox.
+      // Falls back to the manual redirect paste when pairing fails or the
+      // relay is unreachable.
       let pairingHandled = false;
       if (pairingApplies && relayUrl) {
         try {

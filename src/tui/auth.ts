@@ -77,8 +77,11 @@ export function isLoginFailure(error: unknown): error is LoginFailure {
 export type LoginRunner = (hooks: LoginHooks) => Promise<string>;
 
 /**
- * Production runner: a visible browser window locally, pairing on headless.
- * Passwords and MFA stay inside the real SSO pages; nothing is typed here.
+ * Production runner: pairing first on every environment (it reuses any
+ * existing OnTrack session in the user's own browser, so there is no
+ * controlled browser to crash and no stale-profile auth loop). A visible
+ * controlled browser window is only the fallback when pairing is disabled
+ * (empty relay URL).
  */
 export const runBrowserLogin: LoginRunner = async (hooks) => {
   const api = new OnTrackApiClient(normalizeBaseUrl());
@@ -90,13 +93,8 @@ export const runBrowserLogin: LoginRunner = async (hooks) => {
       );
     }
 
-    if (isHeadlessServerEnvironment()) {
-      const relayUrl = resolveRelayUrl(undefined);
-      if (!relayUrl) {
-        throw new Error(
-          'Pairing is disabled (empty relay URL). Set ONTRACK_RELAY_URL, or use `ontrack login` with manual credentials.',
-        );
-      }
+    const relayUrl = resolveRelayUrl(undefined);
+    if (relayUrl) {
       const pairing = await generatePairingSession(relayUrl);
       hooks.onPairingSession?.({
         pairingUrl: pairing.pairingUrl,
@@ -117,8 +115,7 @@ export const runBrowserLogin: LoginRunner = async (hooks) => {
       ssoUrl: redirectTo,
       apiBaseUrl: api.base,
       timeoutMs: TUI_LOGIN_TIMEOUT_MS,
-      // Pop up a visible browser: the user signs in through the real SSO pages.
-      headless: false,
+      headless: isHeadlessServerEnvironment(),
     });
     const session = await finalizeCapturedLogin(api, {
       authToken: captured.authToken,
