@@ -81,7 +81,11 @@ Rules:
 
 GitNexus 1.6.9 is an optional, local code-intelligence index. It complements
 Graphify: Graphify is the portable committed architecture graph, while
-GitNexus provides live symbol context and blast-radius analysis.
+GitNexus provides live symbol context and blast-radius analysis. It is not a
+project dependency: it is installed once per machine as a global Bun tool
+(`bun install -g gitnexus@1.6.9` + `bun pm -g trust @ladybugdb/core
+tree-sitter gitnexus`, see `docs/agents/gitnexus.md`), keeping its ~1 GB
+dependency tree out of `node_modules`.
 
 - All project commands use the ignored `.gitnexus-home/` registry so the MCP
   cannot enumerate repositories from the user's global GitNexus registry.
