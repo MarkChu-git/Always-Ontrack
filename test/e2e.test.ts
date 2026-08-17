@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'bun:test';
+import { deriveMailboxId, encryptForCli } from '../src/lib/pair-login.js';
 
 /**
  * End-to-end tests: run the real CLI as a subprocess against a loopback mock
@@ -42,7 +44,14 @@ const RENEWED_TOKEN = 'e2e-renewed-token';
 const REFRESH_TOKEN = 'e2e-refresh-token';
 const USERNAME = 'student1';
 
-function runCli(args: string[], home: TestHome): Promise<CliResult> {
+function runCli(
+  args: string[],
+  home: TestHome,
+  options: {
+    env?: Record<string, string>;
+    onStdout?: (chunk: string) => void;
+  } = {},
+): Promise<CliResult> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, [resolve(process.cwd(), 'src/cli.ts'), ...args], {
       cwd: process.cwd(),
@@ -51,6 +60,7 @@ function runCli(args: string[], home: TestHome): Promise<CliResult> {
         XDG_CONFIG_HOME: home.xdgConfigHome,
         HOME: home.home,
         NO_COLOR: '1',
+        ...options.env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -60,6 +70,7 @@ function runCli(args: string[], home: TestHome): Promise<CliResult> {
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
+      options.onStdout?.(chunk);
     });
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
@@ -350,6 +361,123 @@ test(
       );
     } finally {
       server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+/** Minimal in-memory pairing relay: PUT stores, GET reads-and-deletes. */
+async function startMockRelay(): Promise<{ server: Server; relayUrl: string }> {
+  const mailboxes = new Map<string, string>();
+  const server = createServer((request, response) => {
+    void (async () => {
+      const match = /^\/m\/([0-9a-f]{64})$/.exec(request.url ?? '');
+      if (!match) {
+        response.writeHead(404).end();
+        return;
+      }
+      if (request.method === 'PUT') {
+        const body = await readBody(request);
+        if (mailboxes.has(match[1])) {
+          response.writeHead(409).end();
+          return;
+        }
+        mailboxes.set(match[1], body);
+        response.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+        return;
+      }
+      if (request.method === 'GET') {
+        const body = mailboxes.get(match[1]);
+        if (body === undefined) {
+          response.writeHead(404).end();
+          return;
+        }
+        mailboxes.delete(match[1]);
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(body);
+        return;
+      }
+      response.writeHead(405).end();
+    })();
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address() as AddressInfo;
+  return { server, relayUrl: `http://127.0.0.1:${address.port}` };
+}
+
+test(
+  'e2e: headless login pairs through the relay and stores the session',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl } = await startMock((request, body) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      if (request.url === '/api/auth' && request.method === 'POST') {
+        const payload = JSON.parse(body) as Record<string, unknown>;
+        assert.equal(payload.auth_token, 'paired-one-time-token');
+        assert.equal(payload.username, USERNAME);
+        assert.equal(payload.remember, true);
+        return {
+          status: 201,
+          json: signInPayload(ACCESS_TOKEN),
+          setCookie: refreshCookiePair(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+        };
+      }
+      return null;
+    });
+    const relay = await startMockRelay();
+
+    try {
+      // The test plays the browser side: as soon as the CLI prints the pairing
+      // URL, encrypt the credential to the advertised key and PUT it to the
+      // mailbox derived from the pairing code, like the bookmarklet would.
+      let stdoutSoFar = '';
+      let delivered: Promise<void> | undefined;
+      const login = await runCli(['login', '--base-url', baseUrl], home, {
+        env: { ONTRACK_HEADLESS: '1', ONTRACK_RELAY_URL: relay.relayUrl },
+        onStdout: (chunk) => {
+          stdoutSoFar += chunk;
+          if (delivered) {
+            return;
+          }
+          const match = /#c=([a-z2-7]{16})&k=([A-Za-z0-9_-]+)/.exec(stdoutSoFar);
+          if (!match) {
+            return;
+          }
+          delivered = (async () => {
+            const envelope = await encryptForCli(match[2], {
+              authToken: 'paired-one-time-token',
+              username: USERNAME,
+            });
+            const mailboxId = deriveMailboxId(match[1]);
+            const response = await fetch(`${relay.relayUrl}/m/${mailboxId}`, {
+              method: 'PUT',
+              body: JSON.stringify(envelope),
+            });
+            assert.equal(response.status, 200);
+          })();
+        },
+      });
+      await delivered;
+      assert.equal(login.exitCode, 0, login.stderr);
+      assert.match(login.stdout, /Pairing code: [a-z2-7]{4}-/);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+        source?: string;
+      };
+      assert.equal(session.authToken, ACCESS_TOKEN);
+      assert.equal(session.source, 'pair-relay');
+    } finally {
+      server.close();
+      relay.server.close();
       await cleanupHome(home);
     }
   },

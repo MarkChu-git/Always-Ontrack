@@ -606,28 +606,20 @@ export function isHeadlessServerEnvironment(
   return !Boolean(streams.stdin.isTTY && streams.stdout.isTTY);
 }
 
-export type LoginMode = 'manual' | 'auto' | 'sso_guided';
+export type LoginMode = 'manual' | 'auto';
 
 /**
  * Login route decision:
- * - explicit mode flags win
  * - direct credentials / redirect URL imply manual mode
- * - otherwise guided SSO is default path
+ * - otherwise browser-capture mode is the default: the user signs in through
+ *   the real SSO pages in an opened browser window (pairing mode on headless
+ *   environments is decided separately by the CLI).
  */
 export function resolveLoginMode(options: {
-  auto: boolean;
-  sso: boolean;
   hasAuthToken: boolean;
   hasUsername: boolean;
   hasRedirectUrl: boolean;
 }): LoginMode {
-  if (options.auto) {
-    return 'auto';
-  }
-  if (options.sso) {
-    return 'sso_guided';
-  }
-
   const hasDirectCredentials = options.hasAuthToken && options.hasUsername;
   if (hasDirectCredentials) {
     return 'manual';
@@ -637,7 +629,7 @@ export function resolveLoginMode(options: {
     return 'manual';
   }
 
-  return 'sso_guided';
+  return 'auto';
 }
 
 export const SENSITIVE_QUERY_KEYS = new Set([

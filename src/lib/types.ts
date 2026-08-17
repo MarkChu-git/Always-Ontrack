@@ -66,7 +66,8 @@ export type CredentialSource =
   | 'legacy'
   | 'manual-sign-in'
   | 'browser-sso'
-  | 'access-token';
+  | 'access-token'
+  | 'pair-relay';
 
 /** Local cached session payload stored on disk. */
 export interface SessionData {

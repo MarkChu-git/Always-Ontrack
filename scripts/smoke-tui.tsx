@@ -14,7 +14,7 @@ import { act } from 'react';
 import { AgentProtocolError } from '../src/lib/agent-protocol';
 import { OnTrackHttpError } from '../src/lib/auth';
 import { App } from '../src/tui/app';
-import type { GuidedLoginRunner } from '../src/tui/auth';
+import type { LoginRunner } from '../src/tui/auth';
 import type { LoadState } from '../src/tui/data';
 import type { SetStatusRunner } from '../src/tui/status';
 import type { SubmitActions, SubmitRequest } from '../src/tui/submit';
@@ -265,31 +265,13 @@ async function openWizard(setup: TuiSetup) {
   });
 }
 
-/** Type credentials into the wizard's self-drawn fields (password second). */
-async function fillCredentials(setup: TuiSetup, user: string, pass: string) {
-  await act(async () => {
-    await setup.mockInput.pressKeys(user.split(''));
-    await settle();
-    await setup.mockInput.pressKey('ARROW_DOWN'); // switch to the password field
-    await settle();
-    await setup.mockInput.pressKeys(pass.split(''));
-    await settle();
-  });
-}
-
-// Scenario A: happy path with an Okta Verify number challenge.
-let seenCreds: { username: string; password: string } | null = null;
-let releaseMfaWait: (() => void) | null = null;
-const happyRunner: GuidedLoginRunner = async (creds, hooks) => {
-  seenCreds = creds;
-  hooks.onStep('username');
-  hooks.onStep('password');
-  hooks.onStep('mfa_wait');
-  hooks.onMfaNumberChallenge(['42', '17', '93']);
+// Scenario A: happy path — the wizard starts the runner immediately on open.
+let releaseLogin: (() => void) | null = null;
+const happyRunner: LoginRunner = async () => {
   await new Promise<void>((resolve) => {
-    releaseMfaWait = resolve;
+    releaseLogin = resolve;
   });
-  return creds.username;
+  return 'alice.zhang';
 };
 const wizardSetup = await testRender(
   <App load={wizardLoader()} auth={{ login: happyRunner, logout: async () => {} }} />,
@@ -298,25 +280,11 @@ const wizardSetup = await testRender(
 await openWizard(wizardSetup);
 check('l opens the login wizard', wizardSetup.captureCharFrame(), [
   'Sign in to OnTrack',
-  'Username',
-  'Password',
-]);
-
-await fillCredentials(wizardSetup, 'jdoe', 'hunter2');
-check('password is masked', wizardSetup.captureCharFrame(), ['jdoe', '••••••']);
-
-await act(async () => {
-  await wizardSetup.mockInput.pressKey('RETURN');
-  await settle();
-});
-check('mfa wait shows the number challenge', wizardSetup.captureCharFrame(), [
-  'Approve the request in Okta Verify',
-  'Tap',
-  '42',
+  'Complete sign-in in the opened browser window',
 ]);
 
 await act(async () => {
-  releaseMfaWait!();
+  releaseLogin!();
   await settle();
 });
 await act(async () => {
@@ -326,102 +294,51 @@ check('successful login reloads into the task view', wizardSetup.captureCharFram
   'alice.zhang',
   'Tasks (7)',
 ]);
-if (seenCreds?.username !== 'jdoe' || seenCreds?.password !== 'hunter2') {
-  failures += 1;
-  console.error('FAIL runner received the typed credentials');
-} else {
-  console.log('ok   runner received the typed credentials');
-}
 await act(async () => {
   wizardSetup.renderer.destroy();
 });
 
-// Scenario B: MFA method selection resolves the parked callback.
-let chosenMfaId: number | null = null;
-const selectRunner: GuidedLoginRunner = async (creds, hooks) => {
-  hooks.onStep('mfa_select');
-  chosenMfaId = await hooks.chooseMfaMethod([
-    { id: 1, label: 'Okta Verify', recommended: true },
-    { id: 2, label: 'SMS' },
-  ]);
-  return creds.username;
+// Scenario B: pairing session info renders while the runner waits.
+let releasePairing: (() => void) | null = null;
+const pairingRunner: LoginRunner = async (hooks) => {
+  hooks.onPairingSession?.({
+    pairingUrl: 'https://pair.example.test/#c=abcdefghijklmnop&k=abc123',
+    displayCode: 'abcd-efgh-ijkl-mnop',
+  });
+  await new Promise<void>((resolve) => {
+    releasePairing = resolve;
+  });
+  return 'alice.zhang';
 };
-const selectSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: selectRunner, logout: async () => {} }} />,
+const pairingSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: pairingRunner, logout: async () => {} }} />,
   { width: 100, height: 32 },
 );
-await openWizard(selectSetup);
-await fillCredentials(selectSetup, 'jdoe', 'hunter2');
+await openWizard(pairingSetup);
 await act(async () => {
-  await selectSetup.mockInput.pressKey('RETURN');
   await settle();
 });
-check('mfa select lists the methods', selectSetup.captureCharFrame(), [
-  'Choose a security method',
-  'Okta Verify',
-  '(Recommended)',
-  'SMS',
+check('pairing link and code render', pairingSetup.captureCharFrame(), [
+  'Waiting for pairing sign-in',
+  'https://pair.example.test/#c=abcdefghijklmnop&k=abc123',
+  'abcd-efgh-ijkl-mnop',
 ]);
 await act(async () => {
-  await selectSetup.mockInput.pressKey('2');
+  releasePairing!();
   await settle();
 });
 await act(async () => {
   await settle();
 });
-check('mfa choice completes the login', selectSetup.captureCharFrame(), ['Tasks (7)']);
-if (chosenMfaId !== 2) {
-  failures += 1;
-  console.error(`FAIL mfa choice resolved with ${chosenMfaId}, expected 2`);
-} else {
-  console.log('ok   mfa choice resolved with id 2');
-}
-await act(async () => {
-  selectSetup.renderer.destroy();
-});
-
-// Scenario C: MFA code entry resolves the parked callback.
-let seenMfaCode: string | null = null;
-const codeRunner: GuidedLoginRunner = async (creds, hooks) => {
-  hooks.onStep('mfa_code');
-  seenMfaCode = await hooks.requestMfaCode('Okta Verify');
-  return creds.username;
-};
-const codeSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: codeRunner, logout: async () => {} }} />,
-  { width: 100, height: 32 },
-);
-await openWizard(codeSetup);
-await fillCredentials(codeSetup, 'jdoe', 'hunter2');
-await act(async () => {
-  await codeSetup.mockInput.pressKey('RETURN');
-  await settle();
-});
-check('mfa code prompt renders', codeSetup.captureCharFrame(), [
-  'Okta Verify: enter the current code',
+check('pairing login reloads into the task view', pairingSetup.captureCharFrame(), [
+  'Tasks (7)',
 ]);
 await act(async () => {
-  await codeSetup.mockInput.pressKeys(['1', '2', '3', '4', '5', '6']);
-  await settle();
-  await codeSetup.mockInput.pressKey('RETURN');
-  await settle();
-});
-await act(async () => {
-  await settle();
-});
-check('mfa code completes the login', codeSetup.captureCharFrame(), ['Tasks (7)']);
-if (seenMfaCode !== '123456') {
-  failures += 1;
-  console.error(`FAIL mfa code resolved with ${seenMfaCode}, expected 123456`);
-} else {
-  console.log('ok   mfa code resolved with 123456');
-}
-await act(async () => {
-  codeSetup.renderer.destroy();
+  pairingSetup.renderer.destroy();
 });
 
-// Scenario D: classified failure renders, r returns to credentials.
-const failRunner: GuidedLoginRunner = async () => {
+// Scenario C: classified failure renders, esc leaves the wizard.
+const failRunner: LoginRunner = async () => {
   throw {
     reason: 'timeout',
     step: 'mfa_wait',
@@ -433,20 +350,13 @@ const failSetup = await testRender(
   { width: 100, height: 32 },
 );
 await openWizard(failSetup);
-await fillCredentials(failSetup, 'jdoe', 'hunter2');
 await act(async () => {
-  await failSetup.mockInput.pressKey('RETURN');
   await settle();
 });
 check('classified failure renders', failSetup.captureCharFrame(), [
-  'Timed out waiting for the SSO flow',
+  'Timed out waiting for the sign-in to complete',
   'r retry',
 ]);
-await act(async () => {
-  await failSetup.mockInput.pressKey('r');
-  await settle();
-});
-check('r after failure returns to credentials', failSetup.captureCharFrame(), ['Password']);
 await act(async () => {
   await failSetup.mockInput.pressKey('ESCAPE');
   await settle();
@@ -454,6 +364,42 @@ await act(async () => {
 check('esc leaves the wizard', failSetup.captureCharFrame(), ['Not signed in']);
 await act(async () => {
   failSetup.renderer.destroy();
+});
+
+// Scenario D: r after failure restarts the runner and can succeed.
+let retryCalls = 0;
+const retryRunner: LoginRunner = async () => {
+  retryCalls += 1;
+  if (retryCalls === 1) {
+    throw { reason: 'timeout', message: 'Timed out while waiting.' };
+  }
+  return 'alice.zhang';
+};
+const retryLoginSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: retryRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(retryLoginSetup);
+await act(async () => {
+  await settle();
+});
+check('first attempt fails', retryLoginSetup.captureCharFrame(), ['r retry']);
+await act(async () => {
+  await retryLoginSetup.mockInput.pressKey('r');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('r retries and completes the login', retryLoginSetup.captureCharFrame(), ['Tasks (7)']);
+if (retryCalls !== 2) {
+  failures += 1;
+  console.error(`FAIL retry ran the runner ${retryCalls} times, expected 2`);
+} else {
+  console.log('ok   r retry restarted the runner');
+}
+await act(async () => {
+  retryLoginSetup.renderer.destroy();
 });
 
 // Scenario E: /logout needs a second confirm, then clears back to signed-out.
@@ -1032,50 +978,7 @@ await act(async () => {
   retrySetup.renderer.destroy();
 });
 
-// Scenario M: bracketed paste fills the login wizard's self-drawn fields.
-let pastedCreds: { username: string; password: string } | null = null;
-const pasteRunner: GuidedLoginRunner = async (creds) => {
-  pastedCreds = creds;
-  return creds.username;
-};
-const pasteLoginSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: pasteRunner, logout: async () => {} }} />,
-  { width: 100, height: 32 },
-);
-await openWizard(pasteLoginSetup);
-await act(async () => {
-  await pasteLoginSetup.mockInput.pasteBracketedText('jdoe@example.com');
-  await settle();
-});
-await act(async () => {
-  await pasteLoginSetup.mockInput.pressKey('ARROW_DOWN');
-  await settle();
-});
-await act(async () => {
-  await pasteLoginSetup.mockInput.pasteBracketedText('p@ss w0rd!');
-  await settle();
-});
-check('pasted username renders in the credentials stage', pasteLoginSetup.captureCharFrame(), [
-  'jdoe@example.com',
-]);
-await act(async () => {
-  await pasteLoginSetup.mockInput.pressKey('RETURN');
-  await settle();
-});
-await act(async () => {
-  await settle();
-});
-if (pastedCreds?.username !== 'jdoe@example.com' || pastedCreds?.password !== 'p@ss w0rd!') {
-  failures += 1;
-  console.error(`FAIL runner received pasted credentials ${JSON.stringify(pastedCreds)}`);
-} else {
-  console.log('ok   runner received the pasted credentials');
-}
-await act(async () => {
-  pasteLoginSetup.renderer.destroy();
-});
-
-// Scenario N: bracketed paste fills the submit wizard's path fields.
+// Scenario M: bracketed paste fills the submit wizard's path fields.
 let pasteSubmit: SubmitRequest | null = null;
 const pasteSubmitActions: SubmitActions = {
   inspect: async () => ({ size: 2048 }),
@@ -1168,7 +1071,7 @@ await act(async () => {
   pasteSubmitSetup.renderer.destroy();
 });
 
-// Scenario O: an auth-classified rejection mid-submit drops to the sign-in
+// Scenario N: an auth-classified rejection mid-submit drops to the sign-in
 // screen instead of posing as a server refusal.
 const expiredSubmit: SubmitActions = {
   inspect: async () => ({ size: 10 }),
@@ -1225,7 +1128,7 @@ await act(async () => {
   expiredSetup.renderer.destroy();
 });
 
-// Scenario P: an auth-classified set-status rejection drops to the sign-in
+// Scenario O: an auth-classified set-status rejection drops to the sign-in
 // screen instead of a refusal toast.
 const expiredStatusRunner: SetStatusRunner = async () => ({
   kind: 'rejected',

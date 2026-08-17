@@ -183,11 +183,9 @@ test('isHeadlessServerEnvironment detects ssh and explicit overrides', () => {
   );
 });
 
-test('resolveLoginMode prefers auto, then guided sso as the default path', () => {
+test('resolveLoginMode defaults to browser capture, manual only for direct credentials', () => {
   assert.equal(
     resolveLoginMode({
-      auto: true,
-      sso: true,
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: false,
@@ -197,46 +195,29 @@ test('resolveLoginMode prefers auto, then guided sso as the default path', () =>
 
   assert.equal(
     resolveLoginMode({
-      auto: false,
-      sso: true,
-      hasAuthToken: false,
-      hasUsername: false,
+      hasAuthToken: true,
+      hasUsername: true,
       hasRedirectUrl: false,
     }),
-    'sso_guided',
+    'manual',
   );
 
   assert.equal(
     resolveLoginMode({
-      auto: false,
-      sso: false,
-      hasAuthToken: false,
-      hasUsername: false,
-      hasRedirectUrl: false,
-    }),
-    'sso_guided',
-  );
-
-  assert.equal(
-    resolveLoginMode({
-      auto: false,
-      sso: false,
-      hasAuthToken: false,
-      hasUsername: false,
-      hasRedirectUrl: false,
-    }),
-    'sso_guided',
-  );
-
-  assert.equal(
-    resolveLoginMode({
-      auto: false,
-      sso: false,
       hasAuthToken: false,
       hasUsername: false,
       hasRedirectUrl: true,
     }),
     'manual',
+  );
+
+  assert.equal(
+    resolveLoginMode({
+      hasAuthToken: true,
+      hasUsername: false,
+      hasRedirectUrl: false,
+    }),
+    'auto',
   );
 });
 
