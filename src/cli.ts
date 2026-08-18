@@ -311,6 +311,7 @@ Notes:
   - Upload files are regular, non-symlink, non-hard-link files capped at 50 MiB each; use --allow-external-file only for explicit external input.
   - Planner, status, and submission writes are dry-runs unless --confirm is supplied.
   - Confirmed Agent writes also require --idempotency-key; completed keys replay safely and unknown outcomes stay blocked.
+  - AI agents: start with "ontrack agent list" for the machine-readable command directory, then "ontrack agent describe"/"ontrack schema" per command.
   - Agent callers should use --output agent-json for the versioned ontrack.agent/v1 envelope.
   - Structured Agent input is accepted via --input-json OBJECT or --input -.
 `);
