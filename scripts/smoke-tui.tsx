@@ -11,10 +11,14 @@
  */
 import { testRender } from '@opentui/react/test-utils';
 import { act } from 'react';
+import { AgentProtocolError } from '../src/lib/agent-protocol';
+import { OnTrackHttpError } from '../src/lib/auth';
 import { App } from '../src/tui/app';
 import type { GuidedLoginRunner } from '../src/tui/auth';
 import type { LoadState } from '../src/tui/data';
 import type { SetStatusRunner } from '../src/tui/status';
+import type { SubmitActions, SubmitRequest } from '../src/tui/submit';
+import type { TaskExtrasActions } from '../src/tui/task-extras';
 import { FAKE_TASKS } from '../src/tui/tasks';
 
 let failures = 0;
@@ -49,7 +53,36 @@ const readyLoad = async (): Promise<LoadState> => ({
   tasks: FAKE_TASKS,
 });
 
-const setup = await testRender(<App load={readyLoad} />, { width: 100, height: 32 });
+/** Detail-pane extras stub: deterministic reads, no network or session. */
+const stubExtras: TaskExtrasActions = {
+  prerequisites: async () => ({ kind: 'ok', value: [] }),
+  submissionStatus: async () => ({
+    kind: 'ok',
+    value: {
+      pdfState: 'unavailable',
+      submissionObserved: false,
+      submissionDate: null,
+      taskStatus: null,
+    },
+  }),
+  downloadTaskPdf: async () => ({
+    kind: 'ok',
+    value: { path: 'downloads/FIT1045-P1-task.pdf', bytes: 1234 },
+  }),
+  downloadResources: async () => ({
+    kind: 'ok',
+    value: { path: 'downloads/FIT1045-P1-resources.zip', bytes: 567 },
+  }),
+  downloadSubmissionPdf: async () => ({
+    kind: 'ok',
+    value: { path: 'downloads/FIT1045-P1-submission.pdf', bytes: 890 },
+  }),
+};
+
+const setup = await testRender(<App load={readyLoad} extras={stubExtras} />, {
+  width: 100,
+  height: 32,
+});
 const { renderer, mockInput, mockMouse, captureCharFrame } = setup;
 
 // Warm-up keypress: forces the first real paint (capturing before any input
@@ -87,6 +120,10 @@ await act(async () => {
   await mockInput.pressKey('RETURN');
   await settle();
 });
+// The detail-pane extras read resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
 check('enter opens task detail', captureCharFrame(), ['H1: Code reading homework', 'click to close']);
 
 await act(async () => {
@@ -98,6 +135,10 @@ await act(async () => {
 await act(async () => {
   const at = locate(captureCharFrame(), '◐ H1: Code reading');
   await mockMouse.click(at.x, at.y);
+  await settle();
+});
+// The detail-pane extras read resolves outside the act batch.
+await act(async () => {
   await settle();
 });
 check('click opens task detail', captureCharFrame(), ['click to close']);
@@ -485,16 +526,23 @@ const remapRunner: SetStatusRunner = async ({ task, trigger }) => {
   // The server answers 200 but maps the request to a different final status.
   return { kind: 'remapped', before: null, requested: trigger, after: 'working_on_it' };
 };
-const writeSetup = await testRender(<App load={readyLoad} setStatus={remapRunner} />, {
-  width: 100,
-  height: 32,
-});
+const writeSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} setStatus={remapRunner} />,
+  {
+    width: 100,
+    height: 32,
+  },
+);
 await act(async () => {
   await writeSetup.mockInput.pressKey('ARROW_DOWN');
   await settle();
 });
 await act(async () => {
   await writeSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// The detail-pane extras read resolves outside the act batch.
+await act(async () => {
   await settle();
 });
 check('detail pane lists status triggers', writeSetup.captureCharFrame(), [
@@ -543,16 +591,23 @@ const refuseRunner: SetStatusRunner = async () => ({
   kind: 'refused',
   before: 'ready_for_feedback',
 });
-const refuseSetup = await testRender(<App load={readyLoad} setStatus={refuseRunner} />, {
-  width: 100,
-  height: 32,
-});
+const refuseSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} setStatus={refuseRunner} />,
+  {
+    width: 100,
+    height: 32,
+  },
+);
 await act(async () => {
   await refuseSetup.mockInput.pressKey('ARROW_DOWN');
   await settle();
 });
 await act(async () => {
   await refuseSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// The detail-pane extras read resolves outside the act batch.
+await act(async () => {
   await settle();
 });
 await act(async () => {
@@ -580,6 +635,634 @@ check('refusal leaves the row unchanged', refuseSetup.captureCharFrame(), [
 ]);
 await act(async () => {
   refuseSetup.renderer.destroy();
+});
+
+// Scenario H: the detail pane pulls prerequisites + submission status through
+// the extras read path, and [d] downloads the task PDF.
+const extrasSetup = await testRender(
+  <App
+    load={readyLoad}
+    extras={{
+      ...stubExtras,
+      prerequisites: async () => ({
+        kind: 'ok',
+        value: [{ taskDefinitionId: 1002, requiredStatus: 'complete' }],
+      }),
+      submissionStatus: async () => ({
+        kind: 'ok',
+        value: {
+          pdfState: 'processing',
+          submissionObserved: true,
+          submissionDate: '2026-08-12',
+          taskStatus: 'ready_for_feedback',
+        },
+      }),
+    }}
+  />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await extrasSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await extrasSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// The extras reads resolve outside the act batch; one more tick paints them.
+await act(async () => {
+  await settle();
+});
+check('detail shows prerequisites from the read path', extrasSetup.captureCharFrame(), [
+  'Requires',
+  'H1: Code reading homework (complete)',
+]);
+check('detail shows the submission status line', extrasSetup.captureCharFrame(), [
+  'Submission',
+  'observed',
+  'processing',
+]);
+await act(async () => {
+  const at = locate(extrasSetup.captureCharFrame(), '[d]');
+  await extrasSetup.mockMouse.click(at.x, at.y);
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('task PDF download toasts the saved path', extrasSetup.captureCharFrame(), [
+  'saved → downloads/FIT1045-P1-task.pdf',
+]);
+await act(async () => {
+  extrasSetup.renderer.destroy();
+});
+
+// Scenario I: submit wizard happy path — slots, validate, preflight, receipt.
+let seenSubmit: SubmitRequest | null = null;
+const okSubmit: SubmitActions = {
+  inspect: async () => ({ size: 2048 }),
+  run: async (request) => {
+    seenSubmit = request;
+    return {
+      kind: 'completed',
+      output: {
+        command: 'submission upload',
+        projectId: 101,
+        unitCode: 'FIT1045',
+        task: 'P1',
+        taskDefinitionId: 1001,
+        operationId: 'op_fixture',
+        state: 'succeeded',
+        dryRun: false,
+        confirmed: true,
+        verification: 'observed',
+        trigger: 'ready_for_feedback',
+        files: request.files.map((f) => ({ key: f.key ?? 'file0', bytes: 2048 })),
+        upload: { status: 'response_accepted' },
+        comment: { status: 'not_requested' },
+      },
+    };
+  },
+};
+const submitSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={okSubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await submitSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await submitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await submitSetup.mockInput.pressKey('s');
+  await settle();
+});
+// The wizard's status read resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
+check('submit wizard lists the evidence slots', submitSetup.captureCharFrame(), [
+  'Submit: P1: Algorithm design workbook',
+  'Evidence slots',
+  'file0',
+  'Workbook PDF',
+  'file1',
+]);
+await act(async () => {
+  await submitSetup.mockInput.pressKeys(['.', '/', 'a', '.', 'p', 'd', 'f']);
+  await settle();
+  await submitSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+  await submitSetup.mockInput.pressKeys(['.', '/', 'b', '.', 'p', 'd', 'f']);
+  await settle();
+});
+check('typed paths render in the slot fields', submitSetup.captureCharFrame(), [
+  './a.pdf',
+  './b.pdf',
+]);
+await act(async () => {
+  await submitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// Validation (inspect) resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
+check('preflight summarizes the dispatch', submitSetup.captureCharFrame(), [
+  'Preflight',
+  './a.pdf',
+  '2.0 KB',
+  'auto (server default)',
+  'tui:',
+]);
+await act(async () => {
+  await submitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('receipt renders the server outcome', submitSetup.captureCharFrame(), [
+  '✓ response accepted',
+  'succeeded',
+  'observed',
+]);
+if (
+  seenSubmit?.mode !== 'upload' ||
+  seenSubmit?.files.length !== 2 ||
+  seenSubmit?.files[0].key !== 'file0' ||
+  seenSubmit?.files[0].path !== './a.pdf' ||
+  seenSubmit?.files[1].key !== 'file1' ||
+  !seenSubmit?.idempotencyKey.startsWith('tui:')
+) {
+  failures += 1;
+  console.error(`FAIL submit runner saw ${JSON.stringify(seenSubmit)}`);
+} else {
+  console.log('ok   submit runner received slots, mode and idempotency key');
+}
+await act(async () => {
+  await submitSetup.mockInput.pressKey('ESCAPE');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('closing the receipt refreshes the list', submitSetup.captureCharFrame(), ['Tasks (7)']);
+await act(async () => {
+  submitSetup.renderer.destroy();
+});
+
+// Scenario J: an unknown transport outcome is never auto-retried.
+const unknownSubmit: SubmitActions = {
+  inspect: async () => ({ size: 10 }),
+  run: async () => {
+    throw new AgentProtocolError({
+      code: 'IDEMPOTENCY_OUTCOME_UNKNOWN',
+      status: 'action_required',
+      summary: 'Submission was dispatched once, but the transport outcome is unknown.',
+    });
+  },
+};
+const unknownSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={unknownSubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await unknownSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await unknownSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await unknownSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await unknownSetup.mockInput.pressKeys(['.', '/', 'a', '.', 'p', 'd', 'f']);
+  await settle();
+  await unknownSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+  await unknownSetup.mockInput.pressKeys(['.', '/', 'b', '.', 'p', 'd', 'f']);
+  await settle();
+});
+await act(async () => {
+  await unknownSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await unknownSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('unknown outcome is surfaced without a retry', unknownSetup.captureCharFrame(), [
+  'Outcome unknown — not retried automatically',
+  'journal key',
+  'tui:',
+  'submission status',
+]);
+await act(async () => {
+  unknownSetup.renderer.destroy();
+});
+
+// Scenario K: ESC during the wizard's loading stage abandons the status read.
+const hangingExtras: TaskExtrasActions = {
+  ...stubExtras,
+  submissionStatus: () => new Promise(() => {}),
+};
+const hangingSetup = await testRender(
+  <App load={readyLoad} extras={hangingExtras} submit={okSubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check(
+  'wizard waits on the loading stage while the status read hangs',
+  hangingSetup.captureCharFrame(),
+  ['reading the current submission state'],
+);
+await act(async () => {
+  await hangingSetup.mockInput.pressKey('ESCAPE');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('ESC during loading abandons the wizard', hangingSetup.captureCharFrame(), [
+  '[s] Submit files',
+  'esc / click to close',
+]);
+await act(async () => {
+  hangingSetup.renderer.destroy();
+});
+
+// Scenario L: a rejection followed by a re-dispatch mints a fresh claim key.
+const attemptKeys: string[] = [];
+let rejected = false;
+const retrySubmit: SubmitActions = {
+  inspect: async () => ({ size: 2048 }),
+  run: async (request) => {
+    attemptKeys.push(request.idempotencyKey);
+    if (!rejected) {
+      rejected = true;
+      throw new OnTrackHttpError(422, 'files rejected');
+    }
+    return {
+      kind: 'completed',
+      output: {
+        command: 'submission upload',
+        projectId: 101,
+        unitCode: 'FIT1045',
+        task: 'P1',
+        taskDefinitionId: 1001,
+        operationId: 'op_fixture',
+        state: 'succeeded',
+        dryRun: false,
+        confirmed: true,
+        verification: 'observed',
+        trigger: 'ready_for_feedback',
+        files: request.files.map((f) => ({ key: f.key ?? 'file0', bytes: 2048 })),
+        upload: { status: 'response_accepted' },
+        comment: { status: 'not_requested' },
+      },
+    };
+  },
+};
+const retrySetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={retrySubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await retrySetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKeys(['.', '/', 'a', '.', 'p', 'd', 'f']);
+  await settle();
+  await retrySetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+  await retrySetup.mockInput.pressKeys(['.', '/', 'b', '.', 'p', 'd', 'f']);
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// Validation (inspect) resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('a definitive rejection lands on the failed stage', retrySetup.captureCharFrame(), [
+  'rejected by the server (HTTP 422)',
+  'r back to files',
+]);
+await act(async () => {
+  await retrySetup.mockInput.pressKey('r');
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await retrySetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('the retry lands on the receipt', retrySetup.captureCharFrame(), ['✓ response accepted']);
+if (
+  attemptKeys.length !== 2 ||
+  !attemptKeys.every((key) => key.startsWith('tui:')) ||
+  attemptKeys[0] === attemptKeys[1]
+) {
+  failures += 1;
+  console.error(`FAIL retry attempt keys ${JSON.stringify(attemptKeys)}`);
+} else {
+  console.log('ok   re-dispatch after a rejection mints a fresh idempotency key');
+}
+await act(async () => {
+  retrySetup.renderer.destroy();
+});
+
+// Scenario M: bracketed paste fills the login wizard's self-drawn fields.
+let pastedCreds: { username: string; password: string } | null = null;
+const pasteRunner: GuidedLoginRunner = async (creds) => {
+  pastedCreds = creds;
+  return creds.username;
+};
+const pasteLoginSetup = await testRender(
+  <App load={wizardLoader()} auth={{ login: pasteRunner, logout: async () => {} }} />,
+  { width: 100, height: 32 },
+);
+await openWizard(pasteLoginSetup);
+await act(async () => {
+  await pasteLoginSetup.mockInput.pasteBracketedText('jdoe@example.com');
+  await settle();
+});
+await act(async () => {
+  await pasteLoginSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await pasteLoginSetup.mockInput.pasteBracketedText('p@ss w0rd!');
+  await settle();
+});
+check('pasted username renders in the credentials stage', pasteLoginSetup.captureCharFrame(), [
+  'jdoe@example.com',
+]);
+await act(async () => {
+  await pasteLoginSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+if (pastedCreds?.username !== 'jdoe@example.com' || pastedCreds?.password !== 'p@ss w0rd!') {
+  failures += 1;
+  console.error(`FAIL runner received pasted credentials ${JSON.stringify(pastedCreds)}`);
+} else {
+  console.log('ok   runner received the pasted credentials');
+}
+await act(async () => {
+  pasteLoginSetup.renderer.destroy();
+});
+
+// Scenario N: bracketed paste fills the submit wizard's path fields.
+let pasteSubmit: SubmitRequest | null = null;
+const pasteSubmitActions: SubmitActions = {
+  inspect: async () => ({ size: 2048 }),
+  run: async (request) => {
+    pasteSubmit = request;
+    return {
+      kind: 'completed',
+      output: {
+        command: 'submission upload',
+        projectId: 101,
+        unitCode: 'FIT1045',
+        task: 'P1',
+        taskDefinitionId: 1001,
+        operationId: 'op_fixture',
+        state: 'succeeded',
+        dryRun: false,
+        confirmed: true,
+        verification: 'observed',
+        trigger: 'ready_for_feedback',
+        files: request.files.map((f) => ({ key: f.key ?? 'file0', bytes: 2048 })),
+        upload: { status: 'response_accepted' },
+        comment: { status: 'not_requested' },
+      },
+    };
+  },
+};
+const pasteSubmitSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={pasteSubmitActions} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pasteBracketedText('/tmp/evidence final.pdf');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pasteBracketedText('/tmp/logs.txt');
+  await settle();
+});
+check('pasted paths render in the slot fields', pasteSubmitSetup.captureCharFrame(), [
+  '/tmp/evidence final.pdf',
+  '/tmp/logs.txt',
+]);
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+// Validation (inspect) resolves outside the act batch.
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await pasteSubmitSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('paste-driven dispatch lands on the receipt', pasteSubmitSetup.captureCharFrame(), [
+  '✓ response accepted',
+]);
+if (
+  pasteSubmit?.files[0]?.path !== '/tmp/evidence final.pdf' ||
+  pasteSubmit?.files[1]?.path !== '/tmp/logs.txt'
+) {
+  failures += 1;
+  console.error(`FAIL submit runner saw ${JSON.stringify(pasteSubmit)}`);
+} else {
+  console.log('ok   submit runner received the pasted paths');
+}
+await act(async () => {
+  pasteSubmitSetup.renderer.destroy();
+});
+
+// Scenario O: an auth-classified rejection mid-submit drops to the sign-in
+// screen instead of posing as a server refusal.
+const expiredSubmit: SubmitActions = {
+  inspect: async () => ({ size: 10 }),
+  run: async () => {
+    throw new OnTrackHttpError(419, 'Authentication timeout');
+  },
+};
+const expiredSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} submit={expiredSubmit} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('s');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKeys(['.', '/', 'a', '.', 'p', 'd', 'f']);
+  await settle();
+  await expiredSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+  await expiredSetup.mockInput.pressKeys(['.', '/', 'b', '.', 'p', 'd', 'f']);
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await expiredSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('a 419 mid-submit drops to the sign-in screen', expiredSetup.captureCharFrame(), [
+  'Not signed in',
+  'session expired — sign in again',
+]);
+await act(async () => {
+  expiredSetup.renderer.destroy();
+});
+
+// Scenario P: an auth-classified set-status rejection drops to the sign-in
+// screen instead of a refusal toast.
+const expiredStatusRunner: SetStatusRunner = async () => ({
+  kind: 'rejected',
+  error: new OnTrackHttpError(419, 'Authentication timeout'),
+});
+const expiredStatusSetup = await testRender(
+  <App load={readyLoad} extras={stubExtras} setStatus={expiredStatusRunner} />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('n');
+  await settle();
+});
+await act(async () => {
+  await expiredStatusSetup.mockInput.pressKey('RETURN');
+  await settle();
+});
+await act(async () => {
+  await settle();
+});
+check('a 419 set-status rejection drops to the sign-in screen', expiredStatusSetup.captureCharFrame(), [
+  'Not signed in',
+  'session expired — sign in again',
+]);
+await act(async () => {
+  expiredStatusSetup.renderer.destroy();
 });
 
 if (failures > 0) {

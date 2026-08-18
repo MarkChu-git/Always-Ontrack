@@ -108,7 +108,7 @@ UI 显示响应里的最终状态而非乐观值）。
 - 顺带修复：离开 `main` 模式时显式 blur 过滤输入框（AGENTS.md 已记录
   的 focus 竞态），否则详情弹层按键被输入框吞掉。
 
-### Phase 4 — 提交向导与任务资源
+### Phase 4 — 提交向导与任务资源（已完成）
 
 - 详情面板补充前置任务（`agentTaskPrerequisites`）与资源/任务 PDF 下载
   入口（`agent-task-pdf`，落到 `downloads/`）。
@@ -120,6 +120,14 @@ UI 显示响应里的最终状态而非乐观值）。
 - 提交后可查看 submission PDF 状态（`submission-lifecycle` 的
   `unavailable/processing/ready` 轮询）。
 - 验收：现有 submission 测试不回归；向导在无头冒烟中走通完整 fixture 流程。
+- 验收达成：写路径提取为 `src/lib/submission-upload.ts`
+  （`applySubmissionUpload`，dry-run/claim/单发派送/回执分类与 CLI 逐字节
+  一致），agent 读路径（prerequisites/resources/task PDF/submission PDF/
+  submission status）提取为 `src/lib/agent-task-reads.ts`；456 项测试不回归。
+- 向导每个 attempt 铸一个幂等键（`tui:<uuid>`，进入 preflight 时铸造，与
+  显示一致）：重复确认走 replay 而不是二次派送；已观察提交自动切
+  `upload-new-files` 模式。冒烟增至 54 项断言（extras 渲染/下载 toast/
+  向导全流程/unknown 不重试/loading 可 ESC 取消/拒绝后重试铸新键）。
 
 ### Phase 5 — Watch 实时面板
 

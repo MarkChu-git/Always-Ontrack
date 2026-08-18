@@ -3,10 +3,24 @@
 An OpenTUI/React TUI lives in `src/tui/` (separate from the agent-first CLI
 core in `src/lib/`). It loads the real Student Task View through
 `src/tui/data.ts` (auth broker + API client + `buildStudentTaskViews`),
+and its default view hides completed units (`isCurrentUnit`: web-parity
+with the home page's "all courses" split — `active: false` or a past
+teaching-period `end_date` excludes the unit).
 has an in-TUI guided SSO login wizard (`src/tui/login.tsx`, driver in
 `src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts` and
 `src/lib/login-finalize.ts`), and is not yet wired into the `ontrack` entry
 point.
+
+Interactive write/read actions are injectable props with production
+defaults, so the smoke test never touches network or disk state:
+`setStatus` (`src/tui/status.ts` over `src/lib/set-task-status.ts`),
+`extras` (`src/tui/task-extras.ts` over `src/lib/agent-task-reads.ts` —
+prerequisites, submission status, task/resource/submission downloads),
+and `submit` (`src/tui/submit.ts` over `src/lib/submission-upload.ts`).
+The submit wizard (`src/tui/submit-wizard.tsx`) follows the login wizard's
+discipline: self-drawn fields, ref mirrors, one idempotency key
+(`tui:<uuid>`) per attempt, and unknown transport outcomes are surfaced
+without auto-retry.
 
 - `bun run tui` starts it; `bun run typecheck:tui` type-checks it against
   `tsconfig.tui.json` (the main `tsconfig.json` excludes `src/tui`, so the
@@ -20,10 +34,16 @@ point.
   handler can observe a stale render closure under `testRender` (read state
   through ref mirrors instead, like `src/tui/login.tsx` does); a mode-change
   focus effect only flushes at an act boundary (split palette interactions
-  into separate `act` blocks).
+  into separate `act` blocks); the detail pane's lazy extras fetch resolves
+  outside the act batch (add one more `act` settle after opening it, or
+  React prints a "not wrapped in act" warning; a few residual warnings from
+  spinner/poll intervals firing outside `act` are cosmetic and tolerated).
 - In `src/tui`, focus inputs imperatively via refs on mode changes; the
   `focused` prop alone races when overlays mount/unmount. OpenTUI inputs
   have no secure-echo mode, so password-style fields are self-drawn.
+  Self-drawn fields must also wire `usePaste`: bracketed paste is not a
+  keypress, so `useKeyboard` never sees it (decode with
+  `decodePasteBytes` + `stripAnsiSequences` from `@opentui/core`).
 
 ## Pull request workflow
 
