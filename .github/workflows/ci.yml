@@ -50,6 +50,11 @@ jobs:
       - name: Verify pinned project skills
         run: bun run skills:check
 
+      - name: Install GitNexus toolchain (global, trusted native builds)
+        run: |
+          bun install -g gitnexus@1.6.9
+          bun pm -g trust @ladybugdb/core tree-sitter gitnexus
+
       - name: Verify isolated GitNexus agent graph
         run: |
           bun run gitnexus:analyze

@@ -5,11 +5,14 @@ core in `src/lib/`). It loads the real Student Task View through
 `src/tui/data.ts` (auth broker + API client + `buildStudentTaskViews`),
 and its default view hides completed units (`isCurrentUnit`: web-parity
 with the home page's "all courses" split — `active: false` or a past
-teaching-period `end_date` excludes the unit).
-has an in-TUI guided SSO login wizard (`src/tui/login.tsx`, driver in
-`src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts` and
-`src/lib/login-finalize.ts`), and is not yet wired into the `ontrack` entry
-point.
+teaching-period `end_date` excludes the unit). It also has an in-TUI login
+wizard with no credential fields (`src/tui/login.tsx`, driver in
+`src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts`,
+`src/lib/pair-login.ts`, and `src/lib/login-finalize.ts`): it runs the
+pairing-relay flow first on every environment (pairing link + code rendered
+in the wizard, reusing any existing OnTrack session in the user's own
+browser), and falls back to a controlled browser window only when pairing is
+disabled. It is not yet wired into the `ontrack` entry point.
 
 Interactive write/read actions are injectable props with production
 defaults, so the smoke test never touches network or disk state:
@@ -17,9 +20,9 @@ defaults, so the smoke test never touches network or disk state:
 `extras` (`src/tui/task-extras.ts` over `src/lib/agent-task-reads.ts` —
 prerequisites, submission status, task/resource/submission downloads),
 and `submit` (`src/tui/submit.ts` over `src/lib/submission-upload.ts`).
-The submit wizard (`src/tui/submit-wizard.tsx`) follows the login wizard's
-discipline: self-drawn fields, ref mirrors, one idempotency key
-(`tui:<uuid>`) per attempt, and unknown transport outcomes are surfaced
+The submit wizard (`src/tui/submit-wizard.tsx`) keeps the input-handling
+discipline documented below: self-drawn fields, ref mirrors, one idempotency
+key (`tui:<uuid>`) per attempt, and unknown transport outcomes are surfaced
 without auto-retry.
 
 - `bun run tui` starts it; `bun run typecheck:tui` type-checks it against
@@ -78,7 +81,11 @@ Rules:
 
 GitNexus 1.6.9 is an optional, local code-intelligence index. It complements
 Graphify: Graphify is the portable committed architecture graph, while
-GitNexus provides live symbol context and blast-radius analysis.
+GitNexus provides live symbol context and blast-radius analysis. It is not a
+project dependency: it is installed once per machine as a global Bun tool
+(`bun install -g gitnexus@1.6.9` + `bun pm -g trust @ladybugdb/core
+tree-sitter gitnexus`, see `docs/agents/gitnexus.md`), keeping its ~1 GB
+dependency tree out of `node_modules`.
 
 - All project commands use the ignored `.gitnexus-home/` registry so the MCP
   cannot enumerate repositories from the user's global GitNexus registry.

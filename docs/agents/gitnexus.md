@@ -10,7 +10,14 @@ OnTrack agent cannot enumerate repositories from the user's global registry.
 ## Pinned toolchain
 
 - Package: `gitnexus`
-- Version: `1.6.9` (exact development dependency)
+- Version: `1.6.9` (exact pin in `scripts/check-gitnexus-skill-sync.ts`)
+- Execution: one global install per machine — GitNexus is deliberately **not**
+  a project dependency. Its ~1 GB dependency tree (ONNX runtimes, HuggingFace
+  transformers, tree-sitter grammars) would otherwise land in every
+  checkout's `node_modules`. Do not re-add it to `devDependencies`, and do not
+  switch the scripts to `bunx`: Bun's ephemeral/cache installs skip the
+  lifecycle scripts that build LadybugDB and tree-sitter, and the CLI refuses
+  to run without them.
 - Package manager: Bun
 - Runtime: Node.js `>=22` (`24.18.0` in CI)
 - MCP transport: local stdio only, through `.codex/config.toml`
@@ -26,8 +33,18 @@ necessary Codex configuration and Codex/Pi skills itself.
 
 ## Initial index and refresh
 
+One-time toolchain setup (global install with trusted native builds):
+
 ```bash
-bun install --frozen-lockfile
+bun install -g gitnexus@1.6.9
+# Run the native build scripts Bun blocks by default (LadybugDB + tree-sitter).
+# @scarf/scarf (telemetry) and onnxruntime-node (unused embeddings path) stay blocked.
+bun pm -g trust @ladybugdb/core tree-sitter gitnexus
+```
+
+Then index and verify:
+
+```bash
 bun run gitnexus:analyze
 bun run gitnexus:status
 ```
@@ -43,8 +60,9 @@ The first index is local and may take a little longer. It does not enable
 embeddings, remote providers, PDG analysis, or HTTP serving.
 Dependency installation and command orchestration use Bun. GitNexus itself runs
 under Node.js because its LadybugDB N-API analysis path crashes under Bun
-1.3.14; do not add `bun --bun` to these scripts until upstream compatibility is
-verified.
+1.3.14 — the `bunx` invocations rely on the package bin's `node` shebang, so
+do not add `bun --bun` / `bunx --bun` to these scripts until upstream
+compatibility is verified.
 
 ## Agent workflow
 
@@ -79,11 +97,16 @@ approval, because either can expose repository information beyond this machine.
 
 ## Updating GitNexus
 
-Check the registry and update the exact pin deliberately:
+Check the registry and update the exact pin deliberately — the pin lives in
+`scripts/check-gitnexus-skill-sync.ts` (`PINNED_VERSION`):
 
 ```bash
 bun pm view gitnexus version
-bun add --dev --exact gitnexus@<reviewed-version>
+# edit PINNED_VERSION in scripts/check-gitnexus-skill-sync.ts
+# update the Version entry above (docs must match the pin)
+bun install -g gitnexus@<reviewed-version>
+bun pm -g trust @ladybugdb/core tree-sitter gitnexus
+bun run skills:check   # verifies skills + docs agree with the pin
 bun run gitnexus:analyze
 bun run gitnexus:status
 ```

@@ -94,75 +94,6 @@ export function shouldMaskPromptInput(
   return Boolean(inputStream.isTTY && outputStream.isTTY);
 }
 
-/**
- * Secure password prompt:
- * - never echoes raw characters
- * - supports backspace editing
- * - exits cleanly on Ctrl+C
- */
-export async function promptHidden(question: string): Promise<string> {
-  if (!shouldMaskPromptInput()) {
-    return prompt(question);
-  }
-
-  return new Promise<string>((resolvePromise, reject) => {
-    const stdinStream = input;
-    if (!stdinStream.isTTY) {
-      resolvePromise('');
-      return;
-    }
-
-    let answer = '';
-    output.write(question);
-    stdinStream.setRawMode(true);
-    stdinStream.resume();
-    stdinStream.setEncoding('utf8');
-
-    const cleanup = (): void => {
-      stdinStream.removeListener('data', onData);
-      stdinStream.setRawMode(false);
-      stdinStream.pause();
-    };
-
-    const onData = (chunk: string): void => {
-      const data = chunk ?? '';
-      if (!data) {
-        return;
-      }
-
-      for (const char of data) {
-        if (char === '\u0003') {
-          output.write('\n');
-          cleanup();
-          reject(new Error('Input interrupted.'));
-          return;
-        }
-
-        if (char === '\r' || char === '\n') {
-          output.write('\n');
-          cleanup();
-          resolvePromise(answer.trim());
-          return;
-        }
-
-        if (char === '\u007f' || char === '\b') {
-          if (answer.length > 0) {
-            answer = answer.slice(0, -1);
-            output.write('\b \b');
-          }
-          continue;
-        }
-
-        if (char >= ' ' && char !== '\u007f') {
-          answer += char;
-          output.write('*');
-        }
-      }
-    };
-
-    stdinStream.on('data', onData);
-  });
-}
 
 /** Open URL in platform-default browser without blocking current process. */
 export interface ExternalOpenCommand {
@@ -606,28 +537,20 @@ export function isHeadlessServerEnvironment(
   return !Boolean(streams.stdin.isTTY && streams.stdout.isTTY);
 }
 
-export type LoginMode = 'manual' | 'auto' | 'sso_guided';
+export type LoginMode = 'manual' | 'auto';
 
 /**
  * Login route decision:
- * - explicit mode flags win
  * - direct credentials / redirect URL imply manual mode
- * - otherwise guided SSO is default path
+ * - otherwise browser-capture mode is the default: the user signs in through
+ *   the real SSO pages in an opened browser window (pairing mode on headless
+ *   environments is decided separately by the CLI).
  */
 export function resolveLoginMode(options: {
-  auto: boolean;
-  sso: boolean;
   hasAuthToken: boolean;
   hasUsername: boolean;
   hasRedirectUrl: boolean;
 }): LoginMode {
-  if (options.auto) {
-    return 'auto';
-  }
-  if (options.sso) {
-    return 'sso_guided';
-  }
-
   const hasDirectCredentials = options.hasAuthToken && options.hasUsername;
   if (hasDirectCredentials) {
     return 'manual';
@@ -637,7 +560,7 @@ export function resolveLoginMode(options: {
     return 'manual';
   }
 
-  return 'sso_guided';
+  return 'auto';
 }
 
 export const SENSITIVE_QUERY_KEYS = new Set([

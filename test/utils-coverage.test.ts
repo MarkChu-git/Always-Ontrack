@@ -65,11 +65,11 @@ test('normalization, SSO parsing, flags, and dates validate command-boundary inp
 });
 
 test('login/headless decisions honour explicit safety overrides and TTY fallback', () => {
-  assert.equal(resolveLoginMode({ auto: true, sso: true, hasAuthToken: true, hasUsername: true, hasRedirectUrl: true }), 'auto');
-  assert.equal(resolveLoginMode({ auto: false, sso: true, hasAuthToken: true, hasUsername: true, hasRedirectUrl: true }), 'sso_guided');
-  assert.equal(resolveLoginMode({ auto: false, sso: false, hasAuthToken: true, hasUsername: true, hasRedirectUrl: false }), 'manual');
-  assert.equal(resolveLoginMode({ auto: false, sso: false, hasAuthToken: false, hasUsername: false, hasRedirectUrl: true }), 'manual');
-  assert.equal(resolveLoginMode({ auto: false, sso: false, hasAuthToken: true, hasUsername: false, hasRedirectUrl: false }), 'sso_guided');
+  assert.equal(resolveLoginMode({ hasAuthToken: true, hasUsername: true, hasRedirectUrl: true }), 'manual');
+  assert.equal(resolveLoginMode({ hasAuthToken: true, hasUsername: true, hasRedirectUrl: false }), 'manual');
+  assert.equal(resolveLoginMode({ hasAuthToken: false, hasUsername: false, hasRedirectUrl: true }), 'manual');
+  assert.equal(resolveLoginMode({ hasAuthToken: false, hasUsername: false, hasRedirectUrl: false }), 'auto');
+  assert.equal(resolveLoginMode({ hasAuthToken: true, hasUsername: false, hasRedirectUrl: false }), 'auto');
   const ttys = { stdin: { isTTY: true }, stdout: { isTTY: true } } as never;
   assert.equal(isHeadlessServerEnvironment({ ONTRACK_HEADLESS: 'true' }, ttys), true);
   assert.equal(isHeadlessServerEnvironment({ ONTRACK_HEADLESS: 'false', CI: 'yes' }, ttys), false);

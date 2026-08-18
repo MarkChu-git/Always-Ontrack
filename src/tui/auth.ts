@@ -1,14 +1,18 @@
 /**
  * TUI auth actions: the production implementations behind the login wizard
  * and the logout command. Both are thin compositions of src/lib primitives —
- * the wizard driver wraps `captureSsoCredentialsWithGuidedLogin` and persists
- * through `finalizeCapturedLogin`, and logout delegates to `signOutEverywhere`,
- * the same orchestration `ontrack logout` uses.
+ * the wizard driver pops a visible browser (or runs pairing on headless
+ * environments) and persists through `finalizeCapturedLogin`, and logout
+ * delegates to `signOutEverywhere`, the same orchestration `ontrack logout`
+ * uses.
  *
- * Deliberate differences from the CLI login command: the wizard always runs
- * the guided flow (the CLI's stored-browser-session fast path and manual
- * paste fallback stay CLI-only for now), and the SSO timeout is fixed at the
- * CLI's default 420s instead of being flag-configurable.
+ * No credentials are ever typed into the TUI: locally the user signs in
+ * through the real SSO pages in an opened browser window, and on headless
+ * environments the pairing-relay flow carries the credential end-to-end
+ * encrypted. Deliberate differences from the CLI login command: the CLI's
+ * stored-browser-session fast path and manual paste fallback stay CLI-only
+ * for now, and the browser/pairing timeouts are fixed instead of
+ * flag-configurable.
  *
  * Everything here is injectable into the App for headless smoke tests; nothing
  * in this module runs at import time.
@@ -16,36 +20,46 @@
 import { OnTrackApiClient } from '../lib/api';
 import {
   SsoFallbackError,
-  captureSsoCredentialsWithGuidedLogin,
+  captureSsoCredentials,
   classifySsoFallback,
-  type MfaMethodOption,
   type SsoFallbackReason,
-  type SsoStep,
 } from '../lib/auto-login';
 import { ssoRedirectUrl } from '../lib/auth';
 import { finalizeCapturedLogin } from '../lib/login-finalize';
+import {
+  pairForCredentials,
+  PairLoginTimeoutError,
+  resolveRelayUrl,
+} from '../lib/pair-login';
 import { signOutEverywhere } from '../lib/sign-out';
-import { normalizeBaseUrl, redactSensitiveText } from '../lib/utils';
+import {
+  isHeadlessServerEnvironment,
+  normalizeBaseUrl,
+  redactSensitiveText,
+} from '../lib/utils';
 
-/** Same default the CLI uses for `--sso-timeout-sec`. */
-const TUI_SSO_TIMEOUT_MS = 420_000;
+/** Browser capture / pairing wait budget (fixed; the CLI's are flag-based). */
+const TUI_LOGIN_TIMEOUT_MS = 300_000;
 
-/** UI-facing callbacks the guided SSO flow needs while it runs. */
-export interface GuidedLoginHooks {
-  onStep(step: SsoStep): void;
-  chooseMfaMethod(options: MfaMethodOption[]): Promise<number | null>;
-  requestMfaCode(methodLabel: string): Promise<string | null>;
-  onMfaNumberChallenge(numbers: string[]): void;
+/** Pairing session details the wizard renders while it waits. */
+export interface PairingSessionInfo {
+  pairingUrl: string;
+  displayCode: string;
+}
+
+/** UI-facing callbacks the login flow needs while it runs. */
+export interface LoginHooks {
+  onPairingSession?(info: PairingSessionInfo): void;
 }
 
 /** Classified, redacted failure shape the wizard renders. */
-export interface GuidedLoginFailure {
+export interface LoginFailure {
   reason: SsoFallbackReason;
-  step?: SsoStep;
+  step?: string;
   message: string;
 }
 
-export function isGuidedLoginFailure(error: unknown): error is GuidedLoginFailure {
+export function isLoginFailure(error: unknown): error is LoginFailure {
   return (
     typeof error === 'object' &&
     error !== null &&
@@ -55,16 +69,19 @@ export function isGuidedLoginFailure(error: unknown): error is GuidedLoginFailur
 }
 
 /**
- * Drives one guided login attempt. Resolves with the signed-in username once
- * the session is persisted; rejects with a GuidedLoginFailure otherwise.
+ * Drives one login attempt. Resolves with the signed-in username once the
+ * session is persisted; rejects with a LoginFailure otherwise.
  */
-export type GuidedLoginRunner = (
-  credentials: { username: string; password: string },
-  hooks: GuidedLoginHooks,
-) => Promise<string>;
+export type LoginRunner = (hooks: LoginHooks) => Promise<string>;
 
-/** Production runner: hidden-browser guided SSO through the shared lib path. */
-export const runGuidedSsoLogin: GuidedLoginRunner = async (credentials, hooks) => {
+/**
+ * Production runner: pairing first on every environment (it reuses any
+ * existing OnTrack session in the user's own browser, so there is no
+ * controlled browser to crash and no stale-profile auth loop). A visible
+ * controlled browser window is only the fallback when pairing is disabled
+ * (empty relay URL).
+ */
+export const runPairingLogin: LoginRunner = async (hooks) => {
   const api = new OnTrackApiClient(normalizeBaseUrl());
   try {
     const redirectTo = ssoRedirectUrl(await api.getAuthMethod());
@@ -73,21 +90,29 @@ export const runGuidedSsoLogin: GuidedLoginRunner = async (credentials, hooks) =
         'This server does not advertise SSO. Use `ontrack login` with manual credentials instead.',
       );
     }
-    const captured = await captureSsoCredentialsWithGuidedLogin(
-      {
-        ssoUrl: redirectTo,
-        apiBaseUrl: api.base,
-        username: credentials.username,
-        password: credentials.password,
-        timeoutMs: TUI_SSO_TIMEOUT_MS,
-        // Same product default as the CLI: hidden browser everywhere.
-        headless: true,
-        chooseMfaMethod: hooks.chooseMfaMethod,
-        requestMfaCode: hooks.requestMfaCode,
-        onMfaNumberChallenge: hooks.onMfaNumberChallenge,
-      },
-      hooks.onStep,
-    );
+
+    const relayUrl = resolveRelayUrl(undefined);
+    if (relayUrl) {
+      const material = await pairForCredentials({
+        relayUrl,
+        timeoutMs: TUI_LOGIN_TIMEOUT_MS,
+        onPairingSession: (pairing) => {
+          hooks.onPairingSession?.({
+            pairingUrl: pairing.pairingUrl,
+            displayCode: pairing.displayCode,
+          });
+        },
+      });
+      const session = await finalizeCapturedLogin(api, material);
+      return session.username;
+    }
+
+    const captured = await captureSsoCredentials({
+      ssoUrl: redirectTo,
+      apiBaseUrl: api.base,
+      timeoutMs: TUI_LOGIN_TIMEOUT_MS,
+      headless: isHeadlessServerEnvironment(),
+    });
     const session = await finalizeCapturedLogin(api, {
       authToken: captured.authToken,
       username: captured.username,
@@ -98,8 +123,11 @@ export const runGuidedSsoLogin: GuidedLoginRunner = async (credentials, hooks) =
     });
     return session.username;
   } catch (error) {
-    const failure: GuidedLoginFailure = {
-      reason: classifySsoFallback(error),
+    const failure: LoginFailure = {
+      reason:
+        error instanceof PairLoginTimeoutError
+          ? 'timeout'
+          : classifySsoFallback(error),
       step: error instanceof SsoFallbackError ? error.step : undefined,
       message: redactSensitiveText(
         error instanceof Error ? error.message : String(error),
@@ -116,11 +144,11 @@ export async function logoutOnTrack(): Promise<void> {
 
 /** Injectable auth surface for the App; production default below. */
 export interface TuiAuthActions {
-  login: GuidedLoginRunner;
+  login: LoginRunner;
   logout: () => Promise<void>;
 }
 
 export const DEFAULT_TUI_AUTH: TuiAuthActions = {
-  login: runGuidedSsoLogin,
+  login: runPairingLogin,
   logout: logoutOnTrack,
 };

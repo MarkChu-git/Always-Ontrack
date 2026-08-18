@@ -82,6 +82,8 @@ jobs:
       - name: Typecheck, test, audit, and build
         run: |
           bun run skills:check
+          bun install -g gitnexus@1.6.9
+          bun pm -g trust @ladybugdb/core tree-sitter gitnexus
           bun run gitnexus:analyze
           bun run gitnexus:status
           bun run gitnexus:check
