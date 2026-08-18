@@ -364,6 +364,10 @@ export async function waitForPairedCredentials(
 
     let response: Response;
     try {
+      // The relay base URL is trusted operator configuration (default constant,
+      // --relay-url/ONTRACK_RELAY_URL override), restricted to https or loopback
+      // in resolveRelayUrl; the mailbox id is a fixed-length hex hash.
+      // codeql[js/request-forgery]
       response = await fetchImpl(mailboxUrl, { redirect: 'error' });
     } catch (error) {
       throw new PairRelayUnavailableError(
