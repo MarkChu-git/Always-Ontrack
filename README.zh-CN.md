@@ -10,120 +10,117 @@
   面向 Agent 的 Monash OnTrack / Doubtfire CLI 与鉴权 MCP
 </p>
 
-`ontrack-cli` 把 Monash OnTrack 中常见的登录、查看任务、跟踪反馈、下载 PDF、上传 submission 等操作统一到一个命令面里:
+`ontrack-cli` 把 Monash OnTrack 中常见的登录、查看任务、跟踪反馈、下载 PDF、上传
+submission 等操作统一到一个命令面（`ontrack <command>`），默认面向 Monash OnTrack
+站点（`https://ontrack.infotech.monash.edu/api`）。主要接口是版本化、可发现 Schema
+的 Agent 协议；人类表格与交互启动器继续复用同一执行引擎。
 
-```bash
-ontrack <command>
-```
-
-项目默认面向 Monash OnTrack 站点:
-
-`https://ontrack.infotech.monash.edu/api`
-
-主要接口是版本化、可发现 Schema 的 Agent 协议；人类表格与交互启动器继续复用同一执行引擎。
+详细指南（英文）:[认证](docs/authentication.md) ·
+[Agent 使用](docs/agent-usage.md) · [命令](docs/commands.md) ·
+[工作流](docs/workflows.md) · [故障排查](docs/troubleshooting.md) ·
+[开发](docs/development.md)
 
 ## 目录
 
 - [功能概览](#功能概览)
 - [安装](#安装)
-- [Agent-first 使用方式](#agent-first-使用方式)
 - [快速开始](#快速开始)
-- [核心概念](#核心概念)
-- [登录与会话](#登录与会话)
-- [命令总览](#命令总览)
-- [常见工作流](#常见工作流)
-- [输出、高亮与 JSON](#输出高亮与-json)
+- [认证](#认证)
+- [Agent-first 使用方式](#agent-first-使用方式)
+- [命令参考](#命令参考)
 - [环境变量](#环境变量)
-- [文件与目录](#文件与目录)
-- [本地开发](#本地开发)
-- [测试与验证](#测试与验证)
-- [项目结构](#项目结构)
 - [故障排查](#故障排查)
+- [开发](#开发)
+- [项目结构](#项目结构)
 - [当前边界](#当前边界)
+- [许可证](#许可证)
 
 ## 功能概览
 
-`ontrack-cli` 目前覆盖了几个核心能力面:
-
-- 登录与会话管理
-  - 从受限浏览器状态静默续期 token
-  - 仅在 Monash 强制验证时进行结构化 human handoff
-  - 本地 `ontrack-auth-mcp` 鉴权控制面
-  - 支持 `SSO auto capture`
-  - 支持手动粘贴 redirect URL
-  - 支持直接传入 `auth token + username`
-- 学习数据读取
-  - `projects`
-  - `units`
-  - `tasks`
-  - `inbox`
-  - `task show`
-  - `task resources`
-- 反馈与实时跟踪
-  - `feedback list`
-  - `feedback watch`
-  - `watch`
-- 文件能力
-  - `task resources`
-  - `pdf task`
-  - `pdf submission`
-  - `submission upload`
-  - `submission upload-new-files`
-- 工程与排障
-  - `doctor`
-  - `discover`
-  - `discover --probe`
-- 终端体验
-  - 默认彩色高亮表格输出
-  - `--output agent-json` 提供版本化 Agent 自动化协议
-  - 旧 `--json` 保持原始脚本输出兼容
-  - 自动处理部分 endpoint 权限差异和 fallback
+- 登录与会话管理——配对中继（pairing relay）登录（所有环境默认）、受控浏览器捕获、
+  手动 redirect URL 导入、直接传入 token、从受限浏览器状态静默续期，以及本地
+  `ontrack-auth-mcp` 鉴权控制面
+- 学习数据读取——`projects`、`units`、`tasks`、`inbox`、`task show`、`task resources`
+- 反馈与实时跟踪——`feedback list`、`feedback watch`、`watch`
+- 文件能力——`pdf task`、`pdf submission`、`task resources`、
+  `submission upload`、`submission upload-new-files`
+- 工程与排障——`doctor`、`discover`、`discover --probe`
+- 终端体验——默认彩色高亮表格输出；`--output agent-json` 提供版本化 Agent 自动化
+  协议；旧 `--json` 保持原始脚本输出兼容；自动处理部分 endpoint 权限差异和 fallback
 
 ## 安装
 
-### 运行环境
+运行环境:HTTP CLI 与 Auth MCP 需要 Bun `1.3.14+`（实验性 Lightpanda provider 额外
+要求 Bun `1.4.0+`）；macOS / Linux / Windows（Lightpanda spike 目前仅限
+macOS/Linux——在实现可执行文件 ACL 校验前，Windows 一律 fail closed）；需要手动安装
+经过审核的浏览器 runtime 时，请保证网络可用。
 
-- Bun `1.3.14+`
-- macOS / Linux / Windows
-- 需要手动安装经过审核的浏览器 runtime 时，请保证网络可用
-
-### 全局安装
-
-推荐直接全局安装:
+全局安装（推荐）:
 
 ```bash
 bun add --global ontrack-cli
 ```
 
-安装完成后，命令入口为:
-
-```bash
-ontrack
-ontrack-auth-mcp
-```
-
-### 本地安装
-
-如果你只想在当前项目里使用:
-
-```bash
-bun install
-bun run ontrack -- auth-method
-```
-
-### 从源码运行
+安装后提供 `ontrack` 与 `ontrack-auth-mcp` 两个命令入口。也可以从源码运行:
 
 ```bash
 bun install
 bun run build
-bun dist/cli.js auth-method
+bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
 ```
 
-开发模式:
+## 快速开始
 
-```bash
-bun run dev -- auth-method
-```
+下面是一套最短、最稳的上手路径。
+
+1. 登录——`ontrack login` 会打印一次性配对链接，在你自己的浏览器（任意设备）里
+   完成登录:
+
+   ```bash
+   ontrack login
+   ```
+
+2. 查看当前账号并列出你的数据:
+
+   ```bash
+   ontrack whoami
+   ontrack projects
+   ontrack units
+   ontrack tasks
+   ```
+
+3. 查看某个具体任务（批量选择器同样可用:`--abbr P1,D4`、`--all-tasks`）:
+
+   ```bash
+   ontrack task show --project-id 87 --abbr D4
+   ```
+
+4. 查看反馈、实时消息并下载 PDF:
+
+   ```bash
+   ontrack feedback list --project-id 87 --abbr D4
+   ontrack feedback watch --project-id 87 --abbr D4
+   ontrack pdf task --project-id 87 --abbr D4
+   ontrack pdf submission --project-id 87 --abbr D4
+   ```
+
+5. 先预检，再确认上传（不带 `--confirm` 时只做安全预检，不发送写请求）:
+
+   ```bash
+   ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
+   ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
+   ```
+
+不带参数运行 `ontrack` 会打开交互式启动器并引导选择任务。端到端流程见
+[docs/workflows.md](docs/workflows.md)（英文）。
+
+## 认证
+
+`ontrack login` 在所有环境下默认走配对中继登录：你在自己的浏览器里完成真实的
+Monash SSO 登录，凭证端到端加密传回 CLI。`--auto` 可改用受控浏览器捕获；手动
+redirect URL 导入与直接 `--auth-token` 登录作为后备路径保留；本地会话可通过受限
+refresh cookie 静默续期。全部登录流程、会话缓存位置、登录输出与退出登录详见
+[docs/authentication.md](docs/authentication.md)（英文）。
 
 ## Agent-first 使用方式
 
@@ -162,11 +159,8 @@ ontrack agent call pdf.submission \
 ```
 
 应先调用 `projects.list`，再使用返回的 `project_id` 读取同一项目的 `unit.show`、
-`tutorials.status` 与 `tasks.list` 投影，最后选择一个 Task Definition 进行任务级读取。
-当前原生接口覆盖 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、
-`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`feedback.watch`、`task.resources`、`pdf.task`、
-`pdf.submission`、`plan.show` 与 `submission.status`；新命令只会按独立审查的垂直切片加入。也可以使用
-`--input -` 读取有大小上限的非交互 stdin。
+`tutorials.status` 与 `tasks.list` 投影，最后选择一个 Task Definition 进行任务级
+读取。也可以使用 `--input -` 读取有大小上限的非交互 stdin。
 
 #### 原生命令目录
 
@@ -187,50 +181,11 @@ ontrack agent call pdf.submission \
 | `plan.show` | definition-first 的计划与日期来源视图 |
 | `submission.status` | definition-first 的 submission 生命周期状态 |
 
-`task.show` 使用 definition-first 的 Student Task View，因此即使项目的
-`tasks` 数组为空，也能从 unit 的 task-definition catalogue 发现任务；未实例化任务会明确标记，
-不会猜测 instance id。`unit.show` 以 `projects.list` 的身份信息为作用域，只读取匹配的
-Unit Detail 并返回 PII 最小化的 unit 摘要和 task definition 数量；不会返回 staff、tutorial、
-group、人员或原始 task payload。`tutorials.status` 是已验证 tutorial-enrolment join 的独立
-只读投影，只含 stream 状态与变更策略，不含 tutorial、room、tutor 或 learner 详情。`tasks.list`
-是用于选择 Task Definition 的有边界 catalogue 投影。`submission.status` 即使没有 task
-instance 也会按 task definition 解析，调用真实的
-per-definition submission-details 路由，并显式返回 PDF 三态与
-`submission_observed`（包括 submitted/processing 生命周期状态）。响应限制为 64 KiB；
-畸形 contract 或相互冲突的 snake/camel
-alias 会 fail closed 为 `REMOTE_UNAVAILABLE`。`task.resources` 返回有边界的
-artifact 元数据（文件名、相对路径、字节数、content type、SHA-256），资源不可用时
-会稳定报告且不会写入占位文件。
-`pdf.task` 有意只支持单个 definition：它解析一个 Task Definition，验证下载内容的
-`%PDF-` 签名，并返回相同的有边界 artifact 元数据，绝不猜测 Task Instance。只有字节
-包含有效 PDF 签名时，才接受 `application/octet-stream`。
-`pdf.submission` 使用同一个单 Task Definition selector，先读取严格的已观察 submission
-状态，只有 PDF 已就绪才下载。PDF 仍在生成时返回可重试的 `CONFLICT`，并给出
-`submission.status` next action；没有 PDF 时返回 `NOT_FOUND`。原生命令会在覆盖已有
-artifact 前拒绝占位文件和无效 `%PDF-` 字节；旧的批量 `pdf submission --json` 与
-`pdf submission --output agent-json` 都保持兼容行为。
-Agent feedback 投影保留可执行的正文，但会替换人员和凭证样式的敏感文本；它从不返回
-author/recipient profile、attachment 或未知远端字段，畸形 alias 和超限响应都会 fail closed。
-`feedback.watch` 解析同一个 Task Definition，只输出一个 baseline 和之后未见过的
-feedback delta。每条输出记录都必须有稳定的服务器 feedback ID；没有 ID 的记录会 fail closed，
-避免丢失 delta。可通过 `SIGINT` 取消，它会中止正在进行的读取，且不会向 stdout 追加人类文本或
-error frame。必须使用 `agent stream feedback.watch`，不要使用 `agent call`，从而保持每行一个
-envelope 的 NDJSON 契约。
-`plan.show` 复用 definition-first catalogue，显式返回可选 task instance 身份与状态、
-personal/grade/unit/missing 日期来源、独立 feedback deadline 和归一化 prerequisites。
-prerequisite 同时返回 required/current status，并保留 tutorial mismatch 与 unknown
-visibility，便于 Agent 区分上下文未知与任务被过滤；缺少 flexible-date capability 会
-fail closed。unit-wide prerequisite 响应与 canonical 输出均限制为 512 KiB；非法公历日期
-或冲突 alias 会 fail closed。
-
-`projects.list` 是这些 project-scoped 命令的原生发现入口。它只接受严格的 `{}`，
-最多返回 200 条经过 PII 最小化的 project directory，包含 project/unit 身份以及有边界的
-成绩和 capability 摘要。Agent `/projects` 响应与完整 Agent envelope 都限制为 512 KiB；冲突 alias、
-重复身份、控制字符、非法类型或超量条目都会 fail closed 为 `REMOTE_UNAVAILABLE`。
-`projects --output agent-json` 与原生命令共用该投影，裸 `projects --json` 继续保持旧 raw shape。
-
-更广泛的旧命令仍通过 `--output agent-json` compatibility Adapter 提供；裸
-`--json` 继续保持原有 raw shape。
+每个命令都返回有边界、经 PII 最小化的投影。任务级读取使用 definition-first 的
+Student Task View，即使项目的 `tasks` 数组为空，也能从 unit 的 task-definition
+catalogue 发现任务；下载命令在写入前校验 artifact；畸形或相互冲突的输入 alias 一律
+fail closed。更广泛的旧命令仍通过 `--output agent-json` compatibility Adapter 提供，
+裸 `--json` 继续保持原有 raw shape。
 
 ### 发现协议
 
@@ -241,790 +196,58 @@ ontrack agent list
 ontrack agent describe pdf.submission
 ```
 
-现有的 `capabilities`、`schema` 和 `--output agent-json` 是覆盖面更广的兼容 Adapter；
-它们的 schema 描述该 Adapter 的批量命令表面。`--output agent-json` 返回稳定的
-`ontrack.agent/v1` envelope，包含 request id、command path、状态、结构化数据、warnings、next actions 与 artifacts。
-错误使用稳定 code 和退出码。原来的裸 `--json` 在 0.5 中继续保持旧的原始
-shape。
-
-### 传入结构化输入
-
-```bash
-ontrack task show \
-  --input-json '{"project_id":87,"abbreviation":["D4"]}' \
-  --output agent-json
-```
-
-也可以使用有大小上限的非交互 stdin：
-
-```bash
-printf '%s' '{"project_id":87,"task_definition_id":501}' |
-  ontrack task show --input - --output agent-json
-```
-
-只接受 command schema 已声明的字段。未知字段、重复且有歧义的 flag、危险
-object key、错误类型以及 TTY stdin 都会在发出业务请求前被拒绝。
-
-### 使用鉴权 MCP
-
-包内另带一个职责严格受限的 stdio server：
-
-```json
-{
-  "mcpServers": {
-    "ontrack-auth": {
-      "command": "ontrack-auth-mcp"
-    }
-  }
-}
-```
-
-它只暴露 `auth_status`、`auth_ensure`、`auth_logout`，不会向 Agent 返回密码、
-Okta challenge 数字、cookie、refresh token、OnTrack access token 或 SSO
-表单数据。MCP 调用方不能自行选择网络 origin；非生产环境必须由可信 host 在
-server 启动前通过 `ONTRACK_BASE_URL` 配置。
-
-自主运行时使用 `auth_ensure` 的 `interaction: "never"`。运行时会先复用有效
-token，再尝试用登录时存入受限存储的 refresh cookie 通过纯 HTTP 静默续期，
-最后才回退到受限浏览器状态。如果 Monash 策略要求 number
-challenge，它会返回结构化 human handoff。用户在场时可以改用
-`interaction: "if_required"`，此时最多开启一次可见浏览器流程；用户完成
-Monash 控制的验证后，Agent 继续工作。
-默认剩余有效期门槛为 60 秒；特定操作需要更长时间时，可传入
-`min_ttl_seconds`（或 CLI 的 `--min-ttl-seconds`）。
-
-CLI 使用同一个生命周期。读请求被拒绝时最多静默刷新并安全重放一次；写请求
-永远不会被自动重放。
-
-### 安全执行写操作
-
-写命令默认仍为 dry-run。Agent 确认真实写入时还必须提供稳定的幂等键：
-
-```bash
-ontrack plan set-dates \
-  --project-id 87 \
-  --abbr D4 \
-  --start 2026-08-01 \
-  --target 2026-08-10 \
-  --confirm \
-  --idempotency-key plan-87-D4-2026-08-10 \
-  --output agent-json
-```
-
-已经完成的 operation 会从安全日志重放结果，不会再次 dispatch；相同 key
-对应不同输入时会被拒绝；如果传输失败或进程中断导致远端结果无法确定，该 key
-会保持阻断，直到 Agent 先读取远端状态完成核对。
-
-## 快速开始
-
-下面是一套最短、最稳的上手路径。
-
-欢迎页动作现在支持引导选择任务：
-
-- `7/8/11/12` 支持引导单任务与批量任务选择
-- 可以选 `single`、`multiple`（逗号分隔）或 `all tasks`
-- 任务输入支持 task 代号（如 `P1`、`D4`）或数字 task definition id
-- 也支持切换到手动输入 `--project-id` + selector
-- 上传动作 `13/14` 仍保持单任务引导，避免误上传
-
-### 1. 检查认证方式
-
-```bash
-ontrack auth-method
-```
-
-人类可读输出只展示通过校验的 SSO origin 与 path，不在终端元数据中显示 query 或
-fragment。服务端返回的认证方式标签会限制长度，并拒绝终端控制字符。
-
-### 2. 登录
-
-推荐默认方式:
-
-```bash
-ontrack login
-```
-
-显式无头模式（与默认行为一致）:
-
-```bash
-ontrack login --hide-browser
-```
-
-### 3. 查看当前账号
-
-```bash
-ontrack whoami
-```
-
-### 4. 列出你的课程和任务
-
-```bash
-ontrack projects
-ontrack units
-ontrack tasks
-```
-
-### 5. 查看某个具体任务
-
-```bash
-ontrack task show --project-id 87 --abbr D4
-```
-
-批量示例：
-
-```bash
-ontrack task show --project-id 87 --abbr P1,D4
-ontrack task show --project-id 87 --all-tasks
-```
-
-### 6. 查看反馈与实时消息
-
-```bash
-ontrack feedback list --project-id 87 --abbr D4
-ontrack feedback watch --project-id 87 --abbr D4
-```
-
-批量读取示例：
-
-```bash
-ontrack feedback list --project-id 87 --abbr P1,D4
-```
-
-### 7. 下载 PDF
-
-```bash
-ontrack pdf task --project-id 87 --abbr D4
-ontrack pdf submission --project-id 87 --abbr D4
-```
-
-批量下载示例：
-
-```bash
-ontrack pdf task --project-id 87 --all-tasks
-```
-
-### 8. 先预检，再确认上传 submission 或补充文件
-
-```bash
-ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
-ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
-```
-
-```bash
-ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf
-ontrack submission upload-new-files --project-id 87 --abbr D4 --file ./evidence.pdf --confirm
-```
-
-不带 `--confirm` 时，两条命令都只做安全预检，不发送写请求。
-
-## 核心概念
-
-为了更容易理解命令参数，先把几个常见概念说明清楚。
-
-### `unit`
-
-对应课程，例如 `FIT1045`。
-
-### `project`
-
-对应你在某个 `unit` 下的个人项目实例。很多任务级命令都需要 `--project-id`。
-
-### `task`
-
-对应具体任务，例如 `P1`、`D4`、`T2`。
-
-### `abbr`
-
-任务缩写，通常是最适合用户输入的选择器，例如:
-
-- `P1`
-- `D4`
-- `T2`
-
-相比纯数字 ID，`--abbr` 更适合日常使用。
-
-### `taskDefinitionId`
-
-数字选择器请使用无歧义的 `--task-definition-id`。旧 `--task-id` 仅作为弃用兼容 Adapter：它可解析唯一的旧 task instance/definition id，会在 stderr 提示弃用，并在 identity 冲突时拒绝执行。
-
-### 批量任务选择器
-
-支持批量选择的命令（`task show`、`feedback list`、`pdf task`、`pdf submission`）可使用：
-
-- 重复参数：`--abbr P1 --abbr D4`
-- 逗号参数：`--abbr P1,D4`
-- 混合参数：`--task-definition-id 501 --abbr D4`
-- 整个项目：`--all-tasks`
-
-### `--json`
-
-几乎所有读命令都支持 `--json`，用于兼容原始脚本输出。Agent 应使用
-`--output agent-json`，以获得版本化 envelope、schema、稳定错误和 next
-actions。
-
-## 登录与会话
-
-### 推荐方式: `ontrack login`
-
-这是默认推荐的登录方式:
-
-```bash
-ontrack login
-```
-
-这个流程会:
-
-1. 先尝试复用 CLI 已保存且仅包含 OnTrack 的浏览器状态
-2. 如果没有可复用会话，再在 CLI 输入 Monash username/password（密码隐藏输入）
-3. 默认使用隐藏浏览器（headless）进入引导式 SSO 自动化
-4. 在终端显示结构化登录进度面板
-5. 如果出现多个 MFA 方法，在 CLI 中给出编号选项供你选择
-6. 若选择代码型方法（`Google Authenticator` / `Enter a code`），CLI 会提示输入验证码并自动提交
-7. 若选择推送型方法（`Get a push notification`），CLI 会高亮显示 Okta Verify number challenge 数字
-8. 捕获凭据并调用 `/api/auth`
-9. 保存本地会话缓存
-10. 缺少 Chromium runtime 时提示你手动安装
-
-`ontrack login` 现在默认在本地和服务器都走隐藏浏览器（headless）模式。  
-只有排查问题时才建议使用 `ontrack login --show-browser`。  
-`ontrack login --sso` 可作为显式引导式 SSO 别名。
-
-系统浏览器 profile 复用默认关闭。如确有需要，显式设置
-`ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1`，并可配合
-`ONTRACK_BROWSER_USER_DATA_DIR` / `ONTRACK_BROWSER_PROFILE_DIR`。该模式可能会
-打开所选 profile 以发现凭据；CLI 不会复制完整 profile storage state，只会保存
-精确匹配的 OnTrack origin。请勿在共享或不受信任的 profile 上启用。
-
-### 浏览器捕获模式: `ontrack login --auto`
-
-`--auto` 保留旧的“仅浏览器捕获”流程，不做用户名/密码引导输入。
-
-当前实现会从以下来源捕获凭据:
-
-- URL query 参数
-- `/api/auth` request payload
-- `/api/auth` response body
-- `localStorage`
-- cookies
-
-### 手动 redirect 导入（备用）
-
-如果你已经拿到最终 redirect URL，也可以直接导入:
-
-```bash
-ontrack login --redirect-url "https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=..."
-```
-
-期望格式:
-
-```text
-https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...
-```
-
-该方式是备用路径，不建议作为日常登录主流程。
-当 CLI 必须打印 SSO 入口供手动打开时，只有通过 HTTP(S)、嵌入凭据、控制字符和
-长度校验的 URL 才会保留完整 query；不安全的服务端 URL 不会原样回显到终端。
-
-### 直接传入 token
-
-如果你已经拿到 `auth token` 和 `username`:
-
-```bash
-ontrack login --auth-token <token> --username <username>
-```
-
-### 登录后会发生什么
-
-CLI 会把 access token 保存到本地，并在登录时请求持久会话，将服务器签发的
-refresh cookie（约一周有效）单独保存在受限的 browser-state
-文件中。authenticated command 会尽量在 token 临近过期时通过纯 HTTP 静默续期，
-不需要启动浏览器，因此一般不需要每次重新登录；当 Monash 的 refresh 或 SSO
-策略到期时，仍可能要求用户完成验证。
-
-使用的认证头为:
-
-- `Auth-Token`
-- `Username`
-
-### 退出登录
-
-```bash
-ontrack logout
-```
-
-## 命令总览
-
-### 账号与连接
-
-| 命令 | 作用 | 典型用途 |
-| --- | --- | --- |
-| `ontrack` | 打开交互式命令启动器 | 用序号快速执行常用流程 |
-| `ontrack welcome` | 显式打开交互式命令启动器 | 适合脚本/别名场景 |
-| `ontrack agent list` | 列出原生 caller-first 命令 | 离线执行，不需要 credential |
-| `ontrack agent describe <command>` | 读取原生命令的 schema 与 policy | 离线执行，不需要 credential |
-| `ontrack agent call <command> --input-json <object>` | 执行原生 caller-first 命令 | 一个结构化 envelope；当前支持 `auth.status`、`projects.list`、`unit.show`、`tutorials.status`、`tasks.list`、`task.show`、`task.prerequisites`、`feedback.list`、`task.resources`、`pdf.task`、`pdf.submission`、`plan.show`、`submission.status` |
-| `ontrack agent stream <command> --input-json <object>` | 执行原生 caller-first stream | NDJSON envelope frame；当前 stream：`feedback.watch` |
-| `ontrack capabilities --output agent-json` | 发现 Agent 协议 | 离线执行，不需要 credential |
-| `ontrack schema <command> --output agent-json` | 读取单个 command schema | 离线执行，不需要 credential |
-| `ontrack auth-method` | 检查站点认证方式 | 确认当前站点是否走 SSO |
-| `ontrack auth status --output agent-json` | 读取 credential 生命周期元数据 | 不返回 credential 或 identity |
-| `ontrack auth ensure --output agent-json` | 保证 credential 可用 | 默认静默；必要时返回结构化 handoff |
-| `ontrack login` | 引导式 Monash SSO 登录（默认） | 主登录入口 |
-| `ontrack login --sso` | 引导式 Monash SSO 登录 | 显式别名模式 |
-| `ontrack login --show-browser` | 显示浏览器执行引导式登录 | 调试 selector/MFA 边缘场景 |
-| `ontrack login --hide-browser` | 显式保持无头引导式登录 | 可选显式参数（默认行为） |
-| `ontrack login --auto` | 浏览器捕获模式登录 | 仅需被动捕获时使用 |
-| `ontrack logout` | 清理本地 session 和浏览器 refresh state | 切账号、重登、排障 |
-| `ontrack whoami` | 查看当前缓存账号 | 确认登录身份 |
-| `ontrack doctor` | 检查关键 API 是否可用 | 快速定位权限或会话问题 |
-
-### 读取课程、项目、任务
-
-| 命令 | 作用 | 说明 |
-| --- | --- | --- |
-| `ontrack projects` | 列出当前账号可访问项目 | Agent 模式使用安全 typed `projects.list` directory；裸 `--json` 保持旧 raw response |
-| `ontrack project show --project-id <id>` | 查看某个项目详情 | 适合确认 unit、成绩、任务分布 |
-| `ontrack units` | 列出课程 | 某些账号会 fallback 到 `/projects` 推导结果 |
-| `ontrack unit show --unit-id <id>` | 查看课程详情 | 包括 task definitions 等 |
-| `ontrack tasks` | 列出任务 | 可按 `--project-id`、`--status` 过滤 |
-| `ontrack unit tasks --unit-id <id>` | 查看某门课的任务 | 按 unit 聚合 |
-| `ontrack inbox` | 读取 inbox / fallback task list | 优先走 `/units/:id/tasks/inbox`，失败时回退 |
-| `ontrack task show --project-id <id> --abbr <abbr>` | 查看单个或多个任务 | 支持重复/逗号 selector 与 `--all-tasks` |
-| `ontrack task resources --project-id <id> --abbr <abbr>` | 下载 task resource 压缩包 | 使用真实 `/units/:unitId/task_definitions/:taskDefId/task_resources.json?as_attachment=true` 路由；definition-first、支持批量；默认生成 `FIT0001-P1-TaskResources.zip`；外部目录必须显式 `--allow-external-dir` |
-| `ontrack task set-status --project-id <id> --abbr <abbr> --status <status>` | 预览或应用一次学生侧任务状态流转 | 学生可设：`working_on_it`、`need_help`、`not_started`、`ready_for_feedback`、`assess_in_portfolio`（别名 `rtm`/`rff`、`ns`、`aip`）；默认 dry-run；`--confirm` 才执行一次；结果状态从响应中校验 |
-
-### 反馈与实时跟踪
-
-| 命令 | 作用 | 说明 |
-| --- | --- | --- |
-| `ontrack feedback list --project-id <id> --abbr <abbr>` | 拉取一个或多个任务的评论与事件 | 支持重复/逗号 selector 与 `--all-tasks` |
-| `ontrack feedback watch --project-id <id> --abbr <abbr>` | 实时轮询任务聊天/反馈 | 默认 `15s` 轮询 |
-| `ontrack watch` | 监控任务状态、due、最新评论变化 | 默认 `60s` 轮询 |
-
-### PDF 与上传
-
-| 命令 | 作用 | 说明 |
-| --- | --- | --- |
-| `ontrack pdf task --project-id <id> --abbr <abbr>` | 下载一个或多个 task PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads`；外部目录必须显式使用 `--allow-external-dir` |
-| `ontrack pdf submission --project-id <id> --abbr <abbr>` | 下载一个或多个 submission PDF | 支持重复/逗号 selector 与 `--all-tasks`；默认保存到 `./downloads`；外部目录必须显式使用 `--allow-external-dir` |
-| `ontrack submission upload ...` | 预检或上传 submission | 默认 dry-run；`--confirm` 才单次 dispatch；工作区外文件必须显式使用 `--allow-external-file` |
-| `ontrack submission upload-new-files ...` | 预检或追加 evidence 文件 | 必须先观察到 existing submission；默认 dry-run；`--confirm` 才单次 dispatch；工作区外文件必须显式使用 `--allow-external-file` |
-
-### 诊断与接口发现
-
-| 命令 | 作用 | 说明 |
-| --- | --- | --- |
-| `ontrack discover` | 扫描 OnTrack 前端 bundle，提取 route/API 模板 | 偏工程用途 |
-| `ontrack discover --probe` | 用当前会话探测发现的 API 模板 | 适合真实账号排查 |
-
-## 常见工作流
-
-### 工作流 1: 第一次登录并找到任务
-
-```bash
-ontrack login
-ontrack whoami
-ontrack projects
-ontrack tasks
-```
-
-如果任务太多，可以先缩小范围:
-
-```bash
-ontrack tasks --project-id 87
-```
-
-或者按课程看:
-
-```bash
-ontrack units
-ontrack unit tasks --unit-id 1
-```
-
-### 工作流 2: 找某个任务的完整上下文
-
-```bash
-ontrack task show --project-id 87 --abbr D4
-ontrack feedback list --project-id 87 --abbr D4
-ontrack pdf task --project-id 87 --abbr D4
-ontrack pdf submission --project-id 87 --abbr D4
-```
-
-### 工作流 3: 实时看聊天和状态变化
-
-看单个任务的评论流:
-
-```bash
-ontrack feedback watch --project-id 87 --abbr D4
-```
-
-只看新消息，不回放历史:
-
-```bash
-ontrack feedback watch --project-id 87 --abbr D4 --history 0
-```
-
-看整个项目或课程的状态变化:
-
-```bash
-ontrack watch --project-id 87
-```
-
-```bash
-ontrack watch --unit-id 1
-```
-
-### 工作流 4: 下载 PDF
-
-```bash
-ontrack pdf task --project-id 87 --abbr D4
-```
-
-```bash
-ontrack pdf submission --project-id 87 --abbr D4
-```
-
-自定义输出目录:
-
-```bash
-ontrack pdf submission --project-id 87 --abbr D4 --out-dir ./exports
-```
-
-PDF 输出目录默认限制在当前工作区内；CLI 会拒绝路径中的符号链接组件和硬链接
-目标文件，并拒绝超过 100 MiB 的二进制响应。只有自动化明确批准时才使用
-`--allow-external-dir`；交互式启动器只有在用户精确输入 `ALLOW` 后才接受外部目录。
-
-默认命名规则:
-
-```text
-<unitCode>_<abbr>_<type>.pdf
-```
-
-例如:
-
-```text
-FIT1045_D4_submission.pdf
-```
-
-### 工作流 5: 上传 submission
-
-安全预检:
-
-```bash
-ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf
-```
-
-确认上传多个文件:
-
-```bash
-ontrack submission upload \
-  --project-id 87 \
-  --abbr D4 \
-  --file ./report.pdf \
-  --file ./demo.mp4 \
-  --confirm
-```
-
-显式映射上传键:
-
-```bash
-ontrack submission upload \
-  --project-id 87 \
-  --abbr D4 \
-  --file file0=./report.pdf \
-  --file file1=./demo.mp4 \
-  --confirm
-```
-
-上传后顺便发评论:
-
-```bash
-ontrack submission upload \
-  --project-id 87 \
-  --abbr D4 \
-  --file ./report.pdf \
-  --comment "Updated submission with revised report." \
-  --confirm
-```
-
-显式指定 trigger:
-
-```bash
-ontrack submission upload \
-  --project-id 87 \
-  --abbr D4 \
-  --file ./report.pdf \
-  --trigger ready_for_feedback \
-  --confirm
-```
-
-### submission upload 和 submission upload-new-files 的区别
-
-- `submission upload`
-  - 面向常规提交
-  - 如果当前任务状态是 `working_on_it` 或 `need_help`，CLI 会默认推断 `trigger=need_help`
-  - 其他情况交给服务端默认行为
-- `submission upload-new-files`
-  - 更接近“补充证据 / new evidence”
-  - 必须先由 `submission status` 证明 existing submission
-  - 不主动施加默认 trigger
-
-### 上传文件匹配规则
-
-如果任务定义里声明了上传要求，CLI 会按任务定义顺序去匹配 `file0`、`file1` 等 key。
-
-规则如下:
-
-- 至少提供一个 `--file`
-- 如果任务要求 2 个文件，你就必须传 2 个文件
-- 如果同时提供显式 key 和普通路径，CLI 会把未指定 key 的路径按剩余 key 顺序补齐
-- 如果 `--task-definition-id` 和 `--abbr` 同时存在，必须指向同一个任务
-- 弃用的 `--task-id` 只有在 legacy definition/instance 含义唯一时才接受
-- 如果使用 `--all-tasks`，不要再同时传任何 id selector 或 `--abbr`
-- 上传文件必须是普通文件、不能是符号链接或硬链接，且单个文件不超过 50 MiB
-- 上传路径默认限制在当前工作区；明确批准工作区外路径时才使用 `--allow-external-file`
-- 交互式启动器只有在用户精确输入 `ALLOW` 后才会加入外部文件授权
-
-## 输出、高亮与 JSON
-
-### 默认输出
-
-默认是彩色表格输出，重点字段会高亮:
-
-- 表头: 青色加粗
-- `task`: 加粗
-- `unit`: 青色
-- `status`: 按状态着色
-- `due`: 即将到期或已逾期会高亮
-
-### 登录流程输出
-
-`ontrack login` 会显示结构化登录 UI，包括:
-
-- 引导式 SSO 启动面板
-- MFA 方法选择面板（同时保留纯文本列表兜底）
-- Okta Verify number challenge 面板（数字高亮）
-- 登录成功面板（账号、角色、下一步命令）
-
-### 强制开启或关闭颜色
-
-强制开启:
-
-```bash
-FORCE_COLOR=1 ontrack inbox
-```
-
-关闭颜色:
-
-```bash
-NO_COLOR=1 ontrack inbox
-```
-
-### JSON 输出
-
-适合脚本、自动化或二次集成:
-
-```bash
-ontrack tasks --project-id 87 --json
-```
-
-### watch 命令在 `--json` 下的行为
-
-`watch` 和 `feedback watch` 在 `--json` 模式下不是一次性输出一个大数组，而是按时间持续输出多个 JSON document。
-
-这意味着它更适合被:
-
-- `jq`
-- 自定义 Node script
-- 日志采集进程
-- 长连接式自动化逻辑
-
-进行流式消费。
-
-### Agent watch 流
-
-使用 `--output agent-json` 获得版本化 NDJSON 流。stdout 的每一行都是一个紧凑的
-`ontrack.agent/v1` envelope：首帧为 `baseline`，后续只输出 `events` 或增量
-`feedback` frame。Agent 流结束时 CLI 不会追加人类可读的停止文本。
-
-```bash
-ontrack watch --project-id 87 --interval 60 --output agent-json
-ontrack feedback watch --project-id 87 --abbr D4 --history 0 --output agent-json
-```
-
-`watch` 使用严格的 definition-first plan 投影：`start`、`target`、
-`feedback_deadline` 是相互独立的 Plan Date，均包含 `kind`、`source`、
-`editable` 与 `unit_local_calendar_date` 解释。一次完整轮询会拆分为最多 800 个
-event 的 frame，且每个 frame 限制为 512 KiB。`feedback watch` 只返回 allowlist
-任务标识和反馈字段，排除人员、附件和未知远端字段；Agent 时间戳必须是 RFC 3339
-instant。裸 `--json` 继续保持 legacy stream shape。
+各命令的具体行为、`ontrack.agent/v1` envelope 与 next actions、结构化输入、鉴权
+MCP、watch 流以及基于幂等键的安全写操作详见
+[docs/agent-usage.md](docs/agent-usage.md)（英文）。
+
+## 命令参考
+
+| 命令 | 作用 |
+| --- | --- |
+| `ontrack` / `ontrack welcome` | 交互式启动器，支持引导选择任务 |
+| `ontrack login` / `logout` / `whoami` | 配对登录（默认）、清理会话、查看缓存账号 |
+| `ontrack auth-method` / `auth status` / `auth ensure` | 认证方式与 credential 生命周期 |
+| `ontrack projects` / `units` / `tasks` / `inbox` | 列出项目、课程和任务数据 |
+| `ontrack task show` / `task resources` / `task set-status` | 任务详情、资源压缩包、学生侧状态流转 |
+| `ontrack feedback list` / `feedback watch` / `watch` | 反馈读取与实时跟踪 |
+| `ontrack pdf task` / `pdf submission` | 下载 task 与 submission PDF |
+| `ontrack submission upload` / `upload-new-files` | 默认 dry-run；`--confirm` 才单次 dispatch |
+| `ontrack doctor` / `discover` / `discover --probe` | 诊断与接口发现 |
+| `ontrack capabilities` / `schema` | Agent 协议发现（compatibility Adapter） |
+
+包含全部 flag 与安全说明的完整参考见 [docs/commands.md](docs/commands.md)（英文）。
 
 ## 环境变量
 
 | 环境变量 | 作用 | 备注 |
 | --- | --- | --- |
 | `ONTRACK_BASE_URL` | 覆盖默认 API base URL | 默认值为 Monash OnTrack API |
-| `ONTRACK_BROWSER_PATH` | 指定自动登录用的浏览器可执行文件 | 当自动探测浏览器失败时使用 |
-| `ONTRACK_BROWSER_STATE_PATH` | 覆盖浏览器会话状态文件路径 | 静默复用仅接受 canonical 路径仍位于当前 operator home 内的文件 |
+| `ONTRACK_RELAY_URL` | 覆盖配对中继 base URL | 置空则完全禁用配对；除 loopback 外要求 https |
+| `ONTRACK_BROWSER_PATH` | 指定 SSO 自动化使用的 Chromium 系浏览器可执行文件 | 未启用 Lightpanda 实验时使用 |
+| `ONTRACK_BROWSER` | 仅在同时满足两道 Lightpanda 闸门时设为 `lightpanda` | 无凭证兼容性 spike；真实登录 fail closed |
+| `ONTRACK_EXPERIMENTAL_LIGHTPANDA` | 设为 `1` 以确认启用 Lightpanda 实验 | 必须与 `ONTRACK_BROWSER=lightpanda` 同时设置 |
+| `ONTRACK_LIGHTPANDA_PATH` | 经过审核的本地 Lightpanda 二进制绝对路径 | 实验必需；CLI 不会从 `PATH` 自动发现 Lightpanda |
 | `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | 显式允许读取系统浏览器 profile 以发现凭据 | 默认关闭；请勿用于共享/不受信任 profile |
-| `ONTRACK_BROWSER_USER_DATA_DIR` | 覆盖 Chromium/Chrome 用户数据根目录 | 仅在显式启用 profile 复用时生效 |
-| `ONTRACK_BROWSER_PROFILE_DIR` | 覆盖用户数据目录下的 profile 名称 | 仅在显式启用时生效；默认 `Default` |
+| `ONTRACK_BROWSER_USER_DATA_DIR` | 覆盖 Chromium/Chrome 用户数据根目录 | 仅在 `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` 时生效 |
+| `ONTRACK_BROWSER_PROFILE_DIR` | 覆盖用户数据根目录下的 profile 目录名 | 仅在显式启用 profile 复用时生效；默认 `Default` |
 | `FORCE_COLOR` | 强制终端彩色输出 | 例如 `FORCE_COLOR=1` |
-| `NO_COLOR` | 关闭彩色输出 | 适合日志或纯文本环境 |
+| `NO_COLOR` | 关闭彩色输出 | 适合日志或 CI 等纯文本环境 |
 | `XDG_CONFIG_HOME` | 控制 Linux/macOS 配置根目录 | 影响 session 存储路径 |
 | `APPDATA` | Windows 配置根目录 | 影响 session 存储路径 |
 
-## 文件与目录
+Lightpanda 是显式、仅本地、无凭证的实验；闸门条件与公开页面探测命令见
+[docs/development.md](docs/development.md#lightpanda-experiment)（英文）。
 
-### Session 缓存
+## 故障排查
 
-默认 session 文件位置:
+全部已知问题与修复方法——列课程 403、inbox 回退、找不到浏览器可执行文件、
+`419 Authentication Timeout`、任务缩写歧义、上传 key 不匹配、无颜色高亮——见
+[docs/troubleshooting.md](docs/troubleshooting.md)（英文）。
 
-- macOS / Linux: `~/.config/ontrack-cli/session.json`
-- Windows: `%APPDATA%\ontrack-cli\session.json`
+## 开发
 
-CLI 会自动创建目录，并尽量以更安全的权限写入 session 文件。
-
-### 浏览器 refresh state
-
-静默续期使用的 exact-origin 浏览器状态单独保存：
-
-- macOS / Linux：`~/.config/ontrack-cli/browser-state.json`
-- Windows：`%APPDATA%\ontrack-cli\browser-state.json`
-
-平台支持时目录权限为 `0700`、文件权限为 `0600`。Auth MCP 只在内部使用该
-状态，绝不会向调用方返回。
-
-### Agent execution journal
-
-Agent 确认写操作的无凭证记录位于：
-
-- macOS / Linux：`~/.config/ontrack-cli/executions/`
-- Windows：`%APPDATA%\ontrack-cli\executions\`
-
-journal 只存储 hash、生命周期状态和经过清理的结果，不存储上传路径、文件内容、
-评论、身份数据或 credential。
-
-### 下载目录
-
-默认 PDF 下载目录:
-
-```text
-./downloads
-```
-
-真实烟测脚本默认使用:
-
-```text
-./downloads-smoke
-```
-
-### 构建输出
-
-编译产物位于:
-
-```text
-dist/
-```
-
-## 本地开发
-
-### 安装依赖
-
-```bash
-bun install
-```
-
-### 构建
-
-```bash
-bun run build
-```
-
-### 测试
-
-```bash
-bun test
-```
-
-### 开发调试
-
-```bash
-bun run dev -- tasks --project-id 87
-```
-
-### 真实账号烟测
-
-```bash
-bun run smoke:real -- --project-id 87 --abbr D4
-```
-
-这个脚本会验证以下流程:
-
-- `auth-method`
-- `whoami`
-- `doctor`
-- `discover`
-- `discover --probe`
-- `projects`
-- `tasks`
-- `task show`
-- `units`
-- `project show`
-- `unit show`
-- `unit tasks`
-- `inbox`
-- `feedback list`
-- `pdf task`
-- `pdf submission`
-- `watch`
-- `feedback watch`
-
-这个脚本当前不会主动做上传操作，避免误改真实账号数据。
-
-## 测试与验证
-
-项目当前包含以下测试维度:
-
-- [api.test.ts](/Users/mark/ontrack-cli/test/api.test.ts)
-  - API client 请求头
-  - 错误处理
-  - PDF 下载
-  - submission upload
-  - comment post
-- [cli-helpers.test.ts](/Users/mark/ontrack-cli/test/cli-helpers.test.ts)
-  - task selector
-  - watch diff
-  - 文件名规则
-  - upload 参数解析
-- [auto-login.test.ts](/Users/mark/ontrack-cli/test/auto-login.test.ts)
-  - SSO credential capture 辅助逻辑
-  - OnTrack origin/domain 隔离
-  - 私有且经过滤的 browser-state 持久化
-- [discovery.test.ts](/Users/mark/ontrack-cli/test/discovery.test.ts)
-  - 前端 bundle route/API 抽取逻辑
-- [logout.test.ts](/Users/mark/ontrack-cli/test/logout.test.ts)
-  - 远端注销失败时仍清理本地 session
-  - 失败输出脱敏
-- [utils.test.ts](/Users/mark/ontrack-cli/test/utils.test.ts)
-  - base URL、redirect URL 等基础工具
-- [whoami.test.ts](/Users/mark/ontrack-cli/test/whoami.test.ts)
-  - allowlist 身份投影
-  - JSON 与人类输出的 secret 回归测试
-
-如果你要发版，最少建议执行:
-
-```bash
-bun test
-bun run test:coverage
-bun run build
-```
-
-如果你已经登录真实账号，再加上:
-
-```bash
-bun run smoke:real -- --project-id <id> --abbr <abbr>
-```
+本地环境、测试、coverage 门槛、真实账号烟测与 Lightpanda spike 见
+[docs/development.md](docs/development.md)（英文）。
 
 ## 项目结构
 
@@ -1032,6 +255,7 @@ bun run smoke:real -- --project-id <id> --abbr <abbr>
 .
 ├── always-ontrack-logo.png      # README logo
 ├── package.json                 # Bun package metadata and scripts
+├── docs/                        # 详细指南（认证、agent 使用、命令、工作流、故障排查、开发，英文）
 ├── scripts/
 │   └── smoke-real.mjs           # real-account smoke verification
 ├── src/
@@ -1048,107 +272,21 @@ bun run smoke:real -- --project-id <id> --abbr <abbr>
 └── tsconfig.json                # TypeScript build config
 ```
 
-## 故障排查
-
-### `Error: 403 Forbidden: Unable to list units`
-
-某些账号没有直接访问 `/units` 的权限。这不是 CLI 崩溃，而是账号能力差异。
-
-当前实现会尽量从 `/projects` 推导 unit 数据。你可以优先改用:
-
-```bash
-ontrack projects
-ontrack tasks
-```
-
-### `Inbox endpoint unavailable ... Showing fallback task list`
-
-这说明 `/units/:id/tasks/inbox` 当前账号不可访问，CLI 已经自动回退到 `/projects` 派生的任务列表。
-
-这通常意味着:
-
-- 你的账号权限较受限
-- 某些 endpoint 对当前角色不可见
-- 某个 unit 的 inbox API 不开放
-
-### `No browser executable found ...`
-
-手动指定浏览器路径:
-
-```bash
-ONTRACK_BROWSER_PATH="/path/to/browser" ontrack login
-```
-
-或者手动安装经过审核、版本固定的 Playwright Chromium runtime:
-
-```bash
-bunx playwright@1.58.2 install chromium
-```
-
-### `419 Authentication Timeout`
-
-说明服务端拒绝了缓存的 access token。先让 auth runtime 尝试续期：
-
-```bash
-ontrack auth ensure --interaction never --output agent-json
-```
-
-如果返回 `HUMAN_VERIFICATION_REQUIRED`，请在用户可操作时改用
-`--interaction if_required`。普通读命令本身也会自动尝试一次静默刷新和安全
-重放。
-
-### `Task abbreviation "... " is ambiguous`
-
-说明同一个 project 里任务缩写不够唯一。改用:
-
-```bash
-ontrack task show --project-id <id> --task-definition-id <id>
-```
-
-### `Upload key mismatch` 或文件数量不匹配
-
-先看任务详情和任务要求，再按显式 key 上传:
-
-```bash
-ontrack task show --project-id 87 --abbr D4 --json
-```
-
-```bash
-ontrack submission upload \
-  --project-id 87 \
-  --abbr D4 \
-  --file file0=./report.pdf \
-  --file file1=./demo.mp4 \
-  --confirm
-```
-
-### 没有颜色高亮
-
-手动强制开启:
-
-```bash
-FORCE_COLOR=1 ontrack tasks --project-id 87
-```
-
 ## 当前边界
 
-当前版本已经支持真实账号驱动的高频读能力、反馈实时跟踪、PDF 下载和上传操作，但仍然保持了比较克制的写能力范围。
+当前版本已经支持真实账号驱动的高频读能力、反馈实时跟踪、PDF 下载和上传操作，但
+仍然保持了比较克制的写能力范围。
 
-目前已支持:
+目前已支持：登录；读取课程、项目、任务、inbox；读取评论与实时反馈流；下载
+task / submission PDF；上传 submission；上传 new evidence / new files；上传后附带
+评论；学生侧任务状态流转（`task set-status`）。
 
-- 登录
-- 读取课程、项目、任务、inbox
-- 读取评论与实时反馈流
-- 下载 task / submission PDF
-- 上传 submission
-- 上传 new evidence / new files
-- 上传后附带评论
-- 学生侧任务状态流转（`task set-status`）
+当前没有扩展到的方向：更复杂的 staff workflow mutation、交互式任务选择器、长期
+持久化 watch 去重状态。
 
-当前没有扩展到的方向包括:
+如果你准备继续扩展，这个仓库最核心的入口文件是 [cli.ts](src/cli.ts)，最关键的
+协议层在 [api.ts](src/lib/api.ts)。
 
-- 更复杂的 staff workflow mutation
-- 交互式任务选择器
-- 长期持久化 watch 去重状态
+## 许可证
 
-如果你准备继续扩展，这个仓库最核心的入口文件是 [cli.ts](/Users/mark/ontrack-cli/src/cli.ts)，最关键的协议层在 [api.ts](/Users/mark/ontrack-cli/src/lib/api.ts)。
+[Apache-2.0](./LICENSE)
