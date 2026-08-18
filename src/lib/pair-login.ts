@@ -83,6 +83,14 @@ export class PairRelayUnavailableError extends Error {
   }
 }
 
+/** Thrown for invalid relay URL configuration (non-https, unparseable). */
+export class RelayUrlConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RelayUrlConfigError';
+  }
+}
+
 function base64UrlEncode(bytes: Uint8Array): string {
   return Buffer.from(bytes)
     .toString('base64')
@@ -139,18 +147,18 @@ export function resolveRelayUrl(
   if (!trimmed) {
     return null;
   }
+  let url: URL;
   try {
-    const url = new URL(trimmed);
-    if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-      throw new Error(`Relay URL must use https (got ${url.protocol}).`);
-    }
-    return url.origin + (url.pathname === '/' ? '' : url.pathname);
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Relay URL')) {
-      throw error;
-    }
-    throw new Error(`Invalid relay URL: ${trimmed}`);
+    url = new URL(trimmed);
+  } catch {
+    throw new RelayUrlConfigError(`Invalid relay URL: ${trimmed}`);
   }
+  if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+    throw new RelayUrlConfigError(
+      `Relay URL must use https (got ${url.protocol}).`,
+    );
+  }
+  return url.origin + (url.pathname === '/' ? '' : url.pathname);
 }
 
 /** Generate the ephemeral keypair + code and assemble the pairing session. */
@@ -342,6 +350,8 @@ export async function waitForPairedCredentials(
   const now = options.now ?? Date.now;
   const deadline = now() + timeoutMs;
   const mailboxUrl = `${options.session.relayUrl}/m/${options.session.mailboxId}`;
+  const pause = (): Promise<void> =>
+    sleepImpl(Math.min(intervalMs, Math.max(1, deadline - now())));
 
   for (;;) {
     const remainingMs = deadline - now();
@@ -362,7 +372,7 @@ export async function waitForPairedCredentials(
     }
 
     if (response.status === 404) {
-      await sleepImpl(Math.min(intervalMs, Math.max(1, deadline - now())));
+      await pause();
       continue;
     }
     if (!response.ok) {
@@ -386,7 +396,7 @@ export async function waitForPairedCredentials(
       return payload;
     }
     // Undecryptable garbage: someone posted to a guessed mailbox. Keep waiting.
-    await sleepImpl(Math.min(intervalMs, Math.max(1, deadline - now())));
+    await pause();
   }
 }
 
@@ -400,4 +410,35 @@ export function capturedMaterialFromPairPayload(
     ...(payload.expiresAt ? { expiresAt: payload.expiresAt } : {}),
     source: 'pair-relay',
   };
+}
+
+export interface PairForCredentialsOptions {
+  relayUrl: string;
+  timeoutMs?: number;
+  /** Called once the pairing session exists, so callers can show the link. */
+  onPairingSession?: (session: PairingSession) => void;
+  onProgress?: (remainingMs: number) => void;
+  /** Test seams forwarded to waitForPairedCredentials. */
+  fetchImpl?: typeof fetch;
+  sleepImpl?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Shared pairing orchestration used by both the CLI login command and the
+ * TUI wizard: generate a session, surface it, wait for the browser side, and
+ * return finalize-ready material.
+ */
+export async function pairForCredentials(
+  options: PairForCredentialsOptions,
+): Promise<CapturedLoginMaterial> {
+  const session = await generatePairingSession(options.relayUrl);
+  options.onPairingSession?.(session);
+  const payload = await waitForPairedCredentials({
+    session,
+    timeoutMs: options.timeoutMs,
+    onProgress: options.onProgress,
+    fetchImpl: options.fetchImpl,
+    sleepImpl: options.sleepImpl,
+  });
+  return capturedMaterialFromPairPayload(payload);
 }

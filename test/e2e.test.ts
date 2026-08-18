@@ -408,64 +408,91 @@ async function startMockRelay(): Promise<{ server: Server; relayUrl: string }> {
   return { server, relayUrl: `http://127.0.0.1:${address.port}` };
 }
 
+/**
+ * Drive one pairing login end to end: the test plays the browser side — as
+ * soon as the CLI prints the pairing URL, encrypt the credential to the
+ * advertised key and PUT it to the mailbox derived from the pairing code,
+ * like the bookmarklet would.
+ */
+async function runPairingLogin(options: {
+  home: TestHome;
+  baseUrl: string;
+  relayUrl: string;
+  extraArgs?: string[];
+  extraEnv?: Record<string, string>;
+}): Promise<CliResult> {
+  let stdoutSoFar = '';
+  let delivered: Promise<void> | undefined;
+  const result = await runCli(
+    ['login', '--base-url', options.baseUrl, ...(options.extraArgs ?? [])],
+    options.home,
+    {
+      env: { ONTRACK_HEADLESS: '1', ...options.extraEnv },
+      onStdout: (chunk) => {
+        stdoutSoFar += chunk;
+        if (delivered) {
+          return;
+        }
+        const match = /#c=([a-z2-7]{16})&k=([A-Za-z0-9_-]+)/.exec(stdoutSoFar);
+        if (!match) {
+          return;
+        }
+        delivered = (async () => {
+          const envelope = await encryptForCli(match[2], {
+            authToken: 'paired-one-time-token',
+            username: USERNAME,
+          });
+          const mailboxId = deriveMailboxId(match[1]);
+          const response = await fetch(`${options.relayUrl}/m/${mailboxId}`, {
+            method: 'PUT',
+            body: JSON.stringify(envelope),
+          });
+          assert.equal(response.status, 200);
+        })();
+      },
+    },
+  );
+  await delivered;
+  return result;
+}
+
+function startPairableOnTrackMock() {
+  return startMock((request, body) => {
+    if (request.url === '/api/auth/method') {
+      return {
+        status: 200,
+        json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+      };
+    }
+    if (request.url === '/api/auth' && request.method === 'POST') {
+      const payload = JSON.parse(body) as Record<string, unknown>;
+      assert.equal(payload.auth_token, 'paired-one-time-token');
+      assert.equal(payload.username, USERNAME);
+      assert.equal(payload.remember, true);
+      return {
+        status: 201,
+        json: signInPayload(ACCESS_TOKEN),
+        setCookie: refreshCookiePair(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+      };
+    }
+    return null;
+  });
+}
+
 test(
   'e2e: headless login pairs through the relay and stores the session',
   async () => {
     const home = await makeHome();
-    const { server, baseUrl } = await startMock((request, body) => {
-      if (request.url === '/api/auth/method') {
-        return {
-          status: 200,
-          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
-        };
-      }
-      if (request.url === '/api/auth' && request.method === 'POST') {
-        const payload = JSON.parse(body) as Record<string, unknown>;
-        assert.equal(payload.auth_token, 'paired-one-time-token');
-        assert.equal(payload.username, USERNAME);
-        assert.equal(payload.remember, true);
-        return {
-          status: 201,
-          json: signInPayload(ACCESS_TOKEN),
-          setCookie: refreshCookiePair(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
-        };
-      }
-      return null;
-    });
+    const { server, baseUrl } = await startPairableOnTrackMock();
     const relay = await startMockRelay();
 
     try {
-      // The test plays the browser side: as soon as the CLI prints the pairing
-      // URL, encrypt the credential to the advertised key and PUT it to the
-      // mailbox derived from the pairing code, like the bookmarklet would.
-      let stdoutSoFar = '';
-      let delivered: Promise<void> | undefined;
-      const login = await runCli(['login', '--base-url', baseUrl], home, {
-        env: { ONTRACK_HEADLESS: '1', ONTRACK_RELAY_URL: relay.relayUrl },
-        onStdout: (chunk) => {
-          stdoutSoFar += chunk;
-          if (delivered) {
-            return;
-          }
-          const match = /#c=([a-z2-7]{16})&k=([A-Za-z0-9_-]+)/.exec(stdoutSoFar);
-          if (!match) {
-            return;
-          }
-          delivered = (async () => {
-            const envelope = await encryptForCli(match[2], {
-              authToken: 'paired-one-time-token',
-              username: USERNAME,
-            });
-            const mailboxId = deriveMailboxId(match[1]);
-            const response = await fetch(`${relay.relayUrl}/m/${mailboxId}`, {
-              method: 'PUT',
-              body: JSON.stringify(envelope),
-            });
-            assert.equal(response.status, 200);
-          })();
-        },
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
       });
-      await delivered;
       assert.equal(login.exitCode, 0, login.stderr);
       assert.match(login.stdout, /Pairing code: [a-z2-7]{4}-/);
 
@@ -483,3 +510,50 @@ test(
   },
   30_000,
 );
+
+test(
+  'e2e: pairing works with --relay-url instead of the env var',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl } = await startPairableOnTrackMock();
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraArgs: ['--relay-url', relay.relayUrl],
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        source?: string;
+      };
+      assert.equal(session.source, 'pair-relay');
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test('e2e: --pair conflicts and an empty relay with --pair fail fast', async () => {
+  const home = await makeHome();
+  try {
+    const conflict = await runCli(['login', '--pair', '--no-pair'], home, {
+      env: { ONTRACK_HEADLESS: '1' },
+    });
+    assert.notEqual(conflict.exitCode, 0);
+    assert.match(conflict.stderr, /either --pair or --no-pair/);
+
+    const disabled = await runCli(['login', '--pair'], home, {
+      env: { ONTRACK_HEADLESS: '1', ONTRACK_RELAY_URL: '' },
+    });
+    assert.notEqual(disabled.exitCode, 0);
+    assert.match(disabled.stderr, /Pairing is disabled/);
+  } finally {
+    await cleanupHome(home);
+  }
+});

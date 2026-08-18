@@ -10,7 +10,8 @@
 
 **角色**：CLI（云端）、配对页（静态页，用户浏览器）、bookmarklet（在 OnTrack 源内执行）、中继（Cloudflare Worker，盲信箱）。
 
-1. CLI 生成 P-256 临时密钥对（ECDH）+ 128-bit 随机配对码 `code`（base32、去歧义字符、显示为 `XXXX-XXXX-XXXX`）。
+1. CLI 生成 P-256 临时密钥对（ECDH）+ 80-bit 随机配对码 `code`（base32、去歧义字符、16 字符，显示为 `XXXX-XXXX-XXXX-XXXX`）。
+   > 实现记录：初稿写 128-bit；落地时定为 80-bit——一次性、5 分钟 TTL、盲中继只存密文的场景下 80-bit 已足够，16 字符的配对码也更适合人工核对。
 2. `mailboxId = SHA-256(code)`（hex）。中继只见 mailboxId，永远见不到 code 本身。
 3. CLI 打印：`https://pair.<domain>/#c=<code>&k=<base64url(spki pubkey)>` —— code 和公钥都在 URL **fragment** 里，HTTP 请求不会携带，中继/日志/CDN 均不可见。
 4. CLI 每 2s 轮询 `GET <relay>/m/<mailboxId>`，默认超时 5 分钟，显示倒计时。

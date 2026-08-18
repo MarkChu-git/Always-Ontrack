@@ -165,12 +165,10 @@ import type {
 } from './lib/types.js';
 import { STUDENT_STATUS_TRIGGERS } from './lib/types.js';
 import {
-  capturedMaterialFromPairPayload,
-  generatePairingSession,
+  pairForCredentials,
   PairLoginTimeoutError,
   PairRelayUnavailableError,
   resolveRelayUrl,
-  waitForPairedCredentials,
 } from './lib/pair-login.js';
 import type { WelcomeMenuItem } from './lib/welcome.js';
 import type { ResolvedTaskSelector } from "./lib/utils.js";
@@ -1822,23 +1820,24 @@ async function handleLogin(args: string[]): Promise<void> {
       let pairingHandled = false;
       if (pairingApplies && relayUrl) {
         try {
-          const session = await generatePairingSession(relayUrl);
-          renderTerminalPanel(
-            'PAIRING SIGN-IN',
-            [
-              'Open the link below on any device and sign in with SSO.',
-              `Pairing code: ${session.displayCode}`,
-              'The link carries the code and a one-time key in its fragment;',
-              'the relay only ever stores an encrypted payload.',
-            ],
-            'info',
-          );
-          // Printed on its own line so terminals keep the full URL clickable.
-          console.log(session.pairingUrl);
           let lastReportedMinute = -1;
-          const payload = await waitForPairedCredentials({
-            session,
+          const material = await pairForCredentials({
+            relayUrl,
             timeoutMs: pairTimeoutSec * 1000,
+            onPairingSession: (session) => {
+              renderTerminalPanel(
+                'PAIRING SIGN-IN',
+                [
+                  'Open the link below on any device and sign in with SSO.',
+                  `Pairing code: ${session.displayCode}`,
+                  'The link carries the code and a one-time key in its fragment;',
+                  'the relay only ever stores an encrypted payload.',
+                ],
+                'info',
+              );
+              // Printed on its own line so terminals keep the full URL clickable.
+              console.log(session.pairingUrl);
+            },
             onProgress: (remainingMs) => {
               const remainingMinute = Math.ceil(remainingMs / 60_000);
               if (remainingMinute !== lastReportedMinute) {
@@ -1847,7 +1846,6 @@ async function handleLogin(args: string[]): Promise<void> {
               }
             },
           });
-          const material = capturedMaterialFromPairPayload(payload);
           authToken = material.authToken;
           username = material.username;
           credentialExpiresAt = material.expiresAt;
@@ -1870,9 +1868,7 @@ async function handleLogin(args: string[]): Promise<void> {
         }
       }
 
-      if (pairingHandled) {
-        // Credentials captured via pairing or its manual fallback above.
-      } else if (loginMode === 'auto') {
+      if (!pairingHandled && loginMode === 'auto') {
         // Browser capture mode: the user signs in through the real SSO pages in
         // an opened browser window (visible by default on machines with a
         // display); the CLI passively captures the resulting credentials.
@@ -1899,7 +1895,7 @@ async function handleLogin(args: string[]): Promise<void> {
           console.log('[info] Falling back to manual redirect URL flow.');
           await manualRedirectCapture();
         }
-      } else {
+      } else if (!pairingHandled) {
         // Explicit manual mode.
         await manualRedirectCapture();
       }

@@ -27,11 +27,9 @@ import {
 import { ssoRedirectUrl } from '../lib/auth';
 import { finalizeCapturedLogin } from '../lib/login-finalize';
 import {
-  capturedMaterialFromPairPayload,
-  generatePairingSession,
+  pairForCredentials,
   PairLoginTimeoutError,
   resolveRelayUrl,
-  waitForPairedCredentials,
 } from '../lib/pair-login';
 import { signOutEverywhere } from '../lib/sign-out';
 import {
@@ -83,7 +81,7 @@ export type LoginRunner = (hooks: LoginHooks) => Promise<string>;
  * controlled browser window is only the fallback when pairing is disabled
  * (empty relay URL).
  */
-export const runBrowserLogin: LoginRunner = async (hooks) => {
+export const runPairingLogin: LoginRunner = async (hooks) => {
   const api = new OnTrackApiClient(normalizeBaseUrl());
   try {
     const redirectTo = ssoRedirectUrl(await api.getAuthMethod());
@@ -95,19 +93,17 @@ export const runBrowserLogin: LoginRunner = async (hooks) => {
 
     const relayUrl = resolveRelayUrl(undefined);
     if (relayUrl) {
-      const pairing = await generatePairingSession(relayUrl);
-      hooks.onPairingSession?.({
-        pairingUrl: pairing.pairingUrl,
-        displayCode: pairing.displayCode,
-      });
-      const payload = await waitForPairedCredentials({
-        session: pairing,
+      const material = await pairForCredentials({
+        relayUrl,
         timeoutMs: TUI_LOGIN_TIMEOUT_MS,
+        onPairingSession: (pairing) => {
+          hooks.onPairingSession?.({
+            pairingUrl: pairing.pairingUrl,
+            displayCode: pairing.displayCode,
+          });
+        },
       });
-      const session = await finalizeCapturedLogin(
-        api,
-        capturedMaterialFromPairPayload(payload),
-      );
+      const session = await finalizeCapturedLogin(api, material);
       return session.username;
     }
 
@@ -153,6 +149,6 @@ export interface TuiAuthActions {
 }
 
 export const DEFAULT_TUI_AUTH: TuiAuthActions = {
-  login: runBrowserLogin,
+  login: runPairingLogin,
   logout: logoutOnTrack,
 };

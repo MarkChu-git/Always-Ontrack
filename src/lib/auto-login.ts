@@ -3946,7 +3946,15 @@ export async function captureSsoCredentials(
   return captureSsoCredentialsInternal(options);
 }
 
-/** Guided credential capture with step callbacks for terminal UX. */
+/**
+ * Guided credential capture with step callbacks for terminal UX.
+ *
+ * @deprecated No production caller remains: the CLI removed guided terminal
+ * credential entry (sign-in is pairing-first, with browser capture via
+ * `captureSsoCredentials` as opt-in). This export and its MFA machinery are
+ * retained only because test/auto-login-browser-adapter.test.ts exercises the
+ * browser-adapter seam through them; removal is tracked as follow-up cleanup.
+ */
 export async function captureSsoCredentialsWithGuidedLogin(
   options: SsoLoginOptions,
   onStep?: (step: SsoStep) => void,

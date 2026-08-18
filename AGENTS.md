@@ -5,15 +5,14 @@ core in `src/lib/`). It loads the real Student Task View through
 `src/tui/data.ts` (auth broker + API client + `buildStudentTaskViews`),
 and its default view hides completed units (`isCurrentUnit`: web-parity
 with the home page's "all courses" split — `active: false` or a past
-teaching-period `end_date` excludes the unit).
-has an in-TUI login wizard with no credential fields (`src/tui/login.tsx`,
-driver in `src/tui/auth.ts` — both thin compositions over
-`src/lib/auto-login.ts`, `src/lib/pair-login.ts`, and
-`src/lib/login-finalize.ts`): it runs the pairing-relay flow first on every
-environment (pairing link + code rendered in the wizard, reusing any
-existing OnTrack session in the user's own browser), and falls back to a
-controlled browser window only when pairing is disabled. It is not yet wired
-into the `ontrack` entry point.
+teaching-period `end_date` excludes the unit). It also has an in-TUI login
+wizard with no credential fields (`src/tui/login.tsx`, driver in
+`src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts`,
+`src/lib/pair-login.ts`, and `src/lib/login-finalize.ts`): it runs the
+pairing-relay flow first on every environment (pairing link + code rendered
+in the wizard, reusing any existing OnTrack session in the user's own
+browser), and falls back to a controlled browser window only when pairing is
+disabled. It is not yet wired into the `ontrack` entry point.
 
 Interactive write/read actions are injectable props with production
 defaults, so the smoke test never touches network or disk state:
