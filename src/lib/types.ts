@@ -69,6 +69,14 @@ export type CredentialSource =
   | 'access-token'
   | 'pair-relay';
 
+/**
+ * Which contract a captured credential belongs to. An 'access-token' credential
+ * is already a live API token and must be used as-is; a 'legacy-auth' one is a
+ * pending one-time login token that `POST /auth` still has to exchange. Sending
+ * the former to `POST /auth` is answered with 419.
+ */
+export type CredentialContract = 'access-token' | 'legacy-auth';
+
 /** Local cached session payload stored on disk. */
 export interface SessionData {
   // API base URL used to create this session.

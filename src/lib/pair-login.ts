@@ -19,6 +19,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import type { CapturedLoginMaterial } from './login-finalize.js';
+import type { CredentialContract } from './types.js';
 
 /** Default public relay; overridable via --relay-url / ONTRACK_RELAY_URL. */
 export const DEFAULT_RELAY_URL = 'https://pair.markchu.work';
@@ -54,6 +55,12 @@ export interface PairCredentialPayload {
   authToken: string;
   username: string;
   expiresAt?: string;
+  /**
+   * Which contract the browser side captured, when it knows. Bookmarklets that
+   * predate this field say nothing, and the CLI then asks the server instead of
+   * guessing (see finalizeCapturedLogin).
+   */
+  contract?: CredentialContract;
 }
 
 /** Relay envelope stored in the mailbox (all binary fields base64url). */
@@ -247,6 +254,11 @@ function validatePayload(payload: unknown): PairCredentialPayload | null {
     ...(typeof record.expiresAt === 'string' && record.expiresAt.trim()
       ? { expiresAt: record.expiresAt }
       : {}),
+    // An unrecognised contract is dropped rather than trusted, so a stale or
+    // hostile payload cannot pick the exchange path on the CLI's behalf.
+    ...(record.contract === 'access-token' || record.contract === 'legacy-auth'
+      ? { contract: record.contract }
+      : {}),
   };
 }
 
@@ -412,6 +424,7 @@ export function capturedMaterialFromPairPayload(
     authToken: payload.authToken,
     username: payload.username,
     ...(payload.expiresAt ? { expiresAt: payload.expiresAt } : {}),
+    ...(payload.contract ? { contract: payload.contract } : {}),
     source: 'pair-relay',
   };
 }

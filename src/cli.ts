@@ -1849,6 +1849,7 @@ async function handleLogin(args: string[]): Promise<void> {
           authToken = material.authToken;
           username = material.username;
           credentialExpiresAt = material.expiresAt;
+          credentialContract = material.contract;
           credentialSource = material.source;
           pairingHandled = true;
           renderTerminalEvent('Pairing sign-in received credentials.', 'success');
@@ -1918,8 +1919,12 @@ async function handleLogin(args: string[]): Promise<void> {
   });
 
   if (!readStoredRefreshCookie({ targetOrigin: new URL(api.base).origin })) {
+    // Pairing deliberately cannot carry one: the refresh cookie is HttpOnly in
+    // the user's own browser, so it never reaches the bookmarklet or the relay.
     console.log(
-      '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.',
+      session.source === 'pair-relay'
+        ? '[info] Pairing carries no refresh cookie, so this session cannot renew itself silently. Sign in again once it expires.'
+        : '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.',
     );
   }
   renderLoginSuccessPanel(session);

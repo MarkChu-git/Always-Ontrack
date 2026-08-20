@@ -124,8 +124,10 @@ task selection. End-to-end recipes: [docs/workflows.md](docs/workflows.md).
 `ontrack login` defaults to pairing-relay sign-in on every environment: you sign
 in through the real Monash SSO pages in your own browser and the credential
 arrives end-to-end encrypted. `--auto` opts into controlled-browser capture,
-manual redirect URL import and direct `--auth-token` login remain as fallbacks,
-and the cached session renews silently from a restricted refresh cookie. See
+manual redirect URL import and direct `--auth-token` login remain as fallbacks.
+A session captured in a browser renews silently from a restricted refresh cookie;
+a paired one cannot, because that cookie is HttpOnly in your own browser, so
+signing in again is what renews it. See
 [docs/authentication.md](docs/authentication.md) for every login flow, the
 session cache locations, login output, and logout.
 

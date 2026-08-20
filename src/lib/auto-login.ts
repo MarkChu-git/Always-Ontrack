@@ -25,7 +25,7 @@ import type {
   Locator,
   Page,
 } from "playwright-core";
-import type { RefreshCookieMaterial } from "./types.js";
+import type { CredentialContract, RefreshCookieMaterial } from "./types.js";
 
 /**
  * Browser automation flow for Monash SSO / Okta handoff.
@@ -41,7 +41,7 @@ export interface LoginCredentials {
   username: string;
   expiresAt?: string;
   source: "url" | "auth_request" | "auth_response" | "local_storage" | "cookie";
-  contract?: "access-token" | "legacy-auth";
+  contract?: CredentialContract;
   /** Refresh-cookie pair observed in the browser context, when it appeared. */
   refreshCookie?: RefreshCookieMaterial;
 }
