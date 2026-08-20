@@ -1701,6 +1701,7 @@ async function handleLogin(args: string[]): Promise<void> {
   let credentialSource: CredentialSource = 'manual-sign-in';
   let credentialExpiresAt: string | undefined;
   let credentialContract: LoginCredentials['contract'];
+  let credentialExchangeToken: string | undefined;
   let capturedRefreshCookie: RefreshCookieMaterial | undefined;
 
   // Manual redirect URL can also directly provide auth token + username.
@@ -1850,6 +1851,7 @@ async function handleLogin(args: string[]): Promise<void> {
           username = material.username;
           credentialExpiresAt = material.expiresAt;
           credentialContract = material.contract;
+          credentialExchangeToken = material.exchangeToken;
           credentialSource = material.source;
           pairingHandled = true;
           renderTerminalEvent('Pairing sign-in received credentials.', 'success');
@@ -1914,16 +1916,18 @@ async function handleLogin(args: string[]): Promise<void> {
     username,
     expiresAt: credentialExpiresAt,
     contract: credentialContract,
+    exchangeToken: credentialExchangeToken,
     refreshCookie: capturedRefreshCookie,
     source: credentialSource,
   });
 
   if (!readStoredRefreshCookie({ targetOrigin: new URL(api.base).origin })) {
-    // Pairing deliberately cannot carry one: the refresh cookie is HttpOnly in
-    // the user's own browser, so it never reaches the bookmarklet or the relay.
+    // Pairing only earns a refresh cookie when it can exchange a still-pending
+    // login token: the cookie itself is HttpOnly in the user's own browser, so
+    // it never reaches the bookmarklet or the relay.
     console.log(
       session.source === 'pair-relay'
-        ? '[info] Pairing carries no refresh cookie, so this session cannot renew itself silently. Sign in again once it expires.'
+        ? '[info] No refresh cookie could be obtained for this pairing, so the session cannot renew itself silently and lasts only as long as its access token. Pair again when it expires, or use --auto for a renewable session.'
         : '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.',
     );
   }

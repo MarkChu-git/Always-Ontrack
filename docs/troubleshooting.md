@@ -50,11 +50,12 @@ If the result is `HUMAN_VERIFICATION_REQUIRED`, run the same command with
 `--interaction if_required` while the user is available. Ordinary read commands
 already attempt one silent refresh and safe replay automatically.
 
-A paired session has no refresh cookie to renew from, so 419 there means signing
-in again. If `ontrack login` itself reports that OnTrack rejected the paired
-credential, the pairing bookmarklet delivered a token the server no longer
-accepts: pair again, and if that keeps happening reinstall the bookmarklet from
-the pairing page.
+A paired session only has a refresh cookie to renew from when the pairing could
+still exchange a one-time login token; `login` prints an `[info]` line when it
+could not, and a 419 on such a session means signing in again. If `ontrack login`
+itself reports that OnTrack rejected the paired credential, the pairing
+bookmarklet delivered a token the server no longer accepts: pair again, and if
+that keeps happening reinstall the bookmarklet from the pairing page.
 
 ## `Task abbreviation "... " is ambiguous`
 

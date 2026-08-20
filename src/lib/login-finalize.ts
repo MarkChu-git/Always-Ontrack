@@ -12,6 +12,11 @@
  * active access token, so replaying a live token there throws away a working
  * credential. The browser capture paths report their contract; pairing
  * bookmarklets old enough to report nothing are resolved against the server.
+ *
+ * It also decides how long the session lives. Only the exchange returns a
+ * refresh cookie, and only a refresh cookie lets a session renew silently, so a
+ * pairing that forwards a still-pending login token is preferred over one that
+ * merely mints a token that cannot outlive itself.
  */
 import type { OnTrackApiClient } from './api.js';
 import { classifyAuthFailure, createSessionFromAccessToken } from './auth.js';
@@ -97,6 +102,12 @@ export interface CapturedLoginMaterial {
   contract?: CredentialContract;
   refreshCookie?: RefreshCookieMaterial;
   /**
+   * A pending one-time login token the pairing bookmarklet forwarded next to
+   * the credential. Exchanging it is what earns a refresh cookie, so it is
+   * preferred over a token that is already live but cannot be renewed.
+   */
+  exchangeToken?: string;
+  /**
    * Provenance recorded on the legacy-exchange session variant. The
    * access-token variant always records 'access-token' itself.
    */
@@ -172,6 +183,41 @@ async function verifyLiveCredential(
 }
 
 /**
+ * Spend the pending one-time login token the browser side forwarded next to the
+ * credential, if it still works. This is the only pairing path that ends with a
+ * refresh cookie, and therefore the only one whose session can renew silently
+ * instead of dying with its token. Failure is expected and cheap: the web app
+ * usually spends the landing-URL token first, and a rejection here leaves the
+ * minted credential untouched for the caller to fall back on.
+ */
+async function sessionFromExchangeCandidate(
+  api: OnTrackApiClient,
+  captured: CapturedLoginMaterial,
+  savedAt: string,
+): Promise<SessionData | null> {
+  const exchangeToken = captured.exchangeToken;
+  if (!exchangeToken || exchangeToken === captured.authToken) {
+    return null;
+  }
+  try {
+    // Deliberately not spreading `captured`: its expiry and contract describe
+    // the minted token, and carrying them onto a different credential would
+    // record a lifetime this session does not have.
+    return await sessionFromExchange(
+      api,
+      {
+        authToken: exchangeToken,
+        username: captured.username,
+        source: captured.source,
+      },
+      savedAt,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Persist a credential that arrived through the pairing relay. The bookmarklet
  * mints it from `POST /auth/access-token`, so it is normally already a live API
  * token and must not be replayed through `POST /auth`. One authenticated read
@@ -186,6 +232,10 @@ async function sessionFromPairedCredential(
   captured: CapturedLoginMaterial,
   savedAt: string,
 ): Promise<SessionData> {
+  const renewable = await sessionFromExchangeCandidate(api, captured, savedAt);
+  if (renewable) {
+    return renewable;
+  }
   if (captured.contract === 'legacy-auth') {
     return sessionFromExchange(api, captured, savedAt);
   }

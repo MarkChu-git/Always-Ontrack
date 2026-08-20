@@ -46,7 +46,8 @@ it to your bookmarks bar once). The bookmark is permanent: each time it asks
 you to paste that session's pairing link into its prompt, then it captures the
 credential — on current OnTrack (doubtfire ≥11) by minting a fresh token from
 the `POST /api/auth/access-token` endpoint with your HttpOnly refresh cookie,
-on older versions by reading the legacy `localStorage` keys. The captured
+on older versions by reading the legacy `localStorage` keys, and alongside it any
+one-time login token still sitting in the landing URL. The captured
 credential is encrypted in your
 browser to a one-time key only the CLI holds, and travels through a blind
 relay mailbox that only ever sees ciphertext. The CLI polls the mailbox and
@@ -62,11 +63,21 @@ bookmarklet may have caught a pending one-time login token from the landing URL.
 Either way, if OnTrack refuses it, `login` asks you to pair again instead of
 leaving a dead session behind.
 
-Pairing deliberately carries no refresh cookie: yours is HttpOnly in your own
-browser, so neither the bookmarklet nor the relay can read it. A paired session
-therefore cannot renew itself silently — when it expires, sign in again. Use
-`--auto` on a machine with a display if you want a session that renews for a
-week without re-authenticating.
+### How long a paired session lasts
+
+An access token on its own is short-lived (OnTrack has been observed issuing ten
+minutes), and only the `POST /api/auth` exchange returns the refresh cookie that
+silent renewal needs. So the bookmarklet also forwards the pending one-time login
+token from the `sign_in` landing URL when it is still there, and the CLI spends
+that first: the exchange earns a week-long refresh cookie and the session then
+renews itself without any browser. The minted token is the fallback for when the
+web app already spent the landing-URL token, which is common — that session works
+immediately but expires with its token, and `login` says so.
+
+Your refresh cookie itself can never travel through pairing: it is HttpOnly in
+your own browser, so neither the bookmarklet nor the relay can read it. When a
+pairing ends up without one, sign in again once it expires, or use `--auto` on a
+machine with a display for a session that renews for a week.
 
 - `--pair` / `--no-pair`: force pairing on/off (off means the --auto browser-capture/manual flows).
 - `--relay-url URL` or `ONTRACK_RELAY_URL`: point at another relay (self-hosters);

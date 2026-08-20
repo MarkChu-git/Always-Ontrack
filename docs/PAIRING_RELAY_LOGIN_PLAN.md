@@ -22,12 +22,13 @@
 6. bookmarklet 在 OnTrack 源内执行：依次尝试从 URL query（`sign_in?authToken=...&username=...`）、localStorage（`doubtfire_credentials_token` / `doubtfire_user`）提取凭证 → 生成自己的临时 P-256 密钥对，与内嵌的 CLI 公钥做 ECDH → HKDF-SHA256 → AES-256-GCM 加密 JSON `{authToken, username, expiresAt?}` → 投递：
    > 实现记录：doubtfire ≥11 不再把凭证写入 web storage（token 只在 Angular 内存中，`doubtfire_user` 被显式清除），提取顺序改为：`POST /api/auth/access-token`（同源 fetch 自动携带 HttpOnly `refresh_token` cookie，铸一个新 token，与 CLI auto-login 复用的是同一契约）→ URL query → 旧版 localStorage 兜底。铸票放在最前，因为落地 URL 里的 token 是一次性的，Web 应用通常已经先把它换掉了。
    > payload 随之扩为 `{authToken, username, expiresAt?, contract?}`：`contract` 说明这张票是**已经可用的 access token**还是**待兑换的一次性登录票**，两者送错端点的代价是整次登录失败（见第 7 步）。
+   > 再一次修订（登录时长问题）：access token 本身很短（生产观察到 10 分钟），而只有 `POST /api/auth` 换票才会返回一周的 refresh cookie，所以铸票优先的顺序反而选中了那条**换不出 cookie** 的路。现在 URL query 里的一次性票**无论铸票成功与否都读**：铸票成功时它作为备胎 `exchangeToken` 一起送（payload 扩为 `{..., exchangeToken?}`），CLI 优先花它换一个可续期的 session。仅当落地 URL 的 `username` 与主凭证一致（或缺失）时才送，否则 CLI 会拿别人的票以本人身份去换。
    - 首选 `fetch PUT <relay>/m/<mailboxId>`（中继 CORS 放开）；
    - 若被 OnTrack 页面 CSP `connect-src` 拦截，降级为 `location.href = <pairing-page>#d=<envelope>&m=<mailboxId>` 跳转，配对页检测 `#d=` 后代为 PUT（fragment 不过网络，安全属性不变；`m` 不可缺——仅凭信封无法知道投到哪个信箱）。
    - 页面内提示"已发送，可关闭本标签页"。
 7. CLI 轮询拿到密文（中继一次性读取，读后即删）→ 私钥解密 → 走现有 `finalizeCapturedLogin`（`src/lib/login-finalize.ts`）持久化 session 和 refresh cookie。
    > 实现记录（v2.0.0 的登录失败原因）：初版无条件把配对凭证送去 `POST /api/auth` 换票，而 bookmarklet 铸出来的 access token 在那个端点上一律得到 **419 expired**——一张好票被扔掉，session 写不进去。现在配对凭证默认**直接使用**，落盘前先做一次已认证读（`GET /api/projects`）验证，被拒时分两种情况：显式声明 `contract: 'access-token'` 的直接报 `PairedCredentialRejectedError`（铸出来的票被拒说明它已经死了，再去换票只会又拿一个 419）；什么都没声明的旧书签才回退去换票，覆盖 doubtfire ≤10 落地 URL 的一次性票，两条路都被拒同样报错提示重新配对。显式 `contract: 'legacy-auth'` 不验证，直接换票。403/5xx/网络失败**不算**拒绝——把它们当拒绝就会重演上面那个 bug。
-   > 另外：配对天生拿不到 refresh cookie（它在用户浏览器里是 HttpOnly），所以配对 session 没有静默续期，到期即需重新配对；`login` 结尾对此打 info 而非 warn。
+   > 另外：refresh cookie 本身永远不可能经配对传过来（它在用户浏览器里是 HttpOnly），但**换票的响应头**会带 Set-Cookie，CLI 读得到。所以配对能否静默续期，取决于有没有一张能换的票：payload 带 `exchangeToken` 时先换它，成功即拿到一周 cookie（`sessionFromExchange` 已经负责落盘）；换票失败（通常是 Web 应用先把它花掉了，419）不影响主凭证，回退到上面的验证-直接使用路径，只是这个 session 到期即需重新配对。`login` 结尾按"是否真的存下了 cookie"来判断打不打这条 info。
 
 **移动端/拖拽失败备用路径**：配对页同时保留"粘贴落地 URL"输入框，走第 6 步同一套加密与投递（加密在配对页执行，不在 OnTrack 源内）。
 

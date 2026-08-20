@@ -125,9 +125,10 @@ task selection. End-to-end recipes: [docs/workflows.md](docs/workflows.md).
 in through the real Monash SSO pages in your own browser and the credential
 arrives end-to-end encrypted. `--auto` opts into controlled-browser capture,
 manual redirect URL import and direct `--auth-token` login remain as fallbacks.
-A session captured in a browser renews silently from a restricted refresh cookie;
-a paired one cannot, because that cookie is HttpOnly in your own browser, so
-signing in again is what renews it. See
+A session captured in a browser renews silently from a restricted refresh cookie.
+A paired one earns the same cookie when the pairing could still exchange a
+one-time login token; otherwise it lasts only as long as its access token, and
+`login` tells you which of the two you got. See
 [docs/authentication.md](docs/authentication.md) for every login flow, the
 session cache locations, login output, and logout.
 

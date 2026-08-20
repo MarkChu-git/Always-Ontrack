@@ -307,6 +307,43 @@ test('capturedMaterialFromPairPayload maps to the finalize-login shape', () => {
       source: 'pair-relay',
     },
   );
+  assert.deepEqual(
+    capturedMaterialFromPairPayload({
+      authToken: 'token-123',
+      username: 'student1',
+      contract: 'access-token',
+      exchangeToken: 'landing-url-token',
+    }),
+    {
+      authToken: 'token-123',
+      username: 'student1',
+      contract: 'access-token',
+      exchangeToken: 'landing-url-token',
+      source: 'pair-relay',
+    },
+  );
+});
+
+test('decryptFromBrowser carries a forwarded login token and ignores a blank one', async () => {
+  const session = await generatePairingSession(RELAY);
+  const forwarded = await encryptForCli(session.publicKeyBase64Url, {
+    authToken: 'token-123',
+    username: 'student1',
+    contract: 'access-token',
+    exchangeToken: 'landing-url-token',
+  });
+  assert.equal(
+    (await decryptFromBrowser(session.privateKey, forwarded))?.exchangeToken,
+    'landing-url-token',
+  );
+
+  const blank = await encryptForCli(session.publicKeyBase64Url, {
+    authToken: 'token-123',
+    username: 'student1',
+    exchangeToken: '   ',
+  });
+  const payload = await decryptFromBrowser(session.privateKey, blank);
+  assert.deepEqual(payload, { authToken: 'token-123', username: 'student1' });
 });
 
 test('decryptFromBrowser keeps a known contract and drops an unknown one', async () => {

@@ -198,6 +198,63 @@ test('a paired credential rejected on both paths fails with re-pairing guidance'
   await assert.rejects(() => stat(join(configRoot, 'ontrack-cli', 'session.json')));
 });
 
+test('a forwarded login token is exchanged first, ahead of a usable minted token', async () => {
+  // Only the exchange returns a refresh cookie, and only a refresh cookie lets
+  // the session outlive its access token, so the spare is worth preferring even
+  // though the minted credential would already work. That the cookie really is
+  // persisted is asserted end-to-end in test/e2e.test.ts, where HOME is
+  // isolated: the managed browser-state store always lives under the real home.
+  const calls = mockFetch((url) => {
+    assert.match(url, /\/api\/auth$/);
+    return exchangeResponse();
+  });
+
+  const session = await finalizeCapturedLogin(
+    new OnTrackApiClient(BASE_URL),
+    pairedMaterial({
+      contract: 'access-token',
+      expiresAt: '2026-08-21T00:00:00.000Z',
+      exchangeToken: 'landing-url-token',
+    }),
+  );
+
+  assert.equal(session.authToken, EXCHANGED_TOKEN);
+  assert.equal(session.source, 'pair-relay');
+  assert.deepEqual(calls.map((call) => call.method), ['POST']);
+});
+
+test('a forwarded login token the web app already spent falls back to the minted one', async () => {
+  const calls = mockFetch((url) =>
+    /\/api\/projects$/.test(url)
+      ? jsonResponse([], 200)
+      : jsonResponse({ error: 'Authentication Timeout' }, 419),
+  );
+
+  const session = await finalizeCapturedLogin(
+    new OnTrackApiClient(BASE_URL),
+    pairedMaterial({
+      contract: 'access-token',
+      expiresAt: '2026-08-21T00:00:00.000Z',
+      exchangeToken: 'already-spent-token',
+    }),
+  );
+
+  assert.equal(session.authToken, PAIRED_TOKEN);
+  assert.deepEqual(calls.map((call) => call.method), ['POST', 'GET']);
+});
+
+test('a forwarded login token identical to the credential is not exchanged twice', async () => {
+  const calls = mockFetch(() => exchangeResponse());
+
+  const session = await finalizeCapturedLogin(
+    new OnTrackApiClient(BASE_URL),
+    pairedMaterial({ contract: 'legacy-auth', exchangeToken: PAIRED_TOKEN }),
+  );
+
+  assert.equal(session.authToken, EXCHANGED_TOKEN);
+  assert.deepEqual(calls.map((call) => call.method), ['POST']);
+});
+
 test('a browser access-token capture still persists with no HTTP at all', async () => {
   const calls = mockFetch(() => {
     throw new Error('no request expected');

@@ -47,6 +47,8 @@ const ACCESS_TOKEN = 'e2e-access-token';
 const RENEWED_TOKEN = 'e2e-renewed-token';
 const REFRESH_TOKEN = 'e2e-refresh-token';
 const PAIRED_TOKEN = 'paired-token';
+/** The pending one-time token a bookmarklet can forward from the landing URL. */
+const LANDING_TOKEN = 'landing-url-token';
 const USERNAME = 'student1';
 
 function runCli(
@@ -472,10 +474,13 @@ function startPairableOnTrackMock(
   options: {
     read?: 'accepted' | 'expired';
     exchange?: 'accepted' | 'expired';
+    /** Which token `POST /auth` accepts; production answers 419 for any other. */
+    exchangeableToken?: string;
   } = {},
 ) {
   const read = options.read ?? 'accepted';
   const exchange = options.exchange ?? 'accepted';
+  const exchangeableToken = options.exchangeableToken ?? PAIRED_TOKEN;
   return startMock((request, body) => {
     if (request.url === '/api/auth/method') {
       return {
@@ -493,10 +498,9 @@ function startPairableOnTrackMock(
     }
     if (request.url === '/api/auth' && request.method === 'POST') {
       const payload = JSON.parse(body) as Record<string, unknown>;
-      assert.equal(payload.auth_token, PAIRED_TOKEN);
       assert.equal(payload.username, USERNAME);
       assert.equal(payload.remember, true);
-      return exchange === 'accepted'
+      return exchange === 'accepted' && payload.auth_token === exchangeableToken
         ? {
             status: 201,
             json: signInPayload(ACCESS_TOKEN),
@@ -681,6 +685,98 @@ test(
       assert.equal(session.authToken, ACCESS_TOKEN);
       assert.equal(hits.authExchange, 1);
       assert.equal(hits.projects, 0, 'an explicit contract needs no verification read');
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a forwarded landing-URL token is exchanged, so the paired session can renew silently',
+  async () => {
+    const home = await makeHome();
+    // The minted token would work for reads, but it cannot outlive itself. Only
+    // `POST /auth` returns the refresh cookie, so the still-pending landing-URL
+    // token the bookmarklet forwarded is worth spending first.
+    const { server, baseUrl, hits } = await startPairableOnTrackMock({
+      exchangeableToken: LANDING_TOKEN,
+    });
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+        payload: {
+          authToken: PAIRED_TOKEN,
+          username: USERNAME,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          contract: 'access-token',
+          exchangeToken: LANDING_TOKEN,
+        },
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      // The mock 419s anything but LANDING_TOKEN, so a stored exchanged token
+      // proves the spare was what the CLI presented.
+      assert.equal(session.authToken, ACCESS_TOKEN);
+      assert.equal(hits.authExchange, 1);
+      assert.equal(hits.projects, 0, 'a successful exchange needs no verification read');
+      assert.match(
+        await readFile(home.browserStatePath, 'utf8'),
+        /refresh_token/,
+        'the exchange must leave the refresh cookie behind for silent renewal',
+      );
+      assert.doesNotMatch(login.stdout, /cannot renew itself silently/);
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a landing-URL token the web app already spent falls back to the minted credential',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startPairableOnTrackMock({
+      exchange: 'expired',
+    });
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+        payload: {
+          authToken: PAIRED_TOKEN,
+          username: USERNAME,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          contract: 'access-token',
+          exchangeToken: LANDING_TOKEN,
+        },
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      assert.equal(session.authToken, PAIRED_TOKEN);
+      assert.equal(hits.authExchange, 1, 'the spare is tried exactly once');
+      assert.equal(hits.projects, 1, 'the minted fallback is still verified');
+      assert.match(login.stdout, /cannot renew itself silently/);
     } finally {
       server.close();
       relay.server.close();
