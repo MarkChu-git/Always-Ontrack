@@ -644,6 +644,7 @@ test(
       assert.equal(session.authToken, PAIRED_TOKEN);
       assert.equal(session.expiresAt, expiresAt);
       assert.equal(hits.authExchange, 0);
+      assert.equal(hits.projects, 1, 'a declared contract is still verified once');
     } finally {
       server.close();
       relay.server.close();

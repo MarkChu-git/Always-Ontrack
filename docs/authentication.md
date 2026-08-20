@@ -54,11 +54,13 @@ decrypts locally.
 
 A minted token is already an API credential, so the CLI keeps it as it arrived
 rather than replaying it through `POST /api/auth`, which answers 419 for an
-already active token. The bookmarklet says which of the two it captured; when it
-is an older bookmarklet that says nothing, the CLI performs one authenticated
-read to find out, and only a credential OnTrack actively rejects is offered to
-the exchange. If OnTrack refuses it on both paths, `login` says so and asks you
-to pair again instead of leaving a dead session behind.
+already active token. One authenticated read confirms the credential before
+anything is stored, so a dead one is reported by `login` itself instead of
+failing every later command. A credential the server rejects is only offered to
+the exchange when the bookmarklet did not say what it captured — an older
+bookmarklet may have caught a pending one-time login token from the landing URL.
+Either way, if OnTrack refuses it, `login` asks you to pair again instead of
+leaving a dead session behind.
 
 Pairing deliberately carries no refresh cookie: yours is HttpOnly in your own
 browser, so neither the bookmarklet nor the relay can read it. A paired session

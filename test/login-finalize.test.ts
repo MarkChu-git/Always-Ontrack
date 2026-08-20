@@ -167,6 +167,22 @@ test('a declared legacy-auth pairing contract exchanges without verifying first'
   assert.deepEqual(calls.map((call) => call.method), ['POST']);
 });
 
+test('a rejected access-token pairing contract is never offered to the exchange', async () => {
+  // The bookmarklet minted it, so a rejection means the token is dead; the
+  // exchange would only answer with the 419 this path exists to avoid.
+  const calls = mockFetch(() => jsonResponse({ error: 'unauthorized' }, 401));
+
+  await assert.rejects(
+    () =>
+      finalizeCapturedLogin(
+        new OnTrackApiClient(BASE_URL),
+        pairedMaterial({ contract: 'access-token', expiresAt: '2026-08-21T00:00:00.000Z' }),
+      ),
+    PairedCredentialRejectedError,
+  );
+  assert.deepEqual(calls.map((call) => call.method), ['GET']);
+});
+
 test('a paired credential rejected on both paths fails with re-pairing guidance', async () => {
   mockFetch(() => jsonResponse({ error: 'Authentication Timeout' }, 419));
 

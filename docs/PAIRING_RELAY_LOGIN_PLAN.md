@@ -26,7 +26,7 @@
    - 若被 OnTrack 页面 CSP `connect-src` 拦截，降级为 `location.href = <pairing-page>#d=<envelope>&m=<mailboxId>` 跳转，配对页检测 `#d=` 后代为 PUT（fragment 不过网络，安全属性不变；`m` 不可缺——仅凭信封无法知道投到哪个信箱）。
    - 页面内提示"已发送，可关闭本标签页"。
 7. CLI 轮询拿到密文（中继一次性读取，读后即删）→ 私钥解密 → 走现有 `finalizeCapturedLogin`（`src/lib/login-finalize.ts`）持久化 session 和 refresh cookie。
-   > 实现记录（v2.0.0 的登录失败原因）：初版无条件把配对凭证送去 `POST /api/auth` 换票，而 bookmarklet 铸出来的 access token 在那个端点上一律得到 **419 expired**——一张好票被扔掉，session 写不进去。现在配对凭证默认**直接使用**：`contract: 'access-token'` 直接落盘；没带 `contract` 的旧书签则先做一次已认证读（`GET /api/projects`）问服务器，只有明确 401/419 才回退去换票（覆盖 doubtfire ≤10 的落地 URL 一次性票），两条路都被拒才报 `PairedCredentialRejectedError` 提示重新配对。403/5xx/网络失败不算拒绝——把它们当拒绝就会重演上面那个 bug。
+   > 实现记录（v2.0.0 的登录失败原因）：初版无条件把配对凭证送去 `POST /api/auth` 换票，而 bookmarklet 铸出来的 access token 在那个端点上一律得到 **419 expired**——一张好票被扔掉，session 写不进去。现在配对凭证默认**直接使用**，落盘前先做一次已认证读（`GET /api/projects`）验证，被拒时分两种情况：显式声明 `contract: 'access-token'` 的直接报 `PairedCredentialRejectedError`（铸出来的票被拒说明它已经死了，再去换票只会又拿一个 419）；什么都没声明的旧书签才回退去换票，覆盖 doubtfire ≤10 落地 URL 的一次性票，两条路都被拒同样报错提示重新配对。显式 `contract: 'legacy-auth'` 不验证，直接换票。403/5xx/网络失败**不算**拒绝——把它们当拒绝就会重演上面那个 bug。
    > 另外：配对天生拿不到 refresh cookie（它在用户浏览器里是 HttpOnly），所以配对 session 没有静默续期，到期即需重新配对；`login` 结尾对此打 info 而非 warn。
 
 **移动端/拖拽失败备用路径**：配对页同时保留"粘贴落地 URL"输入框，走第 6 步同一套加密与投递（加密在配对页执行，不在 OnTrack 源内）。

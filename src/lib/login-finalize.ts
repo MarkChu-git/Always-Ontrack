@@ -174,10 +174,12 @@ async function verifyLiveCredential(
 /**
  * Persist a credential that arrived through the pairing relay. The bookmarklet
  * mints it from `POST /auth/access-token`, so it is normally already a live API
- * token and must not be replayed through `POST /auth`. Bookmarklets installed
- * before the contract field was added report nothing, so verify once and let
- * the server decide; only a credential OnTrack actively rejects is worth
- * trying as a pending one-time login token from the `sign_in` landing URL.
+ * token and must not be replayed through `POST /auth`. One authenticated read
+ * confirms that before anything is written, so a dead credential is reported at
+ * login instead of failing every later command. Only a rejected credential that
+ * declared nothing is worth trying as a pending one-time login token — that is
+ * what a bookmarklet predating the contract field may have caught from the
+ * `sign_in` landing URL.
  */
 async function sessionFromPairedCredential(
   api: OnTrackApiClient,
@@ -190,6 +192,12 @@ async function sessionFromPairedCredential(
   const candidate = sessionFromLiveCredential(api.base, captured, savedAt);
   if ((await verifyLiveCredential(api, candidate)) !== 'rejected') {
     return candidate;
+  }
+  if (captured.contract === 'access-token') {
+    // A minted token is a live credential by definition, so a rejection means
+    // it is dead rather than pending. Offering it to `POST /auth` would be the
+    // 419 this path exists to avoid.
+    throw new PairedCredentialRejectedError();
   }
   try {
     return await sessionFromExchange(api, captured, savedAt);
