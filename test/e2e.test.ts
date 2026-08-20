@@ -7,7 +7,11 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'bun:test';
-import { deriveMailboxId, encryptForCli } from '../src/lib/pair-login.js';
+import {
+  deriveMailboxId,
+  encryptForCli,
+  type PairCredentialPayload,
+} from '../src/lib/pair-login.js';
 
 /**
  * End-to-end tests: run the real CLI as a subprocess against a loopback mock
@@ -42,6 +46,7 @@ interface MockHits {
 const ACCESS_TOKEN = 'e2e-access-token';
 const RENEWED_TOKEN = 'e2e-renewed-token';
 const REFRESH_TOKEN = 'e2e-refresh-token';
+const PAIRED_TOKEN = 'paired-token';
 const USERNAME = 'student1';
 
 function runCli(
@@ -420,6 +425,8 @@ async function runPairingLogin(options: {
   relayUrl: string;
   extraArgs?: string[];
   extraEnv?: Record<string, string>;
+  /** Defaults to the shape a bookmarklet without the contract field delivers. */
+  payload?: PairCredentialPayload;
 }): Promise<CliResult> {
   let stdoutSoFar = '';
   let delivered: Promise<void> | undefined;
@@ -438,10 +445,10 @@ async function runPairingLogin(options: {
           return;
         }
         delivered = (async () => {
-          const envelope = await encryptForCli(match[2], {
-            authToken: 'paired-one-time-token',
-            username: USERNAME,
-          });
+          const envelope = await encryptForCli(
+            match[2],
+            options.payload ?? { authToken: PAIRED_TOKEN, username: USERNAME },
+          );
           const mailboxId = deriveMailboxId(match[1]);
           const response = await fetch(`${options.relayUrl}/m/${mailboxId}`, {
             method: 'PUT',
@@ -456,7 +463,19 @@ async function runPairingLogin(options: {
   return result;
 }
 
-function startPairableOnTrackMock() {
+/**
+ * Mock OnTrack for the pairing tests. The two knobs are the two answers that
+ * decide which path the CLI must take: whether the paired token already works
+ * as an API credential, and whether `POST /auth` accepts it for exchange.
+ */
+function startPairableOnTrackMock(
+  options: {
+    read?: 'accepted' | 'expired';
+    exchange?: 'accepted' | 'expired';
+  } = {},
+) {
+  const read = options.read ?? 'accepted';
+  const exchange = options.exchange ?? 'accepted';
   return startMock((request, body) => {
     if (request.url === '/api/auth/method') {
       return {
@@ -464,26 +483,41 @@ function startPairableOnTrackMock() {
         json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
       };
     }
+    if (request.url === '/api/projects' && request.method === 'GET') {
+      // Whatever the verdict, the read must present the paired credential.
+      assert.equal(request.headers['auth-token'], PAIRED_TOKEN);
+      assert.equal(request.headers.username, USERNAME);
+      return read === 'accepted'
+        ? { status: 200, json: [] }
+        : { status: 419, json: { error: 'Authentication Timeout' } };
+    }
     if (request.url === '/api/auth' && request.method === 'POST') {
       const payload = JSON.parse(body) as Record<string, unknown>;
-      assert.equal(payload.auth_token, 'paired-one-time-token');
+      assert.equal(payload.auth_token, PAIRED_TOKEN);
       assert.equal(payload.username, USERNAME);
       assert.equal(payload.remember, true);
-      return {
-        status: 201,
-        json: signInPayload(ACCESS_TOKEN),
-        setCookie: refreshCookiePair(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
-      };
+      return exchange === 'accepted'
+        ? {
+            status: 201,
+            json: signInPayload(ACCESS_TOKEN),
+            setCookie: refreshCookiePair(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+          }
+        : { status: 419, json: { error: 'Authentication Timeout' } };
     }
     return null;
   });
 }
 
 test(
-  'e2e: headless login pairs through the relay and stores the session',
+  'e2e: headless login pairs through the relay and keeps the minted token instead of replaying it through /auth',
   async () => {
     const home = await makeHome();
-    const { server, baseUrl } = await startPairableOnTrackMock();
+    // Production shape: the bookmarklet mints the token from
+    // /auth/access-token, so it is already an API credential and `POST /auth`
+    // answers 419 for it. Replaying it there is what used to lose the login.
+    const { server, baseUrl, hits } = await startPairableOnTrackMock({
+      exchange: 'expired',
+    });
     const relay = await startMockRelay();
 
     try {
@@ -500,8 +534,152 @@ test(
         authToken: string;
         source?: string;
       };
+      assert.equal(session.authToken, PAIRED_TOKEN);
+      assert.equal(session.source, 'pair-relay');
+      assert.equal(hits.authExchange, 0, '/auth must not be called for a live token');
+      assert.equal(hits.projects, 1, 'the credential must be verified exactly once');
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: pairing falls back to the /auth exchange when OnTrack rejects the paired token',
+  async () => {
+    const home = await makeHome();
+    // Older OnTrack shape: the bookmarklet caught the one-time token from the
+    // sign_in landing URL, so reads reject it and the exchange is the way in.
+    const { server, baseUrl, hits } = await startPairableOnTrackMock({
+      read: 'expired',
+    });
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+        source?: string;
+      };
       assert.equal(session.authToken, ACCESS_TOKEN);
       assert.equal(session.source, 'pair-relay');
+      assert.equal(hits.authExchange, 1);
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a rejected paired credential fails with re-pairing guidance, not a raw 419',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl } = await startPairableOnTrackMock({
+      read: 'expired',
+      exchange: 'expired',
+    });
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+      });
+      assert.notEqual(login.exitCode, 0);
+      assert.match(login.stderr, /rejected the paired credential/i);
+      await assert.rejects(() => stat(home.sessionPath));
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a bookmarklet that reports the access-token contract stores the token expiry',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startPairableOnTrackMock({
+      exchange: 'expired',
+    });
+    const relay = await startMockRelay();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+        payload: {
+          authToken: PAIRED_TOKEN,
+          username: USERNAME,
+          expiresAt,
+          contract: 'access-token',
+        },
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+        expiresAt?: string;
+      };
+      assert.equal(session.authToken, PAIRED_TOKEN);
+      assert.equal(session.expiresAt, expiresAt);
+      assert.equal(hits.authExchange, 0);
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a bookmarklet that reports the legacy contract exchanges without a probe',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startPairableOnTrackMock();
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+        payload: {
+          authToken: PAIRED_TOKEN,
+          username: USERNAME,
+          contract: 'legacy-auth',
+        },
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      assert.equal(session.authToken, ACCESS_TOKEN);
+      assert.equal(hits.authExchange, 1);
+      assert.equal(hits.projects, 0, 'an explicit contract needs no verification read');
     } finally {
       server.close();
       relay.server.close();

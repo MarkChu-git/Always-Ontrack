@@ -294,4 +294,39 @@ test('capturedMaterialFromPairPayload maps to the finalize-login shape', () => {
     }),
     { authToken: 'token-123', username: 'student1', source: 'pair-relay' },
   );
+  assert.deepEqual(
+    capturedMaterialFromPairPayload({
+      authToken: 'token-123',
+      username: 'student1',
+      contract: 'access-token',
+    }),
+    {
+      authToken: 'token-123',
+      username: 'student1',
+      contract: 'access-token',
+      source: 'pair-relay',
+    },
+  );
+});
+
+test('decryptFromBrowser keeps a known contract and drops an unknown one', async () => {
+  const session = await generatePairingSession(RELAY);
+  const declared = await encryptForCli(session.publicKeyBase64Url, {
+    authToken: 'token-123',
+    username: 'student1',
+    contract: 'legacy-auth',
+  });
+  assert.equal(
+    (await decryptFromBrowser(session.privateKey, declared))?.contract,
+    'legacy-auth',
+  );
+
+  // A payload cannot talk the CLI into a contract it does not implement.
+  const bogus = await encryptForCli(session.publicKeyBase64Url, {
+    authToken: 'token-123',
+    username: 'student1',
+    contract: 'refresh-cookie' as never,
+  });
+  const payload = await decryptFromBrowser(session.privateKey, bogus);
+  assert.deepEqual(payload, { authToken: 'token-123', username: 'student1' });
 });

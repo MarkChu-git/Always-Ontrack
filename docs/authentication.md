@@ -19,7 +19,7 @@ This flow:
 1. first probes the CLI's previously saved, OnTrack-only browser state and reuses it when valid
 2. prints a one-time pairing link — you sign in in your own browser on any device, reusing an existing OnTrack session if you have one, and the credential arrives end-to-end encrypted (see the pairing section below)
 3. `--auto` opts into controlled-browser capture instead: a visible browser window on machines with a display
-4. captures the resulting credentials and signs in through `/api/auth`
+4. captures the resulting credentials, exchanging them through `/api/auth` only when they are not already API credentials
 5. stores a local session cache
 6. tells you how to install a browser runtime manually if one is missing
 
@@ -42,10 +42,29 @@ Waiting for pairing sign-in... (5 min left)
 You open the link on any device (phone or laptop), sign in through the real
 Monash SSO pages in your own browser — your password and MFA never leave your
 device — and click the pairing bookmarklet the page gives you (first use: drag
-it to your bookmarks bar once). The captured credential is encrypted in your
+it to your bookmarks bar once). The bookmark is permanent: each time it asks
+you to paste that session's pairing link into its prompt, then it captures the
+credential — on current OnTrack (doubtfire ≥11) by minting a fresh token from
+the `POST /api/auth/access-token` endpoint with your HttpOnly refresh cookie,
+on older versions by reading the legacy `localStorage` keys. The captured
+credential is encrypted in your
 browser to a one-time key only the CLI holds, and travels through a blind
-relay mailbox that only ever sees ciphertext. The CLI polls the mailbox,
-decrypts locally, and completes the usual session exchange.
+relay mailbox that only ever sees ciphertext. The CLI polls the mailbox and
+decrypts locally.
+
+A minted token is already an API credential, so the CLI keeps it as it arrived
+rather than replaying it through `POST /api/auth`, which answers 419 for an
+already active token. The bookmarklet says which of the two it captured; when it
+is an older bookmarklet that says nothing, the CLI performs one authenticated
+read to find out, and only a credential OnTrack actively rejects is offered to
+the exchange. If OnTrack refuses it on both paths, `login` says so and asks you
+to pair again instead of leaving a dead session behind.
+
+Pairing deliberately carries no refresh cookie: yours is HttpOnly in your own
+browser, so neither the bookmarklet nor the relay can read it. A paired session
+therefore cannot renew itself silently — when it expires, sign in again. Use
+`--auto` on a machine with a display if you want a session that renews for a
+week without re-authenticating.
 
 - `--pair` / `--no-pair`: force pairing on/off (off means the --auto browser-capture/manual flows).
 - `--relay-url URL` or `ONTRACK_RELAY_URL`: point at another relay (self-hosters);

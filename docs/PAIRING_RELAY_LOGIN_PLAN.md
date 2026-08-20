@@ -18,11 +18,16 @@
 5. 配对页（纯静态 JS）从 `location.hash` 读出 code + CLI 公钥，**动态生成一个内嵌该会话 code + CLI 公钥的 bookmarklet**（`javascript:` 链接，~1-2KB minified WebCrypto 代码），引导用户：
    - 首次：把按钮拖进书签栏（一次性）。
    - 每次登录：点"打开 OnTrack 登录"→ 在原生 SSO 页面完成登录 → 落地 OnTrack 后点书签栏按钮。
+   > 实现记录：落地时改为**永久 bookmarklet + prompt**——bookmarklet 不内嵌会话数据，点击时弹 prompt 让用户粘贴本次配对链接，从中解析 code + 公钥，所以书签只需安装一次。另注意 React 会消毒 `href` prop 里的 `javascript:` URL（替换成抛错 stub），配对页必须用 ref + `setAttribute` 直写 DOM 属性。
 6. bookmarklet 在 OnTrack 源内执行：依次尝试从 URL query（`sign_in?authToken=...&username=...`）、localStorage（`doubtfire_credentials_token` / `doubtfire_user`）提取凭证 → 生成自己的临时 P-256 密钥对，与内嵌的 CLI 公钥做 ECDH → HKDF-SHA256 → AES-256-GCM 加密 JSON `{authToken, username, expiresAt?}` → 投递：
+   > 实现记录：doubtfire ≥11 不再把凭证写入 web storage（token 只在 Angular 内存中，`doubtfire_user` 被显式清除），提取顺序改为：`POST /api/auth/access-token`（同源 fetch 自动携带 HttpOnly `refresh_token` cookie，铸一个新 token，与 CLI auto-login 复用的是同一契约）→ URL query → 旧版 localStorage 兜底。铸票放在最前，因为落地 URL 里的 token 是一次性的，Web 应用通常已经先把它换掉了。
+   > payload 随之扩为 `{authToken, username, expiresAt?, contract?}`：`contract` 说明这张票是**已经可用的 access token**还是**待兑换的一次性登录票**，两者送错端点的代价是整次登录失败（见第 7 步）。
    - 首选 `fetch PUT <relay>/m/<mailboxId>`（中继 CORS 放开）；
    - 若被 OnTrack 页面 CSP `connect-src` 拦截，降级为 `location.href = <pairing-page>#d=<envelope>&m=<mailboxId>` 跳转，配对页检测 `#d=` 后代为 PUT（fragment 不过网络，安全属性不变；`m` 不可缺——仅凭信封无法知道投到哪个信箱）。
    - 页面内提示"已发送，可关闭本标签页"。
 7. CLI 轮询拿到密文（中继一次性读取，读后即删）→ 私钥解密 → 走现有 `finalizeCapturedLogin`（`src/lib/login-finalize.ts`）持久化 session 和 refresh cookie。
+   > 实现记录（v2.0.0 的登录失败原因）：初版无条件把配对凭证送去 `POST /api/auth` 换票，而 bookmarklet 铸出来的 access token 在那个端点上一律得到 **419 expired**——一张好票被扔掉，session 写不进去。现在配对凭证默认**直接使用**：`contract: 'access-token'` 直接落盘；没带 `contract` 的旧书签则先做一次已认证读（`GET /api/projects`）问服务器，只有明确 401/419 才回退去换票（覆盖 doubtfire ≤10 的落地 URL 一次性票），两条路都被拒才报 `PairedCredentialRejectedError` 提示重新配对。403/5xx/网络失败不算拒绝——把它们当拒绝就会重演上面那个 bug。
+   > 另外：配对天生拿不到 refresh cookie（它在用户浏览器里是 HttpOnly），所以配对 session 没有静默续期，到期即需重新配对；`login` 结尾对此打 info 而非 warn。
 
 **移动端/拖拽失败备用路径**：配对页同时保留"粘贴落地 URL"输入框，走第 6 步同一套加密与投递（加密在配对页执行，不在 OnTrack 源内）。
 
