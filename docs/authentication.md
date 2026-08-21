@@ -74,6 +74,11 @@ renews itself without any browser. The minted token is the fallback for when the
 web app already spent the landing-URL token, which is common — that session works
 immediately but expires with its token, and `login` says so.
 
+Forwarding that spare is a property of the bookmarklet, and the bookmarklet's
+code is baked into the bookmark when you drag it. A bookmark installed before
+this behaviour existed keeps working, but never forwards the spare — drag a fresh
+one from the pairing page to get renewable paired sessions.
+
 Your refresh cookie itself can never travel through pairing: it is HttpOnly in
 your own browser, so neither the bookmarklet nor the relay can read it. When a
 pairing ends up without one, sign in again once it expires, or use `--auto` on a
