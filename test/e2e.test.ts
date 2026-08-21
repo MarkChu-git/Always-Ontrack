@@ -548,6 +548,8 @@ test(
       assert.equal(session.source, 'pair-relay');
       assert.equal(hits.authExchange, 0, '/auth must not be called for a live token');
       assert.equal(hits.projects, 1, 'the credential must be verified exactly once');
+      // Nothing was forwarded to exchange, so the advice is about the bookmark.
+      assert.match(login.stdout, /forwarded no login token to exchange/);
     } finally {
       server.close();
       relay.server.close();
@@ -783,7 +785,9 @@ test(
       assert.equal(session.authToken, PAIRED_TOKEN);
       assert.equal(hits.authExchange, 1, 'the spare is tried exactly once');
       assert.equal(hits.projects, 1, 'the minted fallback is still verified');
-      assert.match(login.stdout, /cannot renew itself silently/);
+      // A spare was forwarded and refused, which is a different user problem
+      // from having none to forward, so the two must not share one message.
+      assert.match(login.stdout, /refused the login token this pairing forwarded/);
     } finally {
       server.close();
       relay.server.close();

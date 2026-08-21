@@ -1924,11 +1924,14 @@ async function handleLogin(args: string[]): Promise<void> {
   if (!readStoredRefreshCookie({ targetOrigin: new URL(api.base).origin })) {
     // Pairing only earns a refresh cookie when it can exchange a still-pending
     // login token: the cookie itself is HttpOnly in the user's own browser, so
-    // it never reaches the bookmarklet or the relay.
+    // it never reaches the bookmarklet or the relay. Which of the two ways that
+    // failed decides what the user should do differently, so say which.
     console.log(
-      session.source === 'pair-relay'
-        ? '[info] No refresh cookie could be obtained for this pairing, so the session cannot renew itself silently and lasts only as long as its access token. Pair again when it expires, or use --auto for a renewable session.'
-        : '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.',
+      session.source !== 'pair-relay'
+        ? '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.'
+        : credentialExchangeToken
+          ? '[info] OnTrack refused the login token this pairing forwarded, most likely because the web page had already spent it, so the session cannot renew itself silently and lasts only as long as its access token. Pair again when it expires, or use --auto for a renewable session.'
+          : '[info] This pairing forwarded no login token to exchange, so the session cannot renew itself silently and lasts only as long as its access token. Install a fresh bookmark from the pairing page if yours predates this, and click it on the sign_in landing page before OnTrack navigates away. Otherwise pair again when it expires, or use --auto.',
     );
   }
   renderLoginSuccessPanel(session);
