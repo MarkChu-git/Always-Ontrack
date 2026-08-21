@@ -120,7 +120,7 @@ bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
 Monash SSO 登录，凭证端到端加密传回 CLI。`--auto` 可改用受控浏览器捕获；手动
 redirect URL 导入与直接 `--auth-token` 登录作为后备路径保留。浏览器里捕获的会话可
 通过受限 refresh cookie 静默续期；配对得到的会话在还能换掉一次性登录票时同样拿到这个
-cookie，否则只能活到 access token 过期为止——`login` 会告诉你拿到的是哪一种。
+cookie，否则只能活到 access token 过期为止——后一种情况 `login` 会明确提示。
 全部登录流程、会话缓存位置、登录输出与退出登录详见
 [docs/authentication.md](docs/authentication.md)（英文）。
 

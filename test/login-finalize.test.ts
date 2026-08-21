@@ -211,14 +211,17 @@ test('a forwarded login token is exchanged first, ahead of a usable minted token
 
   const session = await finalizeCapturedLogin(
     new OnTrackApiClient(BASE_URL),
+    // A minted expiry distinct from the exchange's, so recording the wrong one
+    // fails here instead of understating how long the session lasts.
     pairedMaterial({
       contract: 'access-token',
-      expiresAt: '2026-08-21T00:00:00.000Z',
+      expiresAt: '2026-08-20T00:10:00.000Z',
       exchangeToken: 'landing-url-token',
     }),
   );
 
   assert.equal(session.authToken, EXCHANGED_TOKEN);
+  assert.equal(session.expiresAt, '2026-08-21T00:00:00.000Z');
   assert.equal(session.source, 'pair-relay');
   assert.deepEqual(calls.map((call) => call.method), ['POST']);
 });
@@ -236,6 +239,29 @@ test('a forwarded login token the web app already spent falls back to the minted
       contract: 'access-token',
       expiresAt: '2026-08-21T00:00:00.000Z',
       exchangeToken: 'already-spent-token',
+    }),
+  );
+
+  assert.equal(session.authToken, PAIRED_TOKEN);
+  assert.deepEqual(calls.map((call) => call.method), ['POST', 'GET']);
+});
+
+test('an exchange that never answers still logs in with the minted credential', async () => {
+  // The spare only ever buys a longer session, so an unknown outcome must not
+  // cost the login: whatever happened server-side, the minted token still works.
+  const calls = mockFetch((url) => {
+    if (/\/api\/projects$/.test(url)) {
+      return jsonResponse([], 200);
+    }
+    throw new Error('socket hang up');
+  });
+
+  const session = await finalizeCapturedLogin(
+    new OnTrackApiClient(BASE_URL),
+    pairedMaterial({
+      contract: 'access-token',
+      expiresAt: '2026-08-21T00:00:00.000Z',
+      exchangeToken: 'landing-url-token',
     }),
   );
 

@@ -474,7 +474,7 @@ function startPairableOnTrackMock(
   options: {
     read?: 'accepted' | 'expired';
     exchange?: 'accepted' | 'expired';
-    /** Which token `POST /auth` accepts; production answers 419 for any other. */
+    /** The only token `POST /auth` may be offered; any other fails the test. */
     exchangeableToken?: string;
   } = {},
 ) {
@@ -500,7 +500,13 @@ function startPairableOnTrackMock(
       const payload = JSON.parse(body) as Record<string, unknown>;
       assert.equal(payload.username, USERNAME);
       assert.equal(payload.remember, true);
-      return exchange === 'accepted' && payload.auth_token === exchangeableToken
+      // An already-live token must never be replayed here, whatever the verdict.
+      assert.equal(
+        payload.auth_token,
+        exchangeableToken,
+        'the wrong credential was offered to /auth',
+      );
+      return exchange === 'accepted'
         ? {
             status: 201,
             json: signInPayload(ACCESS_TOKEN),
@@ -725,8 +731,6 @@ test(
       const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
         authToken: string;
       };
-      // The mock 419s anything but LANDING_TOKEN, so a stored exchanged token
-      // proves the spare was what the CLI presented.
       assert.equal(session.authToken, ACCESS_TOKEN);
       assert.equal(hits.authExchange, 1);
       assert.equal(hits.projects, 0, 'a successful exchange needs no verification read');
@@ -749,8 +753,11 @@ test(
   'e2e: a landing-URL token the web app already spent falls back to the minted credential',
   async () => {
     const home = await makeHome();
+    // The mock also asserts that only the spare reaches /auth, so a fallback
+    // that replayed the live minted token there would fail the test.
     const { server, baseUrl, hits } = await startPairableOnTrackMock({
       exchange: 'expired',
+      exchangeableToken: LANDING_TOKEN,
     });
     const relay = await startMockRelay();
 

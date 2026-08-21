@@ -128,7 +128,7 @@ manual redirect URL import and direct `--auth-token` login remain as fallbacks.
 A session captured in a browser renews silently from a restricted refresh cookie.
 A paired one earns the same cookie when the pairing could still exchange a
 one-time login token; otherwise it lasts only as long as its access token, and
-`login` tells you which of the two you got. See
+`login` says so. See
 [docs/authentication.md](docs/authentication.md) for every login flow, the
 session cache locations, login output, and logout.
 

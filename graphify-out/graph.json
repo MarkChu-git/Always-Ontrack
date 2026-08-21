@@ -2310,7 +2310,7 @@
       "_origin": "ast",
       "id": "src_cli_runwelcomeaction",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "runwelcomeaction()"
     },
     {
@@ -2332,7 +2332,7 @@
       "_origin": "ast",
       "id": "src_cli_requiresession",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "requiresession()"
     },
     {
@@ -2343,7 +2343,7 @@
       "_origin": "ast",
       "id": "src_cli_flattentasks",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "flattentasks()"
     },
     {
@@ -2354,7 +2354,7 @@
       "_origin": "ast",
       "id": "src_cli_parseoptionalinteger",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "parseoptionalinteger()"
     },
     {
@@ -2365,7 +2365,7 @@
       "_origin": "ast",
       "id": "src_cli_parseoptionalstring",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "parseoptionalstring()"
     },
     {
@@ -2485,8 +2485,8 @@
       "source_location": "L1474",
       "_origin": "ast",
       "id": "src_cli_buildinboxfallbacktasksfromprojectdetails",
-      "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community": 8,
+      "community_name": "printJson",
       "norm_label": "buildinboxfallbacktasksfromprojectdetails()"
     },
     {
@@ -2508,7 +2508,7 @@
       "_origin": "ast",
       "id": "src_cli_handleauthmethod",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleauthmethod()"
     },
     {
@@ -2541,7 +2541,7 @@
       "_origin": "ast",
       "id": "src_cli_handleschema",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleschema()"
     },
     {
@@ -2563,7 +2563,7 @@
       "_origin": "ast",
       "id": "src_cli_handleauthstatus",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleauthstatus()"
     },
     {
@@ -2574,7 +2574,7 @@
       "_origin": "ast",
       "id": "src_cli_handleauthensure",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleauthensure()"
     },
     {
@@ -2596,7 +2596,7 @@
       "_origin": "ast",
       "id": "src_cli_handlelogout",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlelogout()"
     },
     {
@@ -2607,7 +2607,7 @@
       "_origin": "ast",
       "id": "src_cli_handlewhoami",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlewhoami()"
     },
     {
@@ -2618,7 +2618,7 @@
       "_origin": "ast",
       "id": "src_cli_handleprojects",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleprojects()"
     },
     {
@@ -2629,7 +2629,7 @@
       "_origin": "ast",
       "id": "src_cli_readagentprojectslist",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentprojectslist()"
     },
     {
@@ -2640,7 +2640,7 @@
       "_origin": "ast",
       "id": "src_cli_readagenttaskslist",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagenttaskslist()"
     },
     {
@@ -2651,7 +2651,7 @@
       "_origin": "ast",
       "id": "src_cli_readagentunitshow",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentunitshow()"
     },
     {
@@ -2662,7 +2662,7 @@
       "_origin": "ast",
       "id": "src_cli_readagenttutorialsstatus",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagenttutorialsstatus()"
     },
     {
@@ -2673,7 +2673,7 @@
       "_origin": "ast",
       "id": "src_cli_readagentfeedbacklist",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentfeedbacklist()"
     },
     {
@@ -2684,7 +2684,7 @@
       "_origin": "ast",
       "id": "src_cli_readagentfeedbacktarget",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentfeedbacktarget()"
     },
     {
@@ -2695,7 +2695,7 @@
       "_origin": "ast",
       "id": "src_cli_readagentfeedbackwatch",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentfeedbackwatch()"
     },
     {
@@ -2705,8 +2705,8 @@
       "source_location": "L2110",
       "_origin": "ast",
       "id": "src_cli_agentfeedbacklistinputfromselector",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 8,
+      "community_name": "printJson",
       "norm_label": "agentfeedbacklistinputfromselector()"
     },
     {
@@ -2717,7 +2717,7 @@
       "_origin": "ast",
       "id": "src_cli_parseagentfeedbacklistselector",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "parseagentfeedbacklistselector()"
     },
     {
@@ -2739,7 +2739,7 @@
       "_origin": "ast",
       "id": "src_cli_handleprojectshow",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleprojectshow()"
     },
     {
@@ -2750,7 +2750,7 @@
       "_origin": "ast",
       "id": "src_cli_handleunits",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleunits()"
     },
     {
@@ -2772,7 +2772,7 @@
       "_origin": "ast",
       "id": "src_cli_handleunitshow",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleunitshow()"
     },
     {
@@ -2783,7 +2783,7 @@
       "_origin": "ast",
       "id": "src_cli_handleunittasks",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleunittasks()"
     },
     {
@@ -2794,7 +2794,7 @@
       "_origin": "ast",
       "id": "src_cli_handletasks",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handletasks()"
     },
     {
@@ -2871,7 +2871,7 @@
       "_origin": "ast",
       "id": "src_cli_handlediscover",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlediscover()"
     },
     {
@@ -2882,7 +2882,7 @@
       "_origin": "ast",
       "id": "src_cli_handleinbox",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleinbox()"
     },
     {
@@ -2893,7 +2893,7 @@
       "_origin": "ast",
       "id": "src_cli_handletaskshow",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handletaskshow()"
     },
     {
@@ -2904,7 +2904,7 @@
       "_origin": "ast",
       "id": "src_cli_handletaskprerequisites",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handletaskprerequisites()"
     },
     {
@@ -2914,8 +2914,8 @@
       "source_location": "L2868",
       "_origin": "ast",
       "id": "src_cli_loadplannercontext",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "loadplannercontext()"
     },
     {
@@ -2926,7 +2926,7 @@
       "_origin": "ast",
       "id": "src_cli_handleplanshow",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleplanshow()"
     },
     {
@@ -2937,7 +2937,7 @@
       "_origin": "ast",
       "id": "src_cli_readagentplanshow",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentplanshow()"
     },
     {
@@ -2947,8 +2947,8 @@
       "source_location": "L2977",
       "_origin": "ast",
       "id": "src_cli_plannerreadback",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "plannerreadback()"
     },
     {
@@ -2958,8 +2958,8 @@
       "source_location": "L2995",
       "_origin": "ast",
       "id": "src_cli_requestedidempotencykey",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "requestedidempotencykey()"
     },
     {
@@ -2969,8 +2969,8 @@
       "source_location": "L3000",
       "_origin": "ast",
       "id": "src_cli_claimconfirmedwrite",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "claimconfirmedwrite()"
     },
     {
@@ -2980,8 +2980,8 @@
       "source_location": "L3028",
       "_origin": "ast",
       "id": "src_cli_replayedwriteoutput",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "replayedwriteoutput()"
     },
     {
@@ -2991,8 +2991,8 @@
       "source_location": "L3048",
       "_origin": "ast",
       "id": "src_cli_recordunknownwrite",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "recordunknownwrite()"
     },
     {
@@ -3002,8 +3002,8 @@
       "source_location": "L3070",
       "_origin": "ast",
       "id": "src_cli_handleplansetdates",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "handleplansetdates()"
     },
     {
@@ -3013,8 +3013,8 @@
       "source_location": "L3216",
       "_origin": "ast",
       "id": "src_cli_handleplanreset",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "handleplanreset()"
     },
     {
@@ -3024,8 +3024,8 @@
       "source_location": "L3330",
       "_origin": "ast",
       "id": "src_cli_handleplancommand",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "handleplancommand()"
     },
     {
@@ -3036,7 +3036,7 @@
       "_origin": "ast",
       "id": "src_cli_handleprojectcommand",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleprojectcommand()"
     },
     {
@@ -3047,7 +3047,7 @@
       "_origin": "ast",
       "id": "src_cli_handleunitcommand",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handleunitcommand()"
     },
     {
@@ -3124,7 +3124,7 @@
       "_origin": "ast",
       "id": "src_cli_handlefeedbacklist",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlefeedbacklist()"
     },
     {
@@ -3134,8 +3134,8 @@
       "source_location": "L3538",
       "_origin": "ast",
       "id": "src_cli_handlefeedbackwatch",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 8,
+      "community_name": "printJson",
       "norm_label": "handlefeedbackwatch()"
     },
     {
@@ -3146,7 +3146,7 @@
       "_origin": "ast",
       "id": "src_cli_handlepdfdownload",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlepdfdownload()"
     },
     {
@@ -3157,7 +3157,7 @@
       "_origin": "ast",
       "id": "src_cli_handletaskresourcedownload",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handletaskresourcedownload()"
     },
     {
@@ -3168,7 +3168,7 @@
       "_origin": "ast",
       "id": "src_cli_handlesubmissionupload",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlesubmissionupload()"
     },
     {
@@ -3179,7 +3179,7 @@
       "_origin": "ast",
       "id": "src_cli_handlesubmissionstatus",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlesubmissionstatus()"
     },
     {
@@ -3190,7 +3190,7 @@
       "_origin": "ast",
       "id": "src_cli_agentsubmissionstatusinputfromselector",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "agentsubmissionstatusinputfromselector()"
     },
     {
@@ -3233,8 +3233,8 @@
       "source_location": "L4053",
       "_origin": "ast",
       "id": "src_cli_printwatchjson",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 8,
+      "community_name": "printJson",
       "norm_label": "printwatchjson()"
     },
     {
@@ -3245,7 +3245,7 @@
       "_origin": "ast",
       "id": "src_cli_describewatchevent",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "describewatchevent()"
     },
     {
@@ -3256,7 +3256,7 @@
       "_origin": "ast",
       "id": "src_cli_handlewatch",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlewatch()"
     },
     {
@@ -3266,8 +3266,8 @@
       "source_location": "L4221",
       "_origin": "ast",
       "id": "src_cli_handletaskstatus",
-      "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community": 79,
+      "community_name": "handleTaskStatus",
       "norm_label": "handletaskstatus()"
     },
     {
@@ -3278,7 +3278,7 @@
       "_origin": "ast",
       "id": "src_cli_handletaskcommand",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handletaskcommand()"
     },
     {
@@ -3288,8 +3288,8 @@
       "source_location": "L4388",
       "_origin": "ast",
       "id": "src_cli_handlefeedbackcommand",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 8,
+      "community_name": "printJson",
       "norm_label": "handlefeedbackcommand()"
     },
     {
@@ -3300,7 +3300,7 @@
       "_origin": "ast",
       "id": "src_cli_handlepdfcommand",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlepdfcommand()"
     },
     {
@@ -3311,7 +3311,7 @@
       "_origin": "ast",
       "id": "src_cli_handlesubmissioncommand",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "handlesubmissioncommand()"
     },
     {
@@ -3333,7 +3333,7 @@
       "_origin": "ast",
       "id": "src_cli_createnativeagentexecutionengine",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "createnativeagentexecutionengine()"
     },
     {
@@ -3366,7 +3366,7 @@
       "_origin": "ast",
       "id": "src_cli_main",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "main()"
     },
     {
@@ -3377,7 +3377,7 @@
       "_origin": "ast",
       "id": "src_cli_normalizeagentclierror",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "normalizeagentclierror()"
     },
     {
@@ -5576,8 +5576,8 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "src_lib_agent_plan_nonnegativeinteger",
-      "community": 0,
-      "community_name": "remoteContractFailure",
+      "community": 11,
+      "community_name": "AgentProtocolError",
       "norm_label": "nonnegativeinteger()"
     },
     {
@@ -6259,7 +6259,7 @@
       "_origin": "ast",
       "id": "src_lib_agent_protocol_getagentoutputcontext",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "getagentoutputcontext()"
     },
     {
@@ -6501,7 +6501,7 @@
       "_origin": "ast",
       "id": "src_lib_agent_task_reads_readagenttaskprerequisites",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagenttaskprerequisites()"
     },
     {
@@ -6566,8 +6566,8 @@
       "source_location": "L375",
       "_origin": "ast",
       "id": "src_lib_agent_task_reads_readagenttaskresources",
-      "community": 2,
-      "community_name": "utils.ts",
+      "community": 41,
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagenttaskresources()"
     },
     {
@@ -6588,8 +6588,8 @@
       "source_location": "L448",
       "_origin": "ast",
       "id": "src_lib_agent_task_reads_readagenttaskpdf",
-      "community": 2,
-      "community_name": "utils.ts",
+      "community": 41,
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagenttaskpdf()"
     },
     {
@@ -6633,7 +6633,7 @@
       "_origin": "ast",
       "id": "src_lib_agent_task_reads_readagentsubmissionstatus",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "readagentsubmissionstatus()"
     },
     {
@@ -7953,7 +7953,7 @@
       "_origin": "ast",
       "id": "src_lib_api_ontrackapiclient_getprojectforagent",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": ".getprojectforagent()"
     },
     {
@@ -7997,7 +7997,7 @@
       "_origin": "ast",
       "id": "src_lib_api_ontrackapiclient_getunitforagent",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": ".getunitforagent()"
     },
     {
@@ -8503,7 +8503,7 @@
       "_origin": "ast",
       "id": "src_lib_async_pool",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "async-pool.ts"
     },
     {
@@ -8514,7 +8514,7 @@
       "_origin": "ast",
       "id": "src_lib_async_pool_agent_remote_read_concurrency",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "agent_remote_read_concurrency"
     },
     {
@@ -8525,7 +8525,7 @@
       "_origin": "ast",
       "id": "src_lib_async_pool_mapwithconcurrency",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "mapwithconcurrency()"
     },
     {
@@ -8536,7 +8536,7 @@
       "_origin": "ast",
       "id": "src_lib_async_pool_settlewithconcurrency",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "settlewithconcurrency()"
     },
     {
@@ -9240,7 +9240,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "ssocapturedeadline"
     },
     {
@@ -9251,7 +9251,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_constructor",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": ".constructor()"
     },
     {
@@ -9262,7 +9262,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_remainingms",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": ".remainingms()"
     },
     {
@@ -9273,7 +9273,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_run",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": ".run()"
     },
     {
@@ -9284,7 +9284,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_pause",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": ".pause()"
     },
     {
@@ -9295,7 +9295,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_ssocapturedeadline_timeouterror",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": ".timeouterror()"
     },
     {
@@ -9306,7 +9306,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_closebrowseratmost",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "closebrowseratmost()"
     },
     {
@@ -9361,7 +9361,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_istargetontrackurl",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "istargetontrackurl()"
     },
     {
@@ -9372,7 +9372,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_istargetontrackauthurl",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "istargetontrackauthurl()"
     },
     {
@@ -9382,8 +9382,8 @@
       "source_location": "L214",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromurl",
-      "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community": 24,
+      "community_name": "extractCredentialsFromStorageEntries",
       "norm_label": "extractcredentialsfromurl()"
     },
     {
@@ -9404,8 +9404,8 @@
       "source_location": "L277",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromcookiejar",
-      "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community": 27,
+      "community_name": "auto-login.test.ts",
       "norm_label": "extractcredentialsfromcookiejar()"
     },
     {
@@ -9416,7 +9416,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromrequestheaders",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "extractcredentialsfromrequestheaders()"
     },
     {
@@ -9569,8 +9569,8 @@
       "source_location": "L760",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractcredentialsfromlocalstorage",
-      "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community": 24,
+      "community_name": "extractCredentialsFromStorageEntries",
       "norm_label": "extractcredentialsfromlocalstorage()"
     },
     {
@@ -9614,7 +9614,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_systembrowserprofileadapter",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "systembrowserprofileadapter"
     },
     {
@@ -9625,7 +9625,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_systembrowserprofileadapter_launchpersistentcontext",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": ".launchpersistentcontext()"
     },
     {
@@ -10076,7 +10076,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_blocked_link_hosts",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "blocked_link_hosts"
     },
     {
@@ -10097,7 +10097,7 @@
       "source_location": "L1938",
       "_origin": "ast",
       "id": "src_lib_auto_login_summarizepagelocations",
-      "community": 36,
+      "community": 26,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "summarizepagelocations()"
     },
@@ -10109,7 +10109,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_interactionscope",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "interactionscope"
     },
     {
@@ -10208,7 +10208,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_collectscopes",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "collectscopes()"
     },
     {
@@ -10230,7 +10230,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_canuseselector",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "canuseselector()"
     },
     {
@@ -10241,7 +10241,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_fillfirstvisible",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "fillfirstvisible()"
     },
     {
@@ -10252,7 +10252,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clicklikelyactioncontrol",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "clicklikelyactioncontrol()"
     },
     {
@@ -10263,7 +10263,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_issafeactionlink",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "issafeactionlink()"
     },
     {
@@ -10274,7 +10274,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_clickfirstvisible",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "clickfirstvisible()"
     },
     {
@@ -10285,7 +10285,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_hastextsignal",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "hastextsignal()"
     },
     {
@@ -10296,7 +10296,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_detectssocaptcha",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "detectssocaptcha()"
     },
     {
@@ -10307,7 +10307,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_detectunsupportedmfa",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "detectunsupportedmfa()"
     },
     {
@@ -10318,7 +10318,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_detectoktaverifychallenge",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "detectoktaverifychallenge()"
     },
     {
@@ -10328,8 +10328,8 @@
       "source_location": "L2279",
       "_origin": "ast",
       "id": "src_lib_auto_login_uniqueinorder",
-      "community": 27,
-      "community_name": "auto-login.test.ts",
+      "community": 6,
+      "community_name": "auto-login.ts",
       "norm_label": "uniqueinorder()"
     },
     {
@@ -10339,8 +10339,8 @@
       "source_location": "L2293",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractnumbertokens",
-      "community": 27,
-      "community_name": "auto-login.test.ts",
+      "community": 6,
+      "community_name": "auto-login.ts",
       "norm_label": "extractnumbertokens()"
     },
     {
@@ -10350,8 +10350,8 @@
       "source_location": "L2302",
       "_origin": "ast",
       "id": "src_lib_auto_login_hasmfachallengesignal",
-      "community": 27,
-      "community_name": "auto-login.test.ts",
+      "community": 6,
+      "community_name": "auto-login.ts",
       "norm_label": "hasmfachallengesignal()"
     },
     {
@@ -10361,8 +10361,8 @@
       "source_location": "L2307",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractmfanumberchallengefromtext",
-      "community": 27,
-      "community_name": "auto-login.test.ts",
+      "community": 6,
+      "community_name": "auto-login.ts",
       "norm_label": "extractmfanumberchallengefromtext()"
     },
     {
@@ -10372,8 +10372,8 @@
       "source_location": "L2355",
       "_origin": "ast",
       "id": "src_lib_auto_login_extractmfanumberchallenge",
-      "community": 27,
-      "community_name": "auto-login.test.ts",
+      "community": 6,
+      "community_name": "auto-login.ts",
       "norm_label": "extractmfanumberchallenge()"
     },
     {
@@ -10384,7 +10384,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_canuseselectorinscopes",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "canuseselectorinscopes()"
     },
     {
@@ -10395,7 +10395,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_hasanyselectorinscopes",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "hasanyselectorinscopes()"
     },
     {
@@ -10516,7 +10516,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_maybehandlemfacodeentry",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "maybehandlemfacodeentry()"
     },
     {
@@ -10527,7 +10527,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_fillmfacodeinputs",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "fillmfacodeinputs()"
     },
     {
@@ -10538,7 +10538,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_submitafterfieldfill",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "submitafterfieldfill()"
     },
     {
@@ -10549,7 +10549,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_advanceguidedssoonpage",
       "community": 26,
-      "community_name": "advanceGuidedSsoOnPage",
+      "community_name": "captureSsoCredentialsInternal",
       "norm_label": "advanceguidedssoonpage()"
     },
     {
@@ -10570,7 +10570,7 @@
       "source_location": "L3192",
       "_origin": "ast",
       "id": "src_lib_auto_login_capturessocredentialsinternal",
-      "community": 36,
+      "community": 26,
       "community_name": "captureSsoCredentialsInternal",
       "norm_label": "capturessocredentialsinternal()"
     },
@@ -10593,7 +10593,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_probecredentialsinopencontext",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "probecredentialsinopencontext()"
     },
     {
@@ -10648,7 +10648,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_capturecredentialsfrompersistedstatefile",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "capturecredentialsfrompersistedstatefile()"
     },
     {
@@ -10659,7 +10659,7 @@
       "_origin": "ast",
       "id": "src_lib_auto_login_capturecredentialsfromsystembrowserprofile",
       "community": 36,
-      "community_name": "captureSsoCredentialsInternal",
+      "community_name": "captureCredentialsFromPersistedStateFile",
       "norm_label": "capturecredentialsfromsystembrowserprofile()"
     },
     {
@@ -12712,7 +12712,7 @@
       "label": "sessionFromPairedCredential()",
       "file_type": "code",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L230",
+      "source_location": "L235",
       "_origin": "ast",
       "id": "src_lib_login_finalize_sessionfrompairedcredential",
       "community": 61,
@@ -12723,7 +12723,7 @@
       "label": "finalizeCapturedLogin()",
       "file_type": "code",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L265",
+      "source_location": "L270",
       "_origin": "ast",
       "id": "src_lib_login_finalize_finalizecapturedlogin",
       "community": 61,
@@ -13343,7 +13343,7 @@
       "_origin": "ast",
       "id": "src_lib_project_catalogue",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "project-catalogue.ts"
     },
     {
@@ -13353,7 +13353,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "src_lib_project_catalogue_createauthenticatedapi",
-      "community": 8,
+      "community": 41,
       "community_name": "createAuthenticatedApi",
       "norm_label": "createauthenticatedapi()"
     },
@@ -13365,7 +13365,7 @@
       "_origin": "ast",
       "id": "src_lib_project_catalogue_projectunitid",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "projectunitid()"
     },
     {
@@ -13376,7 +13376,7 @@
       "_origin": "ast",
       "id": "src_lib_project_catalogue_getunittaskdefinitions",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "getunittaskdefinitions()"
     },
     {
@@ -13387,7 +13387,7 @@
       "_origin": "ast",
       "id": "src_lib_project_catalogue_projectmatchesscope",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "projectmatchesscope()"
     },
     {
@@ -13398,7 +13398,7 @@
       "_origin": "ast",
       "id": "src_lib_project_catalogue_settlemetadatareads",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "settlemetadatareads()"
     },
     {
@@ -13409,7 +13409,7 @@
       "_origin": "ast",
       "id": "src_lib_project_catalogue_loadprojectswithtaskmetadata",
       "community": 41,
-      "community_name": "loadProjectsWithTaskMetadata",
+      "community_name": "createAuthenticatedApi",
       "norm_label": "loadprojectswithtaskmetadata()"
     },
     {
@@ -14949,7 +14949,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_getflagvalue",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "getflagvalue()"
     },
     {
@@ -14971,7 +14971,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_hasflag",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "hasflag()"
     },
     {
@@ -14982,7 +14982,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_formatdate",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "formatdate()"
     },
     {
@@ -14993,7 +14993,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_printjson",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "printjson()"
     },
     {
@@ -15114,7 +15114,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_printtable",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "printtable()"
     },
     {
@@ -15147,7 +15147,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_parseintegerflagvalue",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "parseintegerflagvalue()"
     },
     {
@@ -15422,7 +15422,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_taskidentityjson",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "taskidentityjson()"
     },
     {
@@ -15444,7 +15444,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_parsetaskbatchselectorargs",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "parsetaskbatchselectorargs()"
     },
     {
@@ -15455,7 +15455,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_parsetaskselectorargs",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "parsetaskselectorargs()"
     },
     {
@@ -15499,7 +15499,7 @@
       "_origin": "ast",
       "id": "src_lib_utils_filtertasksbystatus",
       "community": 8,
-      "community_name": "createAuthenticatedApi",
+      "community_name": "printJson",
       "norm_label": "filtertasksbystatus()"
     },
     {
@@ -15608,8 +15608,8 @@
       "source_location": "L1140",
       "_origin": "ast",
       "id": "src_lib_utils_getfeedbacktimestamp",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 2,
+      "community_name": "utils.ts",
       "norm_label": "getfeedbacktimestamp()"
     },
     {
@@ -15630,8 +15630,8 @@
       "source_location": "L1154",
       "_origin": "ast",
       "id": "src_lib_utils_feedbackidvalue",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 2,
+      "community_name": "utils.ts",
       "norm_label": "feedbackidvalue()"
     },
     {
@@ -15641,8 +15641,8 @@
       "source_location": "L1171",
       "_origin": "ast",
       "id": "src_lib_utils_feedbackidentity",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 2,
+      "community_name": "utils.ts",
       "norm_label": "feedbackidentity()"
     },
     {
@@ -15652,8 +15652,8 @@
       "source_location": "L1183",
       "_origin": "ast",
       "id": "src_lib_utils_sortfeedbackitems",
-      "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community": 2,
+      "community_name": "utils.ts",
       "norm_label": "sortfeedbackitems()"
     },
     {
@@ -15752,7 +15752,7 @@
       "_origin": "ast",
       "id": "src_lib_watch_runtime",
       "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community_name": "pollUntilInterrupted",
       "norm_label": "watch-runtime.ts"
     },
     {
@@ -15763,7 +15763,7 @@
       "_origin": "ast",
       "id": "src_lib_watch_runtime_pollingstreamoptions",
       "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community_name": "pollUntilInterrupted",
       "norm_label": "pollingstreamoptions"
     },
     {
@@ -15774,7 +15774,7 @@
       "_origin": "ast",
       "id": "src_lib_watch_runtime_pollingstreamoptions_poll",
       "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community_name": "pollUntilInterrupted",
       "norm_label": ".poll()"
     },
     {
@@ -15785,7 +15785,7 @@
       "_origin": "ast",
       "id": "src_lib_watch_runtime_polluntilinterrupted",
       "community": 110,
-      "community_name": "handleFeedbackWatch",
+      "community_name": "pollUntilInterrupted",
       "norm_label": "polluntilinterrupted()"
     },
     {
@@ -22403,7 +22403,7 @@
       "label": "`Task abbreviation \"... \" is ambiguous`",
       "file_type": "document",
       "source_file": "docs/troubleshooting.md",
-      "source_location": "L60",
+      "source_location": "L61",
       "_origin": "ast",
       "id": "docs_troubleshooting_task_abbreviation_is_ambiguous",
       "community": 84,
@@ -22414,7 +22414,7 @@
       "label": "Upload key mismatch or incorrect file count",
       "file_type": "document",
       "source_file": "docs/troubleshooting.md",
-      "source_location": "L68",
+      "source_location": "L69",
       "_origin": "ast",
       "id": "docs_troubleshooting_upload_key_mismatch_or_incorrect_file_count",
       "community": 84,
@@ -22425,7 +22425,7 @@
       "label": "No color highlighting",
       "file_type": "document",
       "source_file": "docs/troubleshooting.md",
-      "source_location": "L85",
+      "source_location": "L86",
       "_origin": "ast",
       "id": "docs_troubleshooting_no_color_highlighting",
       "community": 84,
@@ -61102,7 +61102,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L292",
+      "source_location": "L297",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_finalizecapturedlogin",
@@ -66007,7 +66007,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L265",
+      "source_location": "L270",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize",
@@ -66073,7 +66073,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L230",
+      "source_location": "L235",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize",
@@ -66262,7 +66262,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L274",
+      "source_location": "L279",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_finalizecapturedlogin",
@@ -66346,7 +66346,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L242",
+      "source_location": "L247",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_sessionfrompairedcredential",
@@ -66358,7 +66358,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L285",
+      "source_location": "L290",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_finalizecapturedlogin",
@@ -66382,7 +66382,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L240",
+      "source_location": "L245",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_sessionfrompairedcredential",
@@ -66394,7 +66394,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L243",
+      "source_location": "L248",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_sessionfrompairedcredential",
@@ -66406,7 +66406,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L235",
+      "source_location": "L240",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_sessionfrompairedcredential",
@@ -66418,7 +66418,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L272",
+      "source_location": "L277",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_finalizecapturedlogin",
@@ -66431,7 +66431,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/lib/login-finalize.ts",
-      "source_location": "L288",
+      "source_location": "L293",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_lib_login_finalize_finalizecapturedlogin",
@@ -78757,7 +78757,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "test/e2e.test.ts",
-      "source_location": "L507",
+      "source_location": "L513",
       "weight": 1.0,
       "_origin": "ast",
       "source": "test_e2e_test_startpairableontrackmock",
@@ -78769,7 +78769,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "test/e2e.test.ts",
-      "source_location": "L506",
+      "source_location": "L512",
       "weight": 1.0,
       "_origin": "ast",
       "source": "test_e2e_test_startpairableontrackmock",
@@ -83024,7 +83024,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/troubleshooting.md",
-      "source_location": "L85",
+      "source_location": "L86",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_troubleshooting_troubleshooting",
@@ -83035,7 +83035,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/troubleshooting.md",
-      "source_location": "L60",
+      "source_location": "L61",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_troubleshooting_troubleshooting",
@@ -83046,7 +83046,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/troubleshooting.md",
-      "source_location": "L68",
+      "source_location": "L69",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_troubleshooting_troubleshooting",
@@ -83143,5 +83143,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "b6bb520db16a8d76cc95ae587c49e93ec7dc66bd"
+  "built_at_commit": "bc385cd881d45aaeafdf9f98bb98dfcd59c87543"
 }

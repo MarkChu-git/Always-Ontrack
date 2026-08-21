@@ -213,6 +213,11 @@ async function sessionFromExchangeCandidate(
       savedAt,
     );
   } catch {
+    // Every failure degrades the same way, including a 5xx or a lost response
+    // that leaves the outcome unknown: this exchange only ever buys a longer
+    // session, so the caller still has a credential to fall back on and no
+    // failure here is worth failing the login over. The cost of an unknown
+    // outcome is a spare that may have been spent for a session nobody kept.
     return null;
   }
 }
