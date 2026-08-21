@@ -25,7 +25,6 @@ import type {
   AuthMethodResponse,
   RefreshCookieMaterial,
   SessionData,
-  SignInResponse,
 } from './types.js';
 
 export interface OnTrackAuthBrokerOptions {
@@ -49,7 +48,7 @@ export interface OnTrackAuthBrokerDependencies {
   httpRefreshAccessToken(
     baseUrl: string,
     cookie: RefreshCookieMaterial,
-  ): Promise<SignInResponse | null>;
+  ): Promise<CapturedSignIn | null>;
   persistRefreshCookie(cookie: RefreshCookieMaterial, baseUrl: string): void;
   now(): Date;
 }
@@ -85,7 +84,7 @@ function defaultDependencies(): OnTrackAuthBrokerDependencies {
     readStoredRefreshCookie: (baseUrl) =>
       readStoredRefreshCookie({ targetOrigin: new URL(baseUrl).origin }),
     httpRefreshAccessToken: (baseUrl, cookie) =>
-      new OnTrackApiClient(baseUrl).refreshAccessToken(cookie),
+      new OnTrackApiClient(baseUrl).refreshAccessTokenWithCookieCapture(cookie),
     persistRefreshCookie: (cookie, baseUrl) =>
       persistRefreshCookie(cookie, { targetOrigin: new URL(baseUrl).origin }),
     now: () => new Date(),
@@ -179,14 +178,27 @@ export function createOnTrackAuthBroker(
       if (cookie) {
         try {
           const renewed = await dependencies.httpRefreshAccessToken(baseUrl, cookie);
-          if (renewed?.auth_token && renewed.auth_token_expiry) {
+          const token = renewed?.response;
+          if (token?.auth_token && token.auth_token_expiry) {
+            // A renewal that rotates the cookie hands back one with a later
+            // expiry than the one just spent. Persisting it is what lets the
+            // renewal window roll forward with use; dropping it would end the
+            // session exactly one cookie lifetime after login no matter how
+            // often the CLI ran in between.
+            if (renewed?.refreshCookie) {
+              try {
+                dependencies.persistRefreshCookie(renewed.refreshCookie, baseUrl);
+              } catch {
+                // Persistence is best effort; the renewed token is still valid.
+              }
+            }
             return createSessionFromAccessToken(
               baseUrl,
-              renewed.user?.username ?? cookie.username,
+              token.user?.username ?? cookie.username,
               {
-                auth_token: renewed.auth_token,
-                auth_token_expiry: renewed.auth_token_expiry,
-                user: renewed.user ?? { username: cookie.username },
+                auth_token: token.auth_token,
+                auth_token_expiry: token.auth_token_expiry,
+                user: token.user ?? { username: cookie.username },
               },
               dependencies.now().toISOString(),
             );
