@@ -242,7 +242,13 @@ async function sessionFromPairedCredential(
     return renewable;
   }
   if (captured.contract === 'legacy-auth') {
-    return sessionFromExchange(api, captured, savedAt);
+    try {
+      return await sessionFromExchange(api, captured, savedAt);
+    } catch (error) {
+      // A spent landing-URL token answers 419 here. Reporting that verbatim is
+      // the raw expiry message this whole path exists to translate.
+      throw new PairedCredentialRejectedError({ cause: error });
+    }
   }
   const candidate = sessionFromLiveCredential(api.base, captured, savedAt);
   if ((await verifyLiveCredential(api, candidate)) !== 'rejected') {

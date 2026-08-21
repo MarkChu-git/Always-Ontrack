@@ -167,6 +167,21 @@ test('a declared legacy-auth pairing contract exchanges without verifying first'
   assert.deepEqual(calls.map((call) => call.method), ['POST']);
 });
 
+test('a declared legacy-auth pairing contract reports a 419 as re-pairing guidance', async () => {
+  // This is the landing-URL paste path, and a spent token is its normal failure;
+  // the raw 419 would say nothing about what to do next.
+  mockFetch(() => jsonResponse({ error: 'Authentication Timeout' }, 419));
+
+  await assert.rejects(
+    () =>
+      finalizeCapturedLogin(
+        new OnTrackApiClient(BASE_URL),
+        pairedMaterial({ contract: 'legacy-auth' }),
+      ),
+    PairedCredentialRejectedError,
+  );
+});
+
 test('a rejected access-token pairing contract is never offered to the exchange', async () => {
   // The bookmarklet minted it, so a rejection means the token is dead; the
   // exchange would only answer with the 419 this path exists to avoid.
