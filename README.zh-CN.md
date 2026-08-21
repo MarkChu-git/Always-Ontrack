@@ -119,8 +119,9 @@ bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
 `ontrack login` 在所有环境下默认走配对中继登录：你在自己的浏览器里完成真实的
 Monash SSO 登录，凭证端到端加密传回 CLI。`--auto` 可改用受控浏览器捕获；手动
 redirect URL 导入与直接 `--auth-token` 登录作为后备路径保留。浏览器里捕获的会话可
-通过受限 refresh cookie 静默续期；配对得到的会话在还能换掉一次性登录票时同样拿到这个
-cookie，否则只能活到 access token 过期为止——后一种情况 `login` 会明确提示。
+通过受限 refresh cookie 静默续期；配对得到的会话拿不到这个 cookie——能续期的凭证是
+浏览器里的 HttpOnly cookie，任何书签都读不到它，所以配对会话只能活到 access token
+过期为止，`login` 会明确提示这一点。
 全部登录流程、会话缓存位置、登录输出与退出登录详见
 [docs/authentication.md](docs/authentication.md)（英文）。
 

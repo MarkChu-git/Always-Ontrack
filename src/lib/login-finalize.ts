@@ -13,10 +13,11 @@
  * credential. The browser capture paths report their contract; pairing
  * bookmarklets old enough to report nothing are resolved against the server.
  *
- * It also decides how long the session lives. Only the exchange returns a
- * refresh cookie, and only a refresh cookie lets a session renew silently, so a
- * pairing that forwards a still-pending login token is preferred over one that
- * merely mints a token that cannot outlive itself.
+ * It also decides how long the session lives, and a paired credential cannot
+ * win that: only the exchange returns a refresh cookie, only a refresh cookie
+ * lets a session renew silently, and nothing reachable from a page's JavaScript
+ * yields either one (see docs/authentication.md). A paired session therefore
+ * lives exactly as long as the access token it was handed.
  */
 import type { OnTrackApiClient } from './api.js';
 import { classifyAuthFailure, createSessionFromAccessToken } from './auth.js';
@@ -102,12 +103,6 @@ export interface CapturedLoginMaterial {
   contract?: CredentialContract;
   refreshCookie?: RefreshCookieMaterial;
   /**
-   * A pending one-time login token the pairing bookmarklet forwarded next to
-   * the credential. Exchanging it is what earns a refresh cookie, so it is
-   * preferred over a token that is already live but cannot be renewed.
-   */
-  exchangeToken?: string;
-  /**
    * Provenance recorded on the legacy-exchange session variant. The
    * access-token variant always records 'access-token' itself.
    */
@@ -183,46 +178,6 @@ async function verifyLiveCredential(
 }
 
 /**
- * Spend the pending one-time login token the browser side forwarded next to the
- * credential, if it still works. This is the only pairing path that ends with a
- * refresh cookie, and therefore the only one whose session can renew silently
- * instead of dying with its token. Failure is expected and cheap: the web app
- * usually spends the landing-URL token first, and a rejection here leaves the
- * minted credential untouched for the caller to fall back on.
- */
-async function sessionFromExchangeCandidate(
-  api: OnTrackApiClient,
-  captured: CapturedLoginMaterial,
-  savedAt: string,
-): Promise<SessionData | null> {
-  const exchangeToken = captured.exchangeToken;
-  if (!exchangeToken || exchangeToken === captured.authToken) {
-    return null;
-  }
-  try {
-    // Deliberately not spreading `captured`: its expiry and contract describe
-    // the minted token, and carrying them onto a different credential would
-    // record a lifetime this session does not have.
-    return await sessionFromExchange(
-      api,
-      {
-        authToken: exchangeToken,
-        username: captured.username,
-        source: captured.source,
-      },
-      savedAt,
-    );
-  } catch {
-    // Every failure degrades the same way, including a 5xx or a lost response
-    // that leaves the outcome unknown: this exchange only ever buys a longer
-    // session, so the caller still has a credential to fall back on and no
-    // failure here is worth failing the login over. The cost of an unknown
-    // outcome is a spare that may have been spent for a session nobody kept.
-    return null;
-  }
-}
-
-/**
  * Persist a credential that arrived through the pairing relay. The bookmarklet
  * mints it from `POST /auth/access-token`, so it is normally already a live API
  * token and must not be replayed through `POST /auth`. One authenticated read
@@ -230,17 +185,13 @@ async function sessionFromExchangeCandidate(
  * login instead of failing every later command. Only a rejected credential that
  * declared nothing is worth trying as a pending one-time login token — that is
  * what a bookmarklet predating the contract field may have caught from the
- * `sign_in` landing URL.
+ * `sign_in` landing URL, and what the pairing page's paste box always sends.
  */
 async function sessionFromPairedCredential(
   api: OnTrackApiClient,
   captured: CapturedLoginMaterial,
   savedAt: string,
 ): Promise<SessionData> {
-  const renewable = await sessionFromExchangeCandidate(api, captured, savedAt);
-  if (renewable) {
-    return renewable;
-  }
   if (captured.contract === 'legacy-auth') {
     try {
       return await sessionFromExchange(api, captured, savedAt);

@@ -126,8 +126,8 @@ in through the real Monash SSO pages in your own browser and the credential
 arrives end-to-end encrypted. `--auto` opts into controlled-browser capture,
 manual redirect URL import and direct `--auth-token` login remain as fallbacks.
 A session captured in a browser renews silently from a restricted refresh cookie.
-A paired one earns the same cookie when the pairing could still exchange a
-one-time login token; otherwise it lasts only as long as its access token, and
+A paired one cannot: the credential that renews a session is an HttpOnly cookie
+no bookmark can read, so a paired session lasts as long as its access token and
 `login` says so. See
 [docs/authentication.md](docs/authentication.md) for every login flow, the
 session cache locations, login output, and logout.

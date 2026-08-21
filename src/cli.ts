@@ -1701,7 +1701,6 @@ async function handleLogin(args: string[]): Promise<void> {
   let credentialSource: CredentialSource = 'manual-sign-in';
   let credentialExpiresAt: string | undefined;
   let credentialContract: LoginCredentials['contract'];
-  let credentialExchangeToken: string | undefined;
   let capturedRefreshCookie: RefreshCookieMaterial | undefined;
 
   // Manual redirect URL can also directly provide auth token + username.
@@ -1851,7 +1850,6 @@ async function handleLogin(args: string[]): Promise<void> {
           username = material.username;
           credentialExpiresAt = material.expiresAt;
           credentialContract = material.contract;
-          credentialExchangeToken = material.exchangeToken;
           credentialSource = material.source;
           pairingHandled = true;
           renderTerminalEvent('Pairing sign-in received credentials.', 'success');
@@ -1916,22 +1914,19 @@ async function handleLogin(args: string[]): Promise<void> {
     username,
     expiresAt: credentialExpiresAt,
     contract: credentialContract,
-    exchangeToken: credentialExchangeToken,
     refreshCookie: capturedRefreshCookie,
     source: credentialSource,
   });
 
   if (!readStoredRefreshCookie({ targetOrigin: new URL(api.base).origin })) {
-    // Pairing only earns a refresh cookie when it can exchange a still-pending
-    // login token: the cookie itself is HttpOnly in the user's own browser, so
-    // it never reaches the bookmarklet or the relay. Which of the two ways that
-    // failed decides what the user should do differently, so say which.
+    // A paired session is short by construction, so this is information rather
+    // than a warning, and there is nothing the user can do differently while
+    // pairing: see docs/authentication.md for why no browser-side capture can
+    // reach a renewable credential.
     console.log(
       session.source !== 'pair-relay'
         ? '[warn] Login succeeded, but no refresh cookie was captured; silent renewal is unavailable and the session will expire shortly. Retry login, and report this if it repeats.'
-        : credentialExchangeToken
-          ? '[info] OnTrack refused the login token this pairing forwarded, most likely because the web page had already spent it, so the session cannot renew itself silently and lasts only as long as its access token. Pair again when it expires, or use --auto for a renewable session.'
-          : '[info] This pairing forwarded no login token to exchange, so the session cannot renew itself silently and lasts only as long as its access token. Install a fresh bookmark from the pairing page if yours predates this, and click it on the sign_in landing page before OnTrack navigates away. Otherwise pair again when it expires, or use --auto.',
+        : '[info] A paired session cannot renew itself silently and lasts only as long as its access token, because the credential that renews one is an HttpOnly cookie in your own browser that no bookmark can read. Pair again when it expires, or use --auto for a session that renews itself.',
     );
   }
   renderLoginSuccessPanel(session);

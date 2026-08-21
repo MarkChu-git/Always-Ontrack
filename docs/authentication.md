@@ -46,8 +46,7 @@ it to your bookmarks bar once). The bookmark is permanent: each time it asks
 you to paste that session's pairing link into its prompt, then it captures the
 credential — on current OnTrack (doubtfire ≥11) by minting a fresh token from
 the `POST /api/auth/access-token` endpoint with your HttpOnly refresh cookie,
-on older versions by reading the legacy `localStorage` keys, and alongside it any
-one-time login token still sitting in the landing URL. The captured
+on older versions by reading the legacy `localStorage` keys. The captured
 credential is encrypted in your
 browser to a one-time key only the CLI holds, and travels through a blind
 relay mailbox that only ever sees ciphertext. The CLI polls the mailbox and
@@ -63,26 +62,30 @@ bookmarklet may have caught a pending one-time login token from the landing URL.
 Either way, if OnTrack refuses it, `login` asks you to pair again instead of
 leaving a dead session behind.
 
-### How long a paired session lasts
+### How long a paired session lasts, and why it cannot last longer
 
-An access token on its own is short-lived (OnTrack has been observed issuing ten
-minutes), and only the `POST /api/auth` exchange returns the refresh cookie that
-silent renewal needs. So the bookmarklet also forwards the pending one-time login
-token from the `sign_in` landing URL when it is still there, and the CLI spends
-that first: the exchange earns a week-long refresh cookie and the session then
-renews itself without any browser. The minted token is the fallback for when the
-web app already spent the landing-URL token, which is common — that session works
-immediately but expires with its token, and `login` says so.
+A paired session lives exactly as long as the access token it was handed —
+OnTrack has been observed issuing ten minutes — and `login` says so. This is a
+property of the OnTrack API, not a gap in the pairing implementation, and it is
+worth spelling out because the obvious fixes all fail on inspection of
+[doubtfire-api](https://github.com/doubtfire-lms/doubtfire-api) and
+[doubtfire-web](https://github.com/doubtfire-lms/doubtfire-web):
 
-Forwarding that spare is a property of the bookmarklet, and the bookmarklet's
-code is baked into the bookmark when you drag it. A bookmark installed before
-this behaviour existed keeps working, but never forwards the spare — drag a fresh
-one from the pairing page to get renewable paired sessions.
+- Only `POST /api/auth` returns a refresh cookie, and it only accepts a pending
+  one-time login token. Those tokens come from `generate_temporary_authentication_token!`,
+  which expires them after **30 seconds**, and the web app spends the one in the
+  `sign_in` landing URL as soon as `/api/auth/method` answers — the server then
+  destroys it. So there is no window, human or automated, in which a page's
+  JavaScript can hand a spendable login token to the CLI.
+- The refresh cookie itself is `HttpOnly` with `path=/api/auth`, so no
+  bookmarklet, pairing page, or relay can ever read it.
+- Renewal (`POST /api/auth/access-token`) requires that cookie, and no endpoint
+  renews an access token from the access token alone. A paired session therefore
+  cannot keep itself alive either.
 
-Your refresh cookie itself can never travel through pairing: it is HttpOnly in
-your own browser, so neither the bookmarklet nor the relay can read it. When a
-pairing ends up without one, sign in again once it expires, or use `--auto` on a
-machine with a display for a session that renews for a week.
+So pair again when the session expires, or use `--auto` on a machine with a
+display: that flow does the real SSO sign-in in a browser the CLI controls, which
+is what puts a renewable refresh cookie (about one week) on disk.
 
 - `--pair` / `--no-pair`: force pairing on/off (off means the --auto browser-capture/manual flows).
 - `--relay-url URL` or `ONTRACK_RELAY_URL`: point at another relay (self-hosters);
@@ -132,6 +135,13 @@ The expected redirect format looks like this:
 ```text
 https://ontrack.infotech.monash.edu/sign_in?authToken=...&username=...
 ```
+
+That token expires 30 seconds after OnTrack issues it, and the web app spends it
+on load, so copying one out of a browser that opened the page is a race you lose:
+expect `login` to report a rejected credential and ask you to sign in again. This
+path is for a redirect URL you can feed straight to the CLI without letting a
+browser load it — the same reason the pairing page's paste box is a last resort
+rather than a substitute for the bookmarklet.
 
 Browser capture automatically falls back to this manual redirect mode when the
 browser flow hits captcha, selector mismatch, or timeout. Treat this as a backup

@@ -548,8 +548,9 @@ test(
       assert.equal(session.source, 'pair-relay');
       assert.equal(hits.authExchange, 0, '/auth must not be called for a live token');
       assert.equal(hits.projects, 1, 'the credential must be verified exactly once');
-      // Nothing was forwarded to exchange, so the advice is about the bookmark.
-      assert.match(login.stdout, /forwarded no login token to exchange/);
+      // The user must be told the session is short, without being told to try
+      // something that cannot work: a minted token can never earn the cookie.
+      assert.match(login.stdout, /A paired session cannot renew itself silently/);
     } finally {
       server.close();
       relay.server.close();
@@ -703,12 +704,11 @@ test(
 );
 
 test(
-  'e2e: a forwarded landing-URL token is exchanged, so the paired session can renew silently',
+  'e2e: a pasted landing URL is exchanged, so that paired session can renew silently',
   async () => {
     const home = await makeHome();
-    // The minted token would work for reads, but it cannot outlive itself. Only
-    // `POST /auth` returns the refresh cookie, so the still-pending landing-URL
-    // token the bookmarklet forwarded is worth spending first.
+    // The pairing page's paste box reports the legacy contract, which is the one
+    // paired path that goes through `POST /auth` and so can earn the cookie.
     const { server, baseUrl, hits } = await startPairableOnTrackMock({
       exchangeableToken: LANDING_TOKEN,
     });
@@ -721,11 +721,9 @@ test(
         relayUrl: relay.relayUrl,
         extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
         payload: {
-          authToken: PAIRED_TOKEN,
+          authToken: LANDING_TOKEN,
           username: USERNAME,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-          contract: 'access-token',
-          exchangeToken: LANDING_TOKEN,
+          contract: 'legacy-auth',
         },
       });
       assert.equal(login.exitCode, 0, login.stderr);
@@ -735,59 +733,13 @@ test(
       };
       assert.equal(session.authToken, ACCESS_TOKEN);
       assert.equal(hits.authExchange, 1);
-      assert.equal(hits.projects, 0, 'a successful exchange needs no verification read');
+      assert.equal(hits.projects, 0, 'a declared login token needs no verification read');
       assert.match(
         await readFile(home.browserStatePath, 'utf8'),
         /refresh_token/,
         'the exchange must leave the refresh cookie behind for silent renewal',
       );
       assert.doesNotMatch(login.stdout, /cannot renew itself silently/);
-    } finally {
-      server.close();
-      relay.server.close();
-      await cleanupHome(home);
-    }
-  },
-  30_000,
-);
-
-test(
-  'e2e: a landing-URL token the web app already spent falls back to the minted credential',
-  async () => {
-    const home = await makeHome();
-    // The mock also asserts that only the spare reaches /auth, so a fallback
-    // that replayed the live minted token there would fail the test.
-    const { server, baseUrl, hits } = await startPairableOnTrackMock({
-      exchange: 'expired',
-      exchangeableToken: LANDING_TOKEN,
-    });
-    const relay = await startMockRelay();
-
-    try {
-      const login = await runPairingLogin({
-        home,
-        baseUrl,
-        relayUrl: relay.relayUrl,
-        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
-        payload: {
-          authToken: PAIRED_TOKEN,
-          username: USERNAME,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-          contract: 'access-token',
-          exchangeToken: LANDING_TOKEN,
-        },
-      });
-      assert.equal(login.exitCode, 0, login.stderr);
-
-      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
-        authToken: string;
-      };
-      assert.equal(session.authToken, PAIRED_TOKEN);
-      assert.equal(hits.authExchange, 1, 'the spare is tried exactly once');
-      assert.equal(hits.projects, 1, 'the minted fallback is still verified');
-      // A spare was forwarded and refused, which is a different user problem
-      // from having none to forward, so the two must not share one message.
-      assert.match(login.stdout, /refused the login token this pairing forwarded/);
     } finally {
       server.close();
       relay.server.close();

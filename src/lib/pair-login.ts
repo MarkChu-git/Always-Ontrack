@@ -61,13 +61,6 @@ export interface PairCredentialPayload {
    * guessing (see finalizeCapturedLogin).
    */
   contract?: CredentialContract;
-  /**
-   * A pending one-time `sign_in` login token for the same user, when the
-   * landing URL still carried one. Exchanging it is the only way a paired
-   * session earns the refresh cookie that silent renewal needs, so the CLI
-   * prefers it over the minted token in `authToken` (see finalizeCapturedLogin).
-   */
-  exchangeToken?: string;
 }
 
 /** Relay envelope stored in the mailbox (all binary fields base64url). */
@@ -266,9 +259,6 @@ function validatePayload(payload: unknown): PairCredentialPayload | null {
     ...(record.contract === 'access-token' || record.contract === 'legacy-auth'
       ? { contract: record.contract }
       : {}),
-    ...(typeof record.exchangeToken === 'string' && record.exchangeToken.trim()
-      ? { exchangeToken: record.exchangeToken }
-      : {}),
   };
 }
 
@@ -435,7 +425,6 @@ export function capturedMaterialFromPairPayload(
     username: payload.username,
     ...(payload.expiresAt ? { expiresAt: payload.expiresAt } : {}),
     ...(payload.contract ? { contract: payload.contract } : {}),
-    ...(payload.exchangeToken ? { exchangeToken: payload.exchangeToken } : {}),
     source: 'pair-relay',
   };
 }
