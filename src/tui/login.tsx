@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
 import type { SsoFallbackReason } from '../lib/auto-login';
+import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import { isLoginFailure, type LoginRunner, type PairingSessionInfo } from './auth';
 import type { Theme } from './theme';
 
@@ -40,11 +41,13 @@ export function LoginWizard({
   run,
   onSignedIn,
   onCancel,
+  onDiagnostic,
 }: {
   theme: Theme;
   run: LoginRunner;
   onSignedIn: (username: string) => void;
   onCancel: () => void;
+  onDiagnostic: AuthDiagnosticSink;
 }) {
   const [stage, setStageState] = useState<Stage>({ kind: 'running', pairing: null });
   const [spin, setSpin] = useState(0);
@@ -64,6 +67,8 @@ export function LoginWizard({
   onSignedInRef.current = onSignedIn;
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  const onDiagnosticRef = useRef(onDiagnostic);
+  onDiagnosticRef.current = onDiagnostic;
 
   useEffect(
     () => () => {
@@ -84,6 +89,10 @@ export function LoginWizard({
       onPairingSession: (info) => {
         if (!liveRef.current || cancelledRef.current) return;
         setStage({ kind: 'running', pairing: info });
+      },
+      onDiagnostic: (diagnostic) => {
+        if (!liveRef.current || cancelledRef.current) return;
+        onDiagnosticRef.current(diagnostic);
       },
     })
       .then((name) => {

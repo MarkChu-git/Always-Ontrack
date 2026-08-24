@@ -26,6 +26,11 @@ import type {
   RefreshCookieMaterial,
   SessionData,
 } from './types.js';
+import {
+  persistRefreshCookieBestEffort,
+  reportAuthDiagnosticToStderr,
+  type AuthDiagnosticSink,
+} from './auth-diagnostic.js';
 
 export interface OnTrackAuthBrokerOptions {
   readonly baseUrl: string;
@@ -50,6 +55,7 @@ export interface OnTrackAuthBrokerDependencies {
     cookie: RefreshCookieMaterial,
   ): Promise<CapturedSignIn | null>;
   persistRefreshCookie(cookie: RefreshCookieMaterial, baseUrl: string): void;
+  reportDiagnostic: AuthDiagnosticSink;
   now(): Date;
 }
 
@@ -87,8 +93,21 @@ function defaultDependencies(): OnTrackAuthBrokerDependencies {
       new OnTrackApiClient(baseUrl).refreshAccessTokenWithCookieCapture(cookie),
     persistRefreshCookie: (cookie, baseUrl) =>
       persistRefreshCookie(cookie, { targetOrigin: new URL(baseUrl).origin }),
+    reportDiagnostic: reportAuthDiagnosticToStderr,
     now: () => new Date(),
   };
+}
+
+function persistCapturedRefreshCookie(
+  dependencies: OnTrackAuthBrokerDependencies,
+  cookie: RefreshCookieMaterial | null,
+  baseUrl: string,
+): void {
+  if (!cookie) return;
+  persistRefreshCookieBestEffort(
+    () => dependencies.persistRefreshCookie(cookie, baseUrl),
+    dependencies.reportDiagnostic,
+  );
 }
 
 async function sessionFromCapture(
@@ -103,13 +122,7 @@ async function sessionFromCapture(
     }
     // This path never re-exchanges over HTTP, so persist the refresh cookie
     // observed in the browser context explicitly.
-    if (captured.refreshCookie) {
-      try {
-        dependencies.persistRefreshCookie(captured.refreshCookie, baseUrl);
-      } catch {
-        // Refresh-cookie persistence is best effort; the session itself is valid.
-      }
-    }
+    persistCapturedRefreshCookie(dependencies, captured.refreshCookie ?? null, baseUrl);
     return createSessionFromAccessToken(
       baseUrl,
       captured.username,
@@ -123,13 +136,7 @@ async function sessionFromCapture(
   }
 
   const exchange = await dependencies.exchangeLegacyCredential(baseUrl, captured);
-  if (exchange.refreshCookie) {
-    try {
-      dependencies.persistRefreshCookie(exchange.refreshCookie, baseUrl);
-    } catch {
-      // Refresh-cookie persistence is best effort; the session itself is valid.
-    }
-  }
+  persistCapturedRefreshCookie(dependencies, exchange.refreshCookie, baseUrl);
   const response = exchange.response;
   return {
     baseUrl,
@@ -145,6 +152,110 @@ async function sessionFromCapture(
   };
 }
 
+async function sessionFromHttpRefresh(
+  baseUrl: string,
+  cookie: RefreshCookieMaterial,
+  dependencies: OnTrackAuthBrokerDependencies,
+): Promise<SessionData | null> {
+  try {
+    const renewed = await dependencies.httpRefreshAccessToken(baseUrl, cookie);
+    const token = renewed?.response;
+    if (!token?.auth_token || !token.auth_token_expiry) return null;
+    persistCapturedRefreshCookie(dependencies, renewed?.refreshCookie ?? null, baseUrl);
+    return createSessionFromAccessToken(
+      baseUrl,
+      token.user?.username ?? cookie.username,
+      {
+        auth_token: token.auth_token,
+        auth_token_expiry: token.auth_token_expiry,
+        user: token.user ?? { username: cookie.username },
+      },
+      dependencies.now().toISOString(),
+    );
+  } catch {
+    return null;
+  }
+}
+
+interface AuthBrokerContext {
+  readonly dependencies: OnTrackAuthBrokerDependencies;
+  readonly options: OnTrackAuthBrokerOptions;
+  readonly targetBaseUrl: string;
+}
+
+async function loadScopedSession(context: AuthBrokerContext): Promise<SessionData | null> {
+  const session = await context.dependencies.loadSession();
+  if (!session) return null;
+  try {
+    return normalizeBaseUrl(session.baseUrl) === context.targetBaseUrl ? session : null;
+  } catch {
+    return null;
+  }
+}
+
+async function captureSession(
+  context: AuthBrokerContext,
+  interactive: boolean,
+): Promise<SessionData | null> {
+  const { dependencies, options, targetBaseUrl } = context;
+  let method: AuthMethodResponse;
+  try {
+    method = await dependencies.getAuthMethod(targetBaseUrl);
+  } catch {
+    return null;
+  }
+  if (!method.redirect_to) return null;
+  const captureOptions: AutoLoginOptions = {
+    ssoUrl: method.redirect_to,
+    apiBaseUrl: targetBaseUrl,
+    timeoutMs: interactive
+      ? (options.interactiveTimeoutMs ?? 5 * 60 * 1000)
+      : (options.silentTimeoutMs ?? 12_000),
+    headless: !interactive,
+  };
+  try {
+    const captured = interactive
+      ? await dependencies.captureInteractiveSession(captureOptions)
+      : await dependencies.captureStoredSession(captureOptions);
+    return captured
+      ? await sessionFromCapture(targetBaseUrl, captured, dependencies)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshSession(
+  context: AuthBrokerContext,
+  interactive: boolean,
+): Promise<SessionData | null> {
+  const { dependencies, targetBaseUrl } = context;
+  if (!interactive) {
+    const cookie = dependencies.readStoredRefreshCookie(targetBaseUrl);
+    if (cookie) {
+      const renewed = await sessionFromHttpRefresh(targetBaseUrl, cookie, dependencies);
+      if (renewed) return renewed;
+    }
+  }
+  return captureSession(context, interactive);
+}
+
+async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView> {
+  const session = await loadScopedSession(context);
+  if (!session) return { status: 'signed_out', baseUrl: context.targetBaseUrl };
+  const usability = sessionUsability(session, context.dependencies.now());
+  return {
+    status: usability.state,
+    source: session.source,
+    ...(usability.state === 'usable' || usability.state === 'expired'
+      ? usability.expiresAt
+        ? { expiresAt: usability.expiresAt }
+        : {}
+      : {}),
+    baseUrl: context.targetBaseUrl,
+  };
+}
+
 /**
  * Create one credential coordinator shared by CLI and Auth MCP callers. Secret
  * material stays in injected adapters and SessionData, never in public results.
@@ -153,127 +264,22 @@ export function createOnTrackAuthBroker(
   options: OnTrackAuthBrokerOptions,
   overrides: Partial<OnTrackAuthBrokerDependencies> = {},
 ): OnTrackAuthBroker {
-  const dependencies = { ...defaultDependencies(), ...overrides };
-  const targetBaseUrl = normalizeBaseUrl(options.baseUrl);
-  const loadScopedSession = async (): Promise<SessionData | null> => {
-    const session = await dependencies.loadSession();
-    if (!session) {
-      return null;
-    }
-    try {
-      return normalizeBaseUrl(session.baseUrl) === targetBaseUrl ? session : null;
-    } catch {
-      return null;
-    }
+  const context: AuthBrokerContext = {
+    dependencies: { ...defaultDependencies(), ...overrides },
+    options: { ...options },
+    targetBaseUrl: normalizeBaseUrl(options.baseUrl),
   };
-
-  const refresh = async (interactive: boolean): Promise<SessionData | null> => {
-    const current = await loadScopedSession();
-    const baseUrl = targetBaseUrl;
-
-    // A stored refresh cookie mints a fresh access token over plain HTTP,
-    // without launching a browser at all.
-    if (!interactive) {
-      const cookie = dependencies.readStoredRefreshCookie(baseUrl);
-      if (cookie) {
-        try {
-          const renewed = await dependencies.httpRefreshAccessToken(baseUrl, cookie);
-          const token = renewed?.response;
-          if (token?.auth_token && token.auth_token_expiry) {
-            // A renewal that rotates the cookie hands back one with a later
-            // expiry than the one just spent. Persisting it is what lets the
-            // renewal window roll forward with use; dropping it would end the
-            // session exactly one cookie lifetime after login no matter how
-            // often the CLI ran in between.
-            if (renewed?.refreshCookie) {
-              try {
-                dependencies.persistRefreshCookie(renewed.refreshCookie, baseUrl);
-              } catch {
-                // Persistence is best effort; the renewed token is still valid.
-              }
-            }
-            return createSessionFromAccessToken(
-              baseUrl,
-              token.user?.username ?? cookie.username,
-              {
-                auth_token: token.auth_token,
-                auth_token_expiry: token.auth_token_expiry,
-                user: token.user ?? { username: cookie.username },
-              },
-              dependencies.now().toISOString(),
-            );
-          }
-        } catch {
-          // Fall through to the browser-based silent capture below.
-        }
-      }
-    }
-
-    let method: AuthMethodResponse;
-    try {
-      method = await dependencies.getAuthMethod(baseUrl);
-    } catch {
-      return null;
-    }
-    if (!method.redirect_to) {
-      return null;
-    }
-
-    const captureOptions: AutoLoginOptions = {
-      ssoUrl: method.redirect_to,
-      apiBaseUrl: baseUrl,
-      timeoutMs: interactive
-        ? (options.interactiveTimeoutMs ?? 5 * 60 * 1000)
-        : (options.silentTimeoutMs ?? 12_000),
-      headless: !interactive,
-    };
-
-    let captured: LoginCredentials | null;
-    try {
-      captured = interactive
-        ? await dependencies.captureInteractiveSession(captureOptions)
-        : await dependencies.captureStoredSession(captureOptions);
-    } catch {
-      return null;
-    }
-    if (!captured) {
-      return null;
-    }
-    try {
-      return await sessionFromCapture(baseUrl, captured, dependencies);
-    } catch {
-      return null;
-    }
-  };
-
   const runtime: AuthRuntime = createAuthRuntime({
-    loadSession: loadScopedSession,
-    saveSession: dependencies.saveSession,
-    withRefreshLock: dependencies.withRefreshLock,
-    silentRefresh: () => refresh(false),
-    beginInteractiveLogin: () => refresh(true),
-    now: dependencies.now,
+    loadSession: () => loadScopedSession(context),
+    saveSession: context.dependencies.saveSession,
+    withRefreshLock: context.dependencies.withRefreshLock,
+    silentRefresh: () => refreshSession(context, false),
+    beginInteractiveLogin: () => refreshSession(context, true),
+    now: context.dependencies.now,
   });
-
   return {
     ensure: (ensureOptions) => runtime.ensure(ensureOptions),
-    currentSession: loadScopedSession,
-    status: async (): Promise<AuthStatusView> => {
-      const session = await loadScopedSession();
-      if (!session) {
-        return { status: 'signed_out', baseUrl: targetBaseUrl };
-      }
-      const usability = sessionUsability(session, dependencies.now());
-      return {
-        status: usability.state,
-        source: session.source,
-        ...(usability.state === 'usable' || usability.state === 'expired'
-          ? usability.expiresAt
-            ? { expiresAt: usability.expiresAt }
-            : {}
-          : {}),
-        baseUrl: targetBaseUrl,
-      };
-    },
+    currentSession: () => loadScopedSession(context),
+    status: () => brokerStatus(context),
   };
 }

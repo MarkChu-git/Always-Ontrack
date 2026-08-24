@@ -12,6 +12,10 @@ import { OnTrackApiClient } from './api.js';
 import { AgentProtocolError } from './agent-protocol.js';
 import { OnTrackHttpError } from './auth.js';
 import { createOnTrackAuthBroker } from './auth-broker.js';
+import {
+  reportAuthDiagnosticToStderr,
+  type AuthDiagnosticSink,
+} from './auth-diagnostic.js';
 import type {
   ProjectSummary,
   SessionData,
@@ -25,8 +29,14 @@ import { getTaskDefinitionId } from './utils.js';
  * are never replayed because the protocol layer restricts this callback to
  * GET/HEAD requests.
  */
-export function createAuthenticatedApi(session: SessionData): OnTrackApiClient {
-  const broker = createOnTrackAuthBroker({ baseUrl: session.baseUrl });
+export function createAuthenticatedApi(
+  session: SessionData,
+  reportDiagnostic: AuthDiagnosticSink = reportAuthDiagnosticToStderr,
+): OnTrackApiClient {
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: session.baseUrl },
+    { reportDiagnostic },
+  );
   return new OnTrackApiClient(session.baseUrl, {
     refreshSession: async () => {
       const result = await broker.ensure({

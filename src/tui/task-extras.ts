@@ -18,6 +18,7 @@ import {
 } from '../lib/agent-task-reads';
 import { OnTrackHttpError } from '../lib/auth';
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
+import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
 import type { SubmissionPdfState } from '../lib/submission-lifecycle';
 import type { SessionData } from '../lib/types';
@@ -67,9 +68,13 @@ function failureMessage(error: unknown): string {
 /** Shared broker prelude: refresh-check the session, then run the read. */
 async function withSession<T>(
   run: (session: SessionData) => Promise<T>,
+  reportDiagnostic: AuthDiagnosticSink,
 ): Promise<ExtrasResult<T>> {
   try {
-    const broker = createOnTrackAuthBroker({ baseUrl: normalizeBaseUrl() });
+    const broker = createOnTrackAuthBroker(
+      { baseUrl: normalizeBaseUrl() },
+      { reportDiagnostic },
+    );
     const auth = await broker.ensure({
       minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
       interaction: 'never',
@@ -95,43 +100,84 @@ const selectorOf = (task: TuiTask) => ({
   task_definition_id: task.taskDefinitionId,
 });
 
-export const PRODUCTION_TASK_EXTRAS: TaskExtrasActions = {
-  prerequisites: (task) =>
-    withSession(async (session) => {
-      const output = await readAgentTaskPrerequisites(selectorOf(task), session);
-      return output.prerequisites.map((row) => ({
-        taskDefinitionId: row.prerequisite_task_definition_id,
-        requiredStatus: row.required_status,
-      }));
-    }),
+function readPrerequisites(
+  task: TuiTask,
+  reportDiagnostic: AuthDiagnosticSink,
+): Promise<ExtrasResult<PrerequisiteInfo[]>> {
+  return withSession(async (session) => {
+    const output = await readAgentTaskPrerequisites(
+      selectorOf(task),
+      session,
+      reportDiagnostic,
+    );
+    return output.prerequisites.map((row) => ({
+      taskDefinitionId: row.prerequisite_task_definition_id,
+      requiredStatus: row.required_status,
+    }));
+  }, reportDiagnostic);
+}
 
-  submissionStatus: (task) =>
-    withSession(async (session) => {
-      const output = await readAgentSubmissionStatus(selectorOf(task), session);
-      return {
-        pdfState: output.pdf_state,
-        submissionObserved: output.submission_observed,
-        submissionDate: output.submission_date,
-        taskStatus: output.task_status,
-      };
-    }),
+function readSubmissionStatus(
+  task: TuiTask,
+  reportDiagnostic: AuthDiagnosticSink,
+): Promise<ExtrasResult<SubmissionStatusInfo>> {
+  return withSession(async (session) => {
+    const output = await readAgentSubmissionStatus(
+      selectorOf(task),
+      session,
+      reportDiagnostic,
+    );
+    return {
+      pdfState: output.pdf_state,
+      submissionObserved: output.submission_observed,
+      submissionDate: output.submission_date,
+      taskStatus: output.task_status,
+    };
+  }, reportDiagnostic);
+}
 
-  downloadTaskPdf: (task) =>
-    withSession(async (session) => {
-      const output = await readAgentTaskPdf(selectorOf(task), session);
-      return { path: output.artifact.path, bytes: output.artifact.bytes };
-    }),
+function readArtifact<T>(
+  reportDiagnostic: AuthDiagnosticSink,
+  read: (session: SessionData) => Promise<T>,
+): Promise<ExtrasResult<T>> {
+  return withSession(read, reportDiagnostic);
+}
 
-  downloadResources: (task) =>
-    withSession(async (session) => {
-      const output = await readAgentTaskResources(selectorOf(task), session);
-      const first = output.downloads[0];
-      return first ? { path: first.artifact.path, bytes: first.artifact.bytes } : null;
-    }),
-
-  downloadSubmissionPdf: (task) =>
-    withSession(async (session) => {
-      const output = await readAgentSubmissionPdf(selectorOf(task), session);
-      return { path: output.artifact.path, bytes: output.artifact.bytes };
-    }),
-};
+export function createTaskExtrasActions(
+  reportDiagnostic: AuthDiagnosticSink,
+): TaskExtrasActions {
+  return {
+    prerequisites: (task) => readPrerequisites(task, reportDiagnostic),
+    submissionStatus: (task) => readSubmissionStatus(task, reportDiagnostic),
+    downloadTaskPdf: (task) =>
+      readArtifact(reportDiagnostic, async (session) => {
+        const output = await readAgentTaskPdf(
+          selectorOf(task),
+          session,
+          reportDiagnostic,
+        );
+        return { path: output.artifact.path, bytes: output.artifact.bytes };
+      }),
+    downloadResources: (task) =>
+      readArtifact(reportDiagnostic, async (session) => {
+        const output = await readAgentTaskResources(
+          selectorOf(task),
+          session,
+          reportDiagnostic,
+        );
+        const first = output.downloads[0];
+        return first
+          ? { path: first.artifact.path, bytes: first.artifact.bytes }
+          : null;
+      }),
+    downloadSubmissionPdf: (task) =>
+      readArtifact(reportDiagnostic, async (session) => {
+        const output = await readAgentSubmissionPdf(
+          selectorOf(task),
+          session,
+          reportDiagnostic,
+        );
+        return { path: output.artifact.path, bytes: output.artifact.bytes };
+      }),
+  };
+}

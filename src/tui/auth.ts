@@ -18,6 +18,7 @@
  * in this module runs at import time.
  */
 import { OnTrackApiClient } from '../lib/api';
+import type { AuthDiagnostic, AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import {
   SsoFallbackError,
   captureSsoCredentials,
@@ -31,7 +32,7 @@ import {
   PairLoginTimeoutError,
   resolveRelayUrl,
 } from '../lib/pair-login';
-import { signOutEverywhere } from '../lib/sign-out';
+import { signOutEverywhere, type SignOutResult } from '../lib/sign-out';
 import {
   isHeadlessServerEnvironment,
   normalizeBaseUrl,
@@ -50,6 +51,7 @@ export interface PairingSessionInfo {
 /** UI-facing callbacks the login flow needs while it runs. */
 export interface LoginHooks {
   onPairingSession?(info: PairingSessionInfo): void;
+  onDiagnostic?(diagnostic: AuthDiagnostic): void;
 }
 
 /** Classified, redacted failure shape the wizard renders. */
@@ -103,7 +105,11 @@ export const runPairingLogin: LoginRunner = async (hooks) => {
           });
         },
       });
-      const session = await finalizeCapturedLogin(api, material);
+      const session = await finalizeCapturedLogin(
+        api,
+        material,
+        (diagnostic) => hooks.onDiagnostic?.(diagnostic),
+      );
       return session.username;
     }
 
@@ -113,14 +119,18 @@ export const runPairingLogin: LoginRunner = async (hooks) => {
       timeoutMs: TUI_LOGIN_TIMEOUT_MS,
       headless: isHeadlessServerEnvironment(),
     });
-    const session = await finalizeCapturedLogin(api, {
-      authToken: captured.authToken,
-      username: captured.username,
-      expiresAt: captured.expiresAt,
-      contract: captured.contract,
-      refreshCookie: captured.refreshCookie,
-      source: captured.contract === 'access-token' ? 'access-token' : 'browser-sso',
-    });
+    const session = await finalizeCapturedLogin(
+      api,
+      {
+        authToken: captured.authToken,
+        username: captured.username,
+        expiresAt: captured.expiresAt,
+        contract: captured.contract,
+        refreshCookie: captured.refreshCookie,
+        source: captured.contract === 'access-token' ? 'access-token' : 'browser-sso',
+      },
+      (diagnostic) => hooks.onDiagnostic?.(diagnostic),
+    );
     return session.username;
   } catch (error) {
     const failure: LoginFailure = {
@@ -138,14 +148,16 @@ export const runPairingLogin: LoginRunner = async (hooks) => {
 };
 
 /** Sign out through the same shared orchestration as `ontrack logout`. */
-export async function logoutOnTrack(): Promise<void> {
-  await signOutEverywhere();
+export async function logoutOnTrack(
+  reportDiagnostic?: AuthDiagnosticSink,
+): Promise<SignOutResult> {
+  return signOutEverywhere(reportDiagnostic);
 }
 
 /** Injectable auth surface for the App; production default below. */
 export interface TuiAuthActions {
   login: LoginRunner;
-  logout: () => Promise<void>;
+  logout: (reportDiagnostic?: AuthDiagnosticSink) => Promise<SignOutResult>;
 }
 
 export const DEFAULT_TUI_AUTH: TuiAuthActions = {

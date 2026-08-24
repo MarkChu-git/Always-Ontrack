@@ -267,14 +267,24 @@ async function openWizard(setup: TuiSetup) {
 
 // Scenario A: happy path — the wizard starts the runner immediately on open.
 let releaseLogin: (() => void) | null = null;
-const happyRunner: LoginRunner = async () => {
+const happyRunner: LoginRunner = async (hooks) => {
   await new Promise<void>((resolve) => {
     releaseLogin = resolve;
+  });
+  hooks.onDiagnostic?.({
+    code: 'refresh_cookie_persistence_failed',
+    message: 'Refresh cookie could not be persisted; silent renewal may be unavailable.',
   });
   return 'alice.zhang';
 };
 const wizardSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: happyRunner, logout: async () => {} }} />,
+  <App
+    load={wizardLoader()}
+    auth={{
+      login: happyRunner,
+      logout: async () => ({ remoteSignOutFailed: false }),
+    }}
+  />,
   { width: 100, height: 32 },
 );
 await openWizard(wizardSetup);
@@ -293,6 +303,7 @@ await act(async () => {
 check('successful login reloads into the task view', wizardSetup.captureCharFrame(), [
   'alice.zhang',
   'Tasks (7)',
+  'Refresh cookie could not be persisted',
 ]);
 await act(async () => {
   wizardSetup.renderer.destroy();
@@ -311,7 +322,13 @@ const pairingRunner: LoginRunner = async (hooks) => {
   return 'alice.zhang';
 };
 const pairingSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: pairingRunner, logout: async () => {} }} />,
+  <App
+    load={wizardLoader()}
+    auth={{
+      login: pairingRunner,
+      logout: async () => ({ remoteSignOutFailed: false }),
+    }}
+  />,
   { width: 100, height: 32 },
 );
 await openWizard(pairingSetup);
@@ -346,7 +363,13 @@ const failRunner: LoginRunner = async () => {
   };
 };
 const failSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: failRunner, logout: async () => {} }} />,
+  <App
+    load={wizardLoader()}
+    auth={{
+      login: failRunner,
+      logout: async () => ({ remoteSignOutFailed: false }),
+    }}
+  />,
   { width: 100, height: 32 },
 );
 await openWizard(failSetup);
@@ -376,7 +399,13 @@ const retryRunner: LoginRunner = async () => {
   return 'alice.zhang';
 };
 const retryLoginSetup = await testRender(
-  <App load={wizardLoader()} auth={{ login: retryRunner, logout: async () => {} }} />,
+  <App
+    load={wizardLoader()}
+    auth={{
+      login: retryRunner,
+      logout: async () => ({ remoteSignOutFailed: false }),
+    }}
+  />,
   { width: 100, height: 32 },
 );
 await openWizard(retryLoginSetup);
@@ -411,6 +440,7 @@ const logoutSetup = await testRender(
       login: happyRunner,
       logout: async () => {
         logoutCalls += 1;
+        return { remoteSignOutFailed: true };
       },
     }}
   />,
@@ -454,7 +484,10 @@ await act(async () => {
 await act(async () => {
   await settle();
 });
-check('second /logout signs out', logoutSetup.captureCharFrame(), ['Not signed in']);
+check('second /logout reports local-only success', logoutSetup.captureCharFrame(), [
+  'Not signed in',
+  'signed out locally',
+]);
 if (logoutCalls !== 1) {
   failures += 1;
   console.error(`FAIL logout ran ${logoutCalls} times, expected 1`);
@@ -463,6 +496,48 @@ if (logoutCalls !== 1) {
 }
 await act(async () => {
   logoutSetup.renderer.destroy();
+});
+
+// Scenario F: a local-cleanup rejection is visible and never reported as success.
+const failedLogoutSetup = await testRender(
+  <App
+    load={readyLoad}
+    auth={{
+      login: happyRunner,
+      logout: async () => {
+        throw new Error('private cleanup detail');
+      },
+    }}
+  />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await failedLogoutSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+for (let attempt = 0; attempt < 2; attempt += 1) {
+  await act(async () => {
+    await failedLogoutSetup.mockInput.pressKey('k', { ctrl: true });
+    await settle();
+  });
+  await act(async () => {
+    await failedLogoutSetup.mockInput.pressKeys(['l', 'o', 'g', 'o', 'u', 't']);
+    await settle();
+  });
+  await act(async () => {
+    await failedLogoutSetup.mockInput.pressKey('RETURN');
+    await settle();
+  });
+}
+await act(async () => {
+  await settle();
+});
+check('logout cleanup failure remains signed in and is visible', failedLogoutSetup.captureCharFrame(), [
+  'Tasks (7)',
+  'sign-out cleanup failed',
+]);
+await act(async () => {
+  failedLogoutSetup.renderer.destroy();
 });
 
 // Scenario F: status trigger with a server-side remap (keyboard flow).

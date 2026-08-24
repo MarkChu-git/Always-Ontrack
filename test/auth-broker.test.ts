@@ -4,6 +4,7 @@ import {
   createOnTrackAuthBroker,
   type OnTrackAuthBrokerDependencies,
 } from '../src/lib/auth-broker.js';
+import type { AuthDiagnostic } from '../src/lib/auth-diagnostic.js';
 import type { LoginCredentials } from '../src/lib/auto-login.js';
 import type { CapturedSignIn } from '../src/lib/api.js';
 import type { RefreshCookieMaterial, SessionData } from '../src/lib/types.js';
@@ -191,7 +192,7 @@ test('broker refreshes over plain HTTP when a stored refresh cookie exists', asy
 test('broker persists a refresh cookie the renewal rotated', async () => {
   // Without this the stored cookie keeps its original expiry, so the session
   // dies one cookie lifetime after login however often it was renewed.
-  const persisted: RefreshCookieMaterial[] = [];
+  let persisted: RefreshCookieMaterial | undefined;
   const broker = createOnTrackAuthBroker(
     { baseUrl: expiredSession.baseUrl },
     dependencies({
@@ -213,20 +214,55 @@ test('broker persists a refresh cookie the renewal rotated', async () => {
         },
       }),
       persistRefreshCookie: (cookie) => {
-        persisted.push(cookie);
+        persisted = { ...cookie };
       },
     }),
   );
 
   const result = await broker.ensure({ minTtlSeconds: 600 });
   assert.equal(result.status, 'ready');
-  assert.deepEqual(persisted, [
-    {
-      username: 'student1',
-      refreshToken: 'rotated-secret',
-      expiresAt: '2026-08-14T00:00:00.000Z',
-    },
-  ]);
+  assert.deepEqual(persisted, {
+    username: 'student1',
+    refreshToken: 'rotated-secret',
+    expiresAt: '2026-08-14T00:00:00.000Z',
+  });
+});
+
+test('broker reports a safe diagnostic when rotated-cookie persistence fails', async () => {
+  let diagnostics: readonly AuthDiagnostic[] = [];
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({
+      readStoredRefreshCookie: () => ({
+        username: 'student1',
+        refreshToken: 'refresh-secret',
+      }),
+      httpRefreshAccessToken: async () => ({
+        response: {
+          auth_token: 'fresh-secret',
+          auth_token_expiry: '2026-07-31T03:00:00.000Z',
+          user: { username: 'student1' },
+        },
+        refreshCookie: {
+          username: 'student1',
+          refreshToken: 'rotated-secret',
+        },
+      }),
+      persistRefreshCookie: () => {
+        throw new Error('rotated-secret must never be logged');
+      },
+      reportDiagnostic: (diagnostic) => {
+        diagnostics = [...diagnostics, diagnostic];
+      },
+    }),
+  );
+
+  const result = await broker.ensure({ minTtlSeconds: 600 });
+  assert.equal(result.status, 'ready');
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0]?.code, 'refresh_cookie_persistence_failed');
+  assert.match(diagnostics[0]?.message ?? '', /refresh cookie could not be persisted/i);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /fresh-secret|refresh-secret|rotated-secret/);
 });
 
 test('broker falls back to browser capture when the HTTP refresh is declined', async () => {
