@@ -4,10 +4,75 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'bun:test';
 import {
+  terminateSubprocess,
   validateTarEntries,
   validateTarEntryTypes,
+  verifyInstalledTui,
   verifyPackageTarball,
 } from '../scripts/verify-package.ts';
+
+test('terminateSubprocess waits for SIGTERM before escalating to SIGKILL', async () => {
+  let resolveExit: (code: number) => void = () => undefined;
+  const exited = new Promise<number>((resolve) => {
+    resolveExit = resolve;
+  });
+  let signals: Array<number | undefined> = [];
+  const child = {
+    exited,
+    kill(signal?: number) {
+      signals = [...signals, signal];
+      if (signal === 9) {
+        resolveExit(137);
+      }
+    },
+  };
+
+  await terminateSubprocess(child, 1);
+
+  assert.deepEqual(signals, [undefined, 9]);
+});
+
+async function assertTuiSmokeFailure(
+  source: string,
+  expected: RegExp,
+  options: {
+    readonly outputLimit?: number;
+    readonly terminationGraceMs?: number;
+    readonly timeoutMs?: number;
+  },
+): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-tui-smoke-failure-'));
+  const cliPath = join(root, 'cli.js');
+  const configRoot = join(root, 'config');
+  try {
+    await mkdir(configRoot);
+    await writeFile(cliPath, source);
+    await assert.rejects(
+      () => verifyInstalledTui(cliPath, root, configRoot, options),
+      expected,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test('verifyInstalledTui bounds timeout, output, and nonzero-exit failures', async () => {
+  await assertTuiSmokeFailure(
+    "process.on('SIGTERM', () => undefined); setInterval(() => undefined, 1_000);",
+    /did not finish its TUI smoke test/,
+    { timeoutMs: 10, terminationGraceMs: 10 },
+  );
+  await assertTuiSmokeFailure(
+    "process.stdout.write('x'.repeat(1_024)); process.on('SIGTERM', () => undefined); setInterval(() => undefined, 1_000);",
+    /exceeded the TUI smoke output limit/,
+    { outputLimit: 10, timeoutMs: 1_000, terminationGraceMs: 10 },
+  );
+  await assertTuiSmokeFailure(
+    'setTimeout(() => process.exit(2), 10);',
+    /packed TUI exited with code 2/,
+    { timeoutMs: 1_000, terminationGraceMs: 10 },
+  );
+});
 
 const validEntries = [
   'package/package.json',
@@ -117,7 +182,13 @@ input.on('line', (line) => {
   );
   await writeFile(
     join(packageRoot, 'dist', 'cli.js'),
-    "#!/usr/bin/env bun\nconsole.log('ontrack help works');",
+    `#!/usr/bin/env bun
+if (process.argv.includes('--help')) {
+  console.log('ontrack help works');
+} else {
+  process.stdout.write('Not signed in\\n');
+  process.on('SIGINT', () => process.exit(0));
+}`,
   );
   await Promise.all([
     chmod(join(packageRoot, 'dist', 'auth-mcp.js'), 0o755),
@@ -130,6 +201,7 @@ input.on('line', (line) => {
   const result = await verifyPackageTarball(archivePath);
 
   assert.match(result.cliOutput, /ontrack help works/);
+  assert.match(result.tuiOutput, /Not signed in/);
   assert.equal(result.authMcpVersion, '0.3.0');
   assert.equal(result.tuiEntrypoint, 'runTui');
   assert.deepEqual([...result.entries].sort(), [...validEntries].sort());

@@ -13,17 +13,21 @@ async function runNonInteractiveCli(args: readonly string[]): Promise<{
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, NO_COLOR: '1' },
   });
-  const stdoutChunks: Buffer[] = [];
-  const stderrChunks: Buffer[] = [];
-  child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-  child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk: Buffer) => {
+    stdout = `${stdout}${chunk.toString('utf8')}`;
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr = `${stderr}${chunk.toString('utf8')}`;
+  });
   const exitCode = await new Promise<number | null>((resolveExit) => {
     child.on('exit', resolveExit);
   });
   return {
     exitCode,
-    stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-    stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    stdout,
+    stderr,
   };
 }
 
