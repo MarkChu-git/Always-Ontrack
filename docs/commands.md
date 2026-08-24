@@ -58,7 +58,7 @@ next actions.
 
 | Command | Purpose | Typical use |
 | --- | --- | --- |
-| `ontrack` | Open the interactive command launcher | Fastest way to run common workflows by number |
+| `ontrack` | Open the full-screen task TUI in an interactive terminal | Default human-facing experience |
 | `ontrack welcome` | Open the interactive command launcher explicitly | Useful for scripts/aliases that pass arguments |
 | `ontrack agent list` | List native caller-first commands | Offline; no credential required |
 | `ontrack agent describe <command>` | Read a native command's executable schema and policy | Offline; no credential required |
@@ -79,10 +79,12 @@ next actions.
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
 | `ontrack doctor` | Probe key endpoints | Quickly identify session or permission issues |
 
-### Interactive launcher
+### Interactive terminal interfaces
 
-Running `ontrack` with no arguments displays the ALWAYS ONTRACK digital-style
-menu. Enter a number to run a command path directly.
+Running `ontrack` with no arguments opens the full-screen task TUI when stdin
+and stdout are interactive terminals. In non-interactive contexts it prints
+help and exits. Run `ontrack welcome` to open the legacy ALWAYS ONTRACK
+numbered launcher explicitly.
 
 Launcher actions include guided task selection:
 

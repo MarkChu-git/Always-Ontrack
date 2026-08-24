@@ -146,6 +146,10 @@ UI 显示响应里的最终状态而非乐观值）。
 
 ### Phase 7 — 入口集成与分发
 
+> 部分完成（v2.2.0）：无参数 `ontrack` 的 TTY 默认入口、独立 TUI bundle、
+> package verifier 与 CI/release 门禁已接入；显式 `tui` 子命令、`--no-tui`
+> 和偏好持久化仍留待后续。
+
 - 无参数 `ontrack`：TTY → TUI；非 TTY → 现有 welcome 菜单（行为不变）。
   增加 `ontrack tui` 显式子命令与 `--no-tui` 逃生门。
 - dist 构建：TUI 需以 bun bundler（或独立 tsc 配置 + JSX）并入 `dist/`；

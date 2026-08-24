@@ -116,8 +116,9 @@ The shortest stable path from install to useful output.
    ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
    ```
 
-Running `ontrack` with no arguments opens the interactive launcher with guided
-task selection. End-to-end recipes: [docs/workflows.md](docs/workflows.md).
+Running `ontrack` with no arguments opens the full-screen TUI in an interactive
+terminal. Use `ontrack welcome` for the legacy numbered launcher. End-to-end
+recipes: [docs/workflows.md](docs/workflows.md).
 
 ## Authentication
 
@@ -217,7 +218,8 @@ idempotency keys: [docs/agent-usage.md](docs/agent-usage.md).
 
 | Command | Purpose |
 | --- | --- |
-| `ontrack` / `ontrack welcome` | Interactive launcher with guided task selection |
+| `ontrack` | Full-screen task TUI in interactive terminals |
+| `ontrack welcome` | Legacy numbered launcher with guided task selection |
 | `ontrack login` / `logout` / `whoami` | Pairing sign-in (default), session cleanup, cached account |
 | `ontrack auth-method` / `auth status` / `auth ensure` | Authentication method and credential lifecycle |
 | `ontrack projects` / `units` / `tasks` / `inbox` | List project, unit, and task data |

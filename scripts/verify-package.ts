@@ -1,6 +1,7 @@
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -12,12 +13,14 @@ const requiredEntries = [
   'package/README.zh-CN.md',
   'package/dist/auth-mcp.js',
   'package/dist/cli.js',
+  'package/dist/tui/index.js',
 ] as const;
 
 export interface PackageVerification {
   entries: string[];
   cliOutput: string;
   authMcpVersion: string;
+  tuiEntrypoint: 'runTui';
 }
 
 const authMcpSmokeTimeoutMs = 10_000;
@@ -213,8 +216,6 @@ export async function verifyPackageTarball(tarballPath: string): Promise<Package
     if (!authMcpSource.startsWith('#!/usr/bin/env bun')) {
       throw new Error('packed Auth MCP is missing its Bun executable entrypoint');
     }
-    const cli = await run([process.execPath, cliPath, '--help'], packageRoot);
-
     const installationRoot = join(extractionRoot, 'installation');
     await mkdir(installationRoot);
     await writeFile(
@@ -229,16 +230,36 @@ export async function verifyPackageTarball(tarballPath: string): Promise<Package
     const installedPackageRoot = await realpath(
       join(installationRoot, 'node_modules', 'ontrack-cli'),
     );
+    const installedCliPath = await realpath(
+      join(installedPackageRoot, 'dist', 'cli.js'),
+    );
     const installedAuthMcpPath = await realpath(
       join(installedPackageRoot, 'dist', 'auth-mcp.js'),
     );
+    const installedTuiPath = await realpath(
+      join(installedPackageRoot, 'dist', 'tui', 'index.js'),
+    );
+    assertChildPath(installedPackageRoot, installedCliPath);
     assertChildPath(installedPackageRoot, installedAuthMcpPath);
+    assertChildPath(installedPackageRoot, installedTuiPath);
+    const cli = await run([process.execPath, installedCliPath, '--help'], installedPackageRoot);
     const authMcpVersion = await verifyInstalledAuthMcp(
       installedAuthMcpPath,
       installedPackageRoot,
       manifest.version,
     );
-    return { entries, cliOutput: `${cli.stdout}${cli.stderr}`, authMcpVersion };
+    const tuiModule = (await import(pathToFileURL(installedTuiPath).href)) as {
+      runTui?: unknown;
+    };
+    if (typeof tuiModule.runTui !== 'function') {
+      throw new Error('packed TUI does not export runTui');
+    }
+    return {
+      entries,
+      cliOutput: `${cli.stdout}${cli.stderr}`,
+      authMcpVersion,
+      tuiEntrypoint: 'runTui',
+    };
   } finally {
     await rm(extractionRoot, { recursive: true, force: true });
   }
@@ -250,7 +271,7 @@ async function main(args: string[]): Promise<void> {
   }
   const result = await verifyPackageTarball(args[0]);
   console.log(
-    `Verified ${result.entries.length} package files, packed CLI help, and Auth MCP ${result.authMcpVersion}.`,
+    `Verified ${result.entries.length} package files, packed CLI help, TUI ${result.tuiEntrypoint}, and Auth MCP ${result.authMcpVersion}.`,
   );
 }
 

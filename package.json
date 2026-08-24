@@ -1,6 +1,6 @@
 {
   "name": "ontrack-cli",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Agent-first CLI and authentication MCP for Monash OnTrack / Doubtfire",
   "license": "Apache-2.0",
   "repository": {
@@ -20,9 +20,11 @@
     "ontrack-auth-mcp": "./dist/auth-mcp.js"
   },
   "scripts": {
-    "build": "bun run clean && tsc -p tsconfig.json && bun -e \"import { chmod } from 'node:fs/promises'; await Promise.all(['dist/cli.js', 'dist/auth-mcp.js'].map((path) => chmod(path, 0o755)))\"",
+    "build": "bun run clean && tsc -p tsconfig.json && bun run build:tui && bun -e \"import { chmod } from 'node:fs/promises'; await Promise.all(['dist/cli.js', 'dist/auth-mcp.js'].map((path) => chmod(path, 0o755)))\"",
+    "build:tui": "bun build src/tui/index.tsx --target=bun --packages=external --outfile=dist/tui/index.js",
     "dev": "bun src/cli.ts",
     "tui": "bun src/tui/index.tsx",
+    "test:tui": "bun scripts/smoke-tui.tsx",
     "typecheck:tui": "tsc --noEmit -p tsconfig.tui.json",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov && bun scripts/check-coverage.ts",

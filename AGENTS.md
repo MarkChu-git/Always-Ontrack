@@ -1,4 +1,4 @@
-## TUI (experimental)
+## TUI
 
 An OpenTUI/React TUI lives in `src/tui/` (separate from the agent-first CLI
 core in `src/lib/`). It loads the real Student Task View through
@@ -12,7 +12,8 @@ wizard with no credential fields (`src/tui/login.tsx`, driver in
 pairing-relay flow first on every environment (pairing link + code rendered
 in the wizard, reusing any existing OnTrack session in the user's own
 browser), and falls back to a controlled browser window only when pairing is
-disabled. It is not yet wired into the `ontrack` entry point.
+disabled. In interactive terminals, the no-argument `ontrack` entry point opens
+this TUI; `ontrack welcome` retains the legacy numbered launcher.
 
 Interactive write/read actions are injectable props with production
 defaults, so the smoke test never touches network or disk state:
@@ -26,8 +27,8 @@ key (`tui:<uuid>`) per attempt, and unknown transport outcomes are surfaced
 without auto-retry.
 
 - `bun run tui` starts it; `bun run typecheck:tui` type-checks it against
-  `tsconfig.tui.json` (the main `tsconfig.json` excludes `src/tui`, so the
-  published `dist/` build is unaffected).
+  `tsconfig.tui.json`. The main `tsconfig.json` still excludes `src/tui`; the
+  release build creates the separate `dist/tui/index.js` bundle.
 - `bun scripts/smoke-tui.tsx` is the headless smoke test; it injects fixture
   loaders/auth drivers, so no network or session is needed. Quirks it
   encapsulates: capture before first paint returns an uninitialized buffer;

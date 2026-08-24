@@ -111,7 +111,8 @@ bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
    ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
    ```
 
-不带参数运行 `ontrack` 会打开交互式启动器并引导选择任务。端到端流程见
+在交互式终端中不带参数运行 `ontrack` 会打开全屏 TUI。使用
+`ontrack welcome` 可进入旧的编号启动器。端到端流程见
 [docs/workflows.md](docs/workflows.md)（英文）。
 
 ## 认证
@@ -207,7 +208,8 @@ MCP、watch 流以及基于幂等键的安全写操作详见
 
 | 命令 | 作用 |
 | --- | --- |
-| `ontrack` / `ontrack welcome` | 交互式启动器，支持引导选择任务 |
+| `ontrack` | 在交互式终端中打开全屏任务 TUI |
+| `ontrack welcome` | 旧的编号启动器，支持引导选择任务 |
 | `ontrack login` / `logout` / `whoami` | 配对登录（默认）、清理会话、查看缓存账号 |
 | `ontrack auth-method` / `auth status` / `auth ensure` | 认证方式与 credential 生命周期 |
 | `ontrack projects` / `units` / `tasks` / `inbox` | 列出项目、课程和任务数据 |

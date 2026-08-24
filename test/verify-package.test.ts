@@ -17,6 +17,7 @@ const validEntries = [
   'package/dist/auth-mcp.js',
   'package/dist/cli.js',
   'package/dist/lib/api.js',
+  'package/dist/tui/index.js',
 ];
 
 test('validateTarEntries accepts the supported package surface', () => {
@@ -27,6 +28,13 @@ test('validateTarEntries requires both public Agent executables', () => {
   assert.throws(
     () => validateTarEntries(validEntries.filter((entry) => entry !== 'package/dist/auth-mcp.js')),
     /missing required entry: package\/dist\/auth-mcp\.js/,
+  );
+});
+
+test('validateTarEntries requires the published TUI entrypoint', () => {
+  assert.throws(
+    () => validateTarEntries(validEntries.filter((entry) => entry !== 'package/dist/tui/index.js')),
+    /missing required entry: package\/dist\/tui\/index\.js/,
   );
 });
 
@@ -68,6 +76,7 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
   const archivePath = join(root, 'ontrack-cli-0.3.0.tgz');
 
   await mkdir(join(packageRoot, 'dist', 'lib'), { recursive: true });
+  await mkdir(join(packageRoot, 'dist', 'tui'), { recursive: true });
   await writeFile(
     join(packageRoot, 'package.json'),
     JSON.stringify({
@@ -83,6 +92,10 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
   await writeFile(join(packageRoot, 'README.md'), '# OnTrack');
   await writeFile(join(packageRoot, 'README.zh-CN.md'), '# OnTrack');
   await writeFile(join(packageRoot, 'dist', 'lib', 'api.js'), 'export {};');
+  await writeFile(
+    join(packageRoot, 'dist', 'tui', 'index.js'),
+    'export async function runTui() {}',
+  );
   await writeFile(
     join(packageRoot, 'dist', 'auth-mcp.js'),
     `#!/usr/bin/env bun
@@ -118,6 +131,7 @@ input.on('line', (line) => {
 
   assert.match(result.cliOutput, /ontrack help works/);
   assert.equal(result.authMcpVersion, '0.3.0');
+  assert.equal(result.tuiEntrypoint, 'runTui');
   assert.deepEqual([...result.entries].sort(), [...validEntries].sort());
   await rm(root, { recursive: true, force: true });
 });

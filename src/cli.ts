@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { resolveCliEntry } from './lib/cli-entry.js';
+import { launchTui } from './lib/tui-launcher.js';
 import { clearSession, loadSession, saveSession } from './lib/session.js';
 import {
   InvalidDownloadFormatError,
@@ -291,7 +293,7 @@ Usage:
   ontrack watch [--unit-id ID] [--project-id ID] [--interval SEC] [--json]
 
 Notes:
-  - Running "ontrack" with no command opens the interactive launcher in TTY terminals.
+  - Running "ontrack" with no command opens the TUI in TTY terminals; use "ontrack welcome" for the legacy numbered launcher.
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
   - --task-definition-id is the unambiguous selector. Deprecated --task-id remains available for legacy definition/instance ids.
@@ -4739,6 +4741,20 @@ async function handleNativeAgentCommand(args: string[]): Promise<void> {
 /** Top-level command dispatcher. */
 async function main(): Promise<void> {
   let args = process.argv.slice(2);
+  const entry = resolveCliEntry(args, {
+    stdinIsTTY: process.stdin.isTTY === true,
+    stdoutIsTTY: process.stdout.isTTY === true,
+  });
+  if (entry.mode === 'tui') {
+    await launchTui();
+    return;
+  }
+  if (entry.mode === 'welcome') {
+    await handleWelcome();
+    return;
+  }
+  args = [...entry.args];
+
   if (args[0] === 'agent') {
     await handleNativeAgentCommand(args.slice(1));
     return;
@@ -4790,11 +4806,6 @@ async function main(): Promise<void> {
 
   const command = args[0];
   const rest = args.slice(1);
-
-  if (!command) {
-    await handleWelcome();
-    return;
-  }
 
   if (command === 'help' || command === '--help' || command === '-h') {
     help();
