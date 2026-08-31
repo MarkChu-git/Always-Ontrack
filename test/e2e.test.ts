@@ -795,3 +795,22 @@ test('e2e: --pair conflicts and an empty relay with --pair fail fast', async () 
     await cleanupHome(home);
   }
 });
+
+test('e2e: --sso conflicts with --auto/--pair fail fast', async () => {
+  const home = await makeHome();
+  try {
+    const withAuto = await runCli(['login', '--sso', '--auto'], home, {
+      env: { ONTRACK_HEADLESS: '1' },
+    });
+    assert.notEqual(withAuto.exitCode, 0);
+    assert.match(withAuto.stderr, /either --auto or --sso/);
+
+    const withPair = await runCli(['login', '--sso', '--pair'], home, {
+      env: { ONTRACK_HEADLESS: '1' },
+    });
+    assert.notEqual(withPair.exitCode, 0);
+    assert.match(withPair.stderr, /cannot be combined with --sso/);
+  } finally {
+    await cleanupHome(home);
+  }
+});

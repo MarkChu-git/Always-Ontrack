@@ -37,9 +37,10 @@ Detailed guides: [authentication](docs/authentication.md) ·
 
 ## What it does
 
-- Authentication and session handling — pairing-relay sign-in (default on every
-  environment), controlled-browser capture, manual redirect import, direct token
-  login, silent token renewal from a restricted browser state, and a local
+- Authentication and session handling — interactive choice of pairing-relay,
+  this-machine browser capture, or terminal username/password, plus
+  manual redirect import, direct token login,
+  silent token renewal from a restricted browser state, and a local
   `ontrack-auth-mcp` control plane
 - Read access — `projects`, `units`, `tasks`, `inbox`, `task show`, `task resources`
 - Feedback and live tracking — `feedback list`, `feedback watch`, `watch`
@@ -77,8 +78,8 @@ bun dist/cli.js auth-method   # or: bun run dev -- auth-method
 
 The shortest stable path from install to useful output.
 
-1. Sign in — `ontrack login` prints a one-time pairing link; sign in in your own
-   browser, on any device:
+1. Sign in — `ontrack login` asks how: a browser on this machine (recommended),
+   pairing (any already signed-in browser), or terminal username/password:
 
    ```bash
    ontrack login
@@ -122,14 +123,15 @@ recipes: [docs/workflows.md](docs/workflows.md).
 
 ## Authentication
 
-`ontrack login` defaults to pairing-relay sign-in on every environment: you sign
-in through the real Monash SSO pages in your own browser and the credential
-arrives end-to-end encrypted. `--auto` opts into controlled-browser capture,
-manual redirect URL import and direct `--auth-token` login remain as fallbacks.
-A session captured in a browser renews silently from a restricted refresh cookie.
-A paired one cannot: the credential that renews a session is an HttpOnly cookie
-no bookmark can read, so a paired session lasts as long as its access token and
-`login` says so. See
+`ontrack login` in an interactive terminal recommends a browser window on this
+machine (renewable session) and still offers pairing or terminal
+username/password. `--pair` / `--auto` / `--sso` skip the prompt. Pairing sends
+the credential end-to-end encrypted; `--auto` captures a refresh cookie that can
+renew silently; `--sso` types credentials in the terminal and fills Okta in a
+hidden browser. Manual redirect URL import and direct
+`--auth-token` login remain as fallbacks. A paired session cannot renew: the
+credential that renews a session is an HttpOnly cookie no bookmark can read, so
+it lasts as long as its access token and `login` says so. See
 [docs/authentication.md](docs/authentication.md) for every login flow, the
 session cache locations, login output, and logout.
 
@@ -220,7 +222,7 @@ idempotency keys: [docs/agent-usage.md](docs/agent-usage.md).
 | --- | --- |
 | `ontrack` | Full-screen task TUI in interactive terminals |
 | `ontrack welcome` | Legacy numbered launcher with guided task selection |
-| `ontrack login` / `logout` / `whoami` | Pairing sign-in (default), session cleanup, cached account |
+| `ontrack login` / `logout` / `whoami` | Interactive sign-in (this machine / pairing / terminal), session cleanup, cached account |
 | `ontrack auth-method` / `auth status` / `auth ensure` | Authentication method and credential lifecycle |
 | `ontrack projects` / `units` / `tasks` / `inbox` | List project, unit, and task data |
 | `ontrack task show` / `task resources` / `task set-status` | Task detail, resource archives, student status transitions |

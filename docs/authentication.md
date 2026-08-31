@@ -2,9 +2,11 @@
 
 ← [README](../README.md)
 
-`ontrack login` supports four credential paths: pairing-relay sign-in (the
-default on every environment), controlled-browser capture, manual redirect URL
-import, and direct token login. Credentials are never typed into the CLI.
+`ontrack login` supports five credential paths: pairing-relay sign-in,
+controlled-browser capture, terminal username/password (hidden-browser guided
+Okta), manual redirect URL import, and direct token login.
+Interactive `ontrack login` (and the TUI sign-in wizard) asks which of the first
+three to use. Only the terminal path types a password into the CLI or TUI.
 
 ## Recommended login: `ontrack login`
 
@@ -17,21 +19,29 @@ ontrack login
 This flow:
 
 1. first probes the CLI's previously saved, OnTrack-only browser state and reuses it when valid
-2. prints a one-time pairing link — you sign in in your own browser on any device, reusing an existing OnTrack session if you have one, and the credential arrives end-to-end encrypted (see the pairing section below)
-3. `--auto` opts into controlled-browser capture instead: a visible browser window on machines with a display
-4. captures the resulting credentials, exchanging them through `/api/auth` only when they are not already API credentials
-5. stores a local session cache
-6. tells you how to install a browser runtime manually if one is missing
+2. in an interactive terminal, recommends a browser window on this machine and still offers pairing or terminal username/password (`--pair` / `--auto` / `--sso` skip the prompt; non-interactive login still defaults to pairing when a relay is configured)
+3. pairing prints a one-time link — you sign in in your own browser on any device, reusing an existing OnTrack session if you have one, and the credential arrives end-to-end encrypted (see the pairing section below)
+4. this-machine / `--auto` opens a visible browser window on machines with a display and passively captures the resulting credentials, including a refresh cookie
+5. terminal / `--sso` asks for Monash username and password in the terminal and fills Okta in a hidden browser; MFA stays in the CLI or TUI
+6. captures the resulting credentials, exchanging them through `/api/auth` only when they are not already API credentials
+7. stores a local session cache
+8. tells you how to install a browser runtime manually if one is missing
 
-The retired guided terminal flow (`--sso`, `--sso-username`,
-`--sso-timeout-sec`) now fails with a pointer to this behavior.
+## Pairing sign-in
 
-## Pairing sign-in (default on every environment)
-
-`ontrack login` defaults to pairing mode instead of any terminal credential entry:
+Interactive `ontrack login` recommends this-machine capture as option 1
+(a renewable session on this computer). Pairing is option 2. Terminal
+username/password is option 3. `--auto` / `--pair` / `--sso` skip the prompt.
+Non-interactive login (scripts, CI, e2e) still defaults to pairing when a
+relay is configured:
 
 ```text
 $ ontrack login
+[SIGN IN]
+- 1. This machine (recommended) — Open a browser here. Renews silently for about a week.
+- 2. Pairing — Use any already signed-in browser. Short session.
+- 3. Terminal — Type username and password here. Hidden browser fills Okta.
+How do you want to sign in? [1/2/3] (1 recommended): 2
 [PAIRING SIGN-IN]
 - Open the link below on any device and sign in with SSO.
 - Pairing code: XXXX-XXXX-XXXX-XXXX
@@ -83,11 +93,12 @@ worth spelling out because the obvious fixes all fail on inspection of
   renews an access token from the access token alone. A paired session therefore
   cannot keep itself alive either.
 
-So pair again when the session expires, or use `--auto` on a machine with a
-display: that flow does the real SSO sign-in in a browser the CLI controls, which
-is what puts a renewable refresh cookie (about one week) on disk.
+So pair again when the session expires, or choose this-machine / `--auto` on a
+machine with a display: that flow does the real SSO sign-in in a browser the CLI
+controls, which is what puts a renewable refresh cookie (about one week) on disk.
 
-- `--pair` / `--no-pair`: force pairing on/off (off means the --auto browser-capture/manual flows).
+- `--pair` / `--auto` / `--sso` / `--no-pair`: skip the interactive method prompt
+  (`--no-pair` means the --auto browser-capture/manual flows).
 - `--relay-url URL` or `ONTRACK_RELAY_URL`: point at another relay (self-hosters);
   set it empty to disable pairing entirely.
 - `--pair-timeout-sec N`: pairing wait budget (default 300, minimum 60).
@@ -97,6 +108,28 @@ is what puts a renewable refresh cookie (about one week) on disk.
 See [PAIRING_RELAY_LOGIN_PLAN.md](PAIRING_RELAY_LOGIN_PLAN.md) for the protocol
 and trust model, and the `ontrack-pair-relay` repository for the relay worker
 and pairing page.
+
+## Terminal username/password: `--sso`, `--sso-username`, `--sso-timeout-sec`
+
+This is the previous default login: type a Monash username and password in the
+terminal (or the TUI wizard). A hidden browser fills Okta; MFA (method pick,
+TOTP, Okta Verify number/push) stays in the CLI or TUI. The password must be
+entered interactively — `--password` and `--sso-password` are rejected so they
+cannot leak through shell history or the process list.
+
+```bash
+ontrack login --sso
+ontrack login --sso --sso-username you@student.monash.edu
+```
+
+`--sso-timeout-sec` defaults to 420 (minimum 60). `--show-browser` makes the
+guided browser visible for debugging; the product default for this path is
+hidden. If guided SSO fails, login falls back to visible browser-assisted
+capture, then to the manual redirect paste.
+
+This path can persist a refresh cookie the same way this-machine capture does,
+because the CLI controls the browser. Prefer this-machine / `--auto` when a
+display is available and you want to sign in through the real pages yourself.
 
 ## Browser capture: `--auto`, `--show-browser`, `--hide-browser`
 
@@ -198,17 +231,20 @@ returns it to its caller.
 
 `ontrack login` renders sign-in progress with styled terminal panels and event lines:
 
+- sign-in method panel (this machine, pairing, or terminal) in an interactive terminal
 - pairing sign-in panel with the one-time link and pairing code
+- guided Monash SSO panels when terminal username/password is chosen
 - login success panel with account, role, and suggested next commands
 
 ## TUI login
 
-The experimental TUI (`bun run tui`) has an in-TUI login wizard with no
-credential fields. It runs the pairing-relay flow first on every environment —
-the pairing link and code are rendered in the wizard, reusing any existing
-OnTrack session in your own browser — and falls back to a controlled browser
-window only when pairing is disabled. The TUI is not yet wired into the
-`ontrack` entry point.
+The TUI (`ontrack` with no arguments, or `bun run tui`) has an in-TUI login
+wizard. It recommends a browser on this machine and still offers pairing or
+terminal username/password. Pairing renders the link and code in the wizard and
+reuses any existing OnTrack session in your own browser; this-machine capture
+opens a controlled browser window; terminal uses self-drawn username/password
+fields and keeps MFA in the wizard (hidden browser fills Okta). Pairing is
+omitted when the relay URL is empty; this-machine and terminal remain.
 
 ## Logout
 

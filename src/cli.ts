@@ -28,10 +28,13 @@ import {
   captureCredentialsFromStoredBrowserSession,
   clearAllBrowserSessionState,
   captureSsoCredentials,
+  captureSsoCredentialsWithGuidedLogin,
+  classifySsoFallback,
   persistRefreshCookie,
   readStoredRefreshCookie,
+  SsoFallbackError,
 } from "./lib/auto-login.js";
-import type { LoginCredentials } from './lib/auto-login.js';
+import type { LoginCredentials, MfaMethodOption } from './lib/auto-login.js';
 import {
   finalizeCapturedLogin,
   sessionFromAccessTokenCapture,
@@ -140,6 +143,7 @@ import {
   printJson,
   printTable,
   prompt,
+  promptHidden,
   resolveTaskSelector,
   resolveTaskBatchSelector,
   resolveLoginMode,
@@ -172,6 +176,15 @@ import {
   PairRelayUnavailableError,
   resolveRelayUrl,
 } from './lib/pair-login.js';
+import {
+  LOGIN_METHOD_NUMBER,
+  availableLoginMethods,
+  defaultLoginMethod,
+  parseLoginMethodChoice,
+  resolveLoginMethod,
+  shouldPromptLoginMethod,
+  type LoginMethod,
+} from './lib/login-method.js';
 import type { WelcomeMenuItem } from './lib/welcome.js';
 import type { ResolvedTaskSelector } from "./lib/utils.js";
 import {
@@ -264,6 +277,7 @@ Usage:
   ontrack login [--base-url URL] [--redirect-url URL]
   ontrack login [--base-url URL] --auth-token TOKEN --username USERNAME
   ontrack login [--base-url URL] --auto [--auto-timeout-sec N] [--show-browser|--hide-browser]
+  ontrack login [--base-url URL] [--sso] [--sso-username USERNAME] [--sso-timeout-sec N] [--show-browser|--hide-browser]
   ontrack login [--base-url URL] [--pair|--no-pair] [--relay-url URL] [--pair-timeout-sec N]
   ontrack logout
   ontrack whoami [--json]
@@ -297,11 +311,13 @@ Notes:
   - Default base URL is https://ontrack.infotech.monash.edu/api
   - This site currently reports SAML SSO.
   - --task-definition-id is the unambiguous selector. Deprecated --task-id remains available for legacy definition/instance ids.
-  - "ontrack login" defaults to pairing mode on every environment: it prints a one-time pairing link, you sign in in your own browser on any device (reusing an existing OnTrack session if you have one), and the credential arrives end-to-end encrypted via a blind relay. Passwords and MFA never touch the terminal.
-  - Use "ontrack login --auto" to opt into controlled-browser capture instead: on machines with a display it pops a visible browser window and passively captures the resulting credentials.
+  - Interactive "ontrack login" (and the TUI sign-in wizard) recommends a browser window on this machine (renewable session) and still offers pairing or terminal username/password. --pair / --auto / --sso skip the prompt. Non-interactive login still defaults to pairing when a relay is configured.
+  - Pairing prints a one-time link; you sign in in your own browser on any device (reusing an existing OnTrack session if you have one), and the credential arrives end-to-end encrypted via a blind relay. The session lasts only as long as the access token.
+  - "ontrack login --auto" (or choosing this machine) opens a visible browser window on machines with a display and passively captures the resulting credentials, including a refresh cookie that can renew silently for about a week.
+  - "ontrack login --sso" (or choosing terminal) asks for Monash username and password in the terminal and fills Okta in a hidden browser. MFA (method pick, TOTP, Okta Verify) stays in the terminal. Passwords must never be passed on the command line.
   - Use --no-pair to opt out of pairing, --relay-url or ONTRACK_RELAY_URL to point at another relay (empty disables pairing).
   - Before opening a browser, login reuses only its saved OnTrack browser state. Live system browser-profile reuse is disabled unless ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1.
-  - Use --show-browser to force a visible browser, or --hide-browser to force a hidden capture (only meaningful with --auto).
+  - Use --show-browser to force a visible browser, or --hide-browser to force a hidden capture (this-machine / --auto default visible on a display; terminal / --sso defaults hidden).
   - If Chromium runtime is missing, install it manually through a reviewed dependency-management workflow.
   - Manual redirect URL paste is backup-only (copy the sign_in?authToken=... entry from your browser history), used when pairing and browser capture fall back or when --redirect-url is provided.
   - PDF and task-resource commands save files into ./downloads by default.
@@ -475,6 +491,13 @@ function renderTerminalEvent(message: string, tone: TerminalPanelTone = 'info'):
 
   const color = tone === 'success' ? '32' : tone === 'warn' ? '33' : KLEIN_BLUE_SOFT;
   console.log(launcherColor(`  • ${message}`, color));
+}
+
+/** Highlight MFA number challenge values inline for fast visual confirmation. */
+function renderChallengeNumbersInline(numbers: string[]): string {
+  return numbers
+    .map((number) => launcherColor(` ${number} `, '1;30;103'))
+    .join(launcherColor('  ', KLEIN_BLUE_SOFT));
 }
 
 /** Final login confirmation panel shown after successful session persistence. */
@@ -1630,12 +1653,39 @@ async function handleAuthEnsure(args: string[]): Promise<void> {
   });
 }
 
+/** Ask this-machine vs pairing vs terminal in an interactive terminal. */
+async function promptLoginMethod(pairingAvailable: boolean): Promise<LoginMethod> {
+  const choices = availableLoginMethods(pairingAvailable);
+  renderTerminalPanel(
+    'SIGN IN',
+    choices.map((choice) => {
+      const mark = choice.recommended ? ' (recommended)' : '';
+      return `${LOGIN_METHOD_NUMBER[choice.id]}. ${choice.title}${mark} — ${choice.summary}`;
+    }),
+  );
+  const allowed = pairingAvailable ? '1, 2, or 3' : '1 or 3';
+  for (;;) {
+    const raw = await prompt(
+      `How do you want to sign in? [${pairingAvailable ? '1/2/3' : '1/3'}] (1 recommended): `,
+    );
+    const choice =
+      raw.trim() === ''
+        ? 'browser'
+        : parseLoginMethodChoice(raw);
+    if (choice && (choice !== 'pair' || pairingAvailable)) {
+      return choice;
+    }
+    console.log(`Please enter ${allowed} (1 this machine, recommended).`);
+  }
+}
+
 /**
  * Login entrypoint.
  *
  * Priority:
  * - direct token/login flags when provided
- * - guided SSO by default
+ * - stored browser-session reuse
+ * - interactive method choice (this machine / pairing / terminal)
  * - browser-assisted and manual redirect as fallback paths
  */
 async function handleLogin(args: string[]): Promise<void> {
@@ -1644,24 +1694,17 @@ async function handleLogin(args: string[]): Promise<void> {
   if (hasFlag(args, '--password') || hasFlag(args, '--sso-password')) {
     throw new Error('Password must be entered interactively. Command-line password flags are not supported.');
   }
-  // Parse mode flags. Guided terminal credential entry was removed: sign-in
-  // happens in a real browser window (local) or via pairing (headless).
+  // Parse mode flags. --auto is this-machine capture, --sso is terminal
+  // username/password (hidden browser), --pair is the pairing relay.
   const auto = hasFlag(args, '--auto');
-  for (const retired of ['--sso', '--sso-username', '--sso-timeout-sec', '--sso-password']) {
-    if (hasFlag(args, retired)) {
-      throw new Error(
-        `${retired} was removed: login now opens a browser window (or pairs on headless environments). Run "ontrack login".`,
-      );
-    }
-  }
+  const sso = hasFlag(args, '--sso');
   const showBrowserFlag = hasFlag(args, '--show-browser');
   const hideBrowserFlag = hasFlag(args, '--hide-browser');
   if (showBrowserFlag && hideBrowserFlag) {
     throw new Error('Use either --show-browser or --hide-browser, not both.');
   }
-  // Product default: pop up a visible browser on machines with a display so the
-  // user signs in through the real SSO pages themselves. Headless environments
-  // default to pairing; --hide-browser forces a hidden capture there.
+  // Product default for this-machine capture: pop up a visible browser on
+  // machines with a display. Terminal / --sso stays hidden unless --show-browser.
   const showBrowser =
     showBrowserFlag || (!hideBrowserFlag && !isHeadlessServerEnvironment());
   const autoTimeoutSec = hasFlag(args, '--auto-timeout-sec')
@@ -1670,6 +1713,12 @@ async function handleLogin(args: string[]): Promise<void> {
   if (autoTimeoutSec < 10) {
     throw new Error('--auto-timeout-sec must be >= 10 seconds.');
   }
+  const ssoTimeoutSec = hasFlag(args, '--sso-timeout-sec')
+    ? parseIntegerFlagValue(getFlagValue(args, '--sso-timeout-sec'), '--sso-timeout-sec')
+    : 420;
+  if (ssoTimeoutSec < 60) {
+    throw new Error('--sso-timeout-sec must be >= 60 seconds.');
+  }
 
   // Pairing-relay flags: headless environments default to pairing unless disabled.
   const pairFlag = hasFlag(args, '--pair');
@@ -1677,8 +1726,14 @@ async function handleLogin(args: string[]): Promise<void> {
   if (pairFlag && noPairFlag) {
     throw new Error('Use either --pair or --no-pair, not both.');
   }
+  if (auto && sso) {
+    throw new Error('Use either --auto or --sso, not both.');
+  }
   if (auto && (pairFlag || noPairFlag)) {
     throw new Error('--pair/--no-pair cannot be combined with --auto.');
+  }
+  if (sso && (pairFlag || noPairFlag)) {
+    throw new Error('--pair/--no-pair cannot be combined with --sso.');
   }
   const pairTimeoutSec = hasFlag(args, '--pair-timeout-sec')
     ? parseIntegerFlagValue(getFlagValue(args, '--pair-timeout-sec'), '--pair-timeout-sec')
@@ -1690,12 +1745,19 @@ async function handleLogin(args: string[]): Promise<void> {
   if (pairFlag && !relayUrl) {
     throw new Error('Pairing is disabled because the relay URL is empty; unset --pair or configure --relay-url/ONTRACK_RELAY_URL.');
   }
-  // Pairing is the default sign-in on every environment: it runs in the
-  // user's own browser with their existing OnTrack session state, so there is
-  // no controlled browser to crash and no stale-profile auth loop. --auto
-  // opts into the controlled-browser capture; --no-pair or an empty relay
-  // opts out of pairing.
-  const pairingApplies = !auto && Boolean(relayUrl) && !noPairFlag;
+  // Interactive terminals ask this-machine vs pairing vs terminal unless a
+  // flag already chose. Non-interactive callers (scripts, e2e, CI) still
+  // default to pairing when a relay is configured, otherwise this-machine.
+  // --auto / --no-pair force this-machine capture; --sso forces terminal
+  // username/password. The prompt waits until stored-session reuse has had a
+  // chance to skip sign-in entirely.
+  const resolvedMethod = resolveLoginMethod({
+    auto,
+    pairFlag,
+    noPairFlag,
+    sso,
+    relayAvailable: Boolean(relayUrl),
+  });
 
   // Direct credential flags are accepted for advanced/manual flows.
   let authToken = getFlagValue(args, '--auth-token');
@@ -1787,6 +1849,17 @@ async function handleLogin(args: string[]): Promise<void> {
         }
       }
 
+      let chosenMethod: LoginMethod =
+        resolvedMethod === 'choose'
+          ? defaultLoginMethod(Boolean(relayUrl))
+          : resolvedMethod;
+      if (resolvedMethod === 'choose' && shouldPromptLoginMethod()) {
+        chosenMethod = await promptLoginMethod(Boolean(relayUrl));
+      }
+      const pairingApplies = chosenMethod === 'pair' && Boolean(relayUrl);
+      const terminalApplies = chosenMethod === 'terminal';
+      const terminalHeadless = !(showBrowserFlag && !hideBrowserFlag);
+
       // Last-resort fallback retained for edge MFA/captcha/selector issues.
       const manualRedirectCapture = async (): Promise<void> => {
         // The sign_in?authToken=... URL only lives in the address bar for a
@@ -1814,12 +1887,193 @@ async function handleLogin(args: string[]): Promise<void> {
         ({ authToken, username } = parseSsoRedirectUrl(pasted));
       };
 
-      // Pairing-relay mode: the default on every environment. The user signs in
-      // in their own browser (reusing any existing OnTrack session); the
-      // credential arrives end-to-end encrypted via a blind relay mailbox.
-      // Falls back to the manual redirect paste when pairing fails or the
-      // relay is unreachable.
+      // Last-resort fallback retained for edge MFA/captcha/selector issues is
+      // defined above. Pairing-relay and this-machine capture sit beside the
+      // restored terminal username/password path (hidden-browser guided Okta).
       let pairingHandled = false;
+
+      if (terminalApplies) {
+        let guidedUsername = parseOptionalString(args, '--sso-username');
+        if (!guidedUsername) {
+          guidedUsername = await prompt('Monash username: ');
+        }
+        if (!guidedUsername.trim()) {
+          throw new Error('Username cannot be empty.');
+        }
+
+        let password = await promptHidden('Password: ');
+        if (!password) {
+          throw new Error('Password cannot be empty.');
+        }
+
+        const submittingPassword = 'Submitting password...';
+        const stepLabels: Record<string, string> = {
+          username: 'Submitting username...',
+          password: submittingPassword,
+          mfa_select: 'Multiple MFA options detected. Please choose one in CLI.',
+          mfa_code: 'Selected MFA method requires a verification code from your authenticator app.',
+          mfa_wait: 'Waiting for Okta Verify push/number approval on your phone...',
+          completed: 'SSO flow completed.',
+        };
+
+        const chooseMfaMethod = async (
+          options: MfaMethodOption[],
+        ): Promise<number> => {
+          if (options.length === 0) {
+            return 1;
+          }
+
+          const recommendedOption =
+            options.find((option) => option.recommended) ?? options[0];
+
+          const optionLines = options.map((option) => {
+            const suffix = option.id === recommendedOption.id ? ' (Recommended)' : '';
+            return `${option.id}. ${option.label}${suffix}`;
+          });
+          renderTerminalPanel(
+            'MFA METHOD SELECTION',
+            [
+              'Pick one method in the prompt below.',
+              ...optionLines,
+              `Default: ${recommendedOption.id}`,
+            ],
+            'info',
+          );
+          console.log('');
+          console.log('Select a security method:');
+          for (const line of optionLines) {
+            console.log(`  ${line}`);
+          }
+
+          const raw = await prompt(`Choose method [${recommendedOption.id}]: `);
+          if (!raw.trim()) {
+            return recommendedOption.id;
+          }
+
+          const selected = Number.parseInt(raw.trim(), 10);
+          if (Number.isFinite(selected) && options.some((option) => option.id === selected)) {
+            return selected;
+          }
+
+          console.log(
+            `[warn] Invalid selection "${raw.trim()}". Using recommended method ${recommendedOption.id}.`,
+          );
+          return recommendedOption.id;
+        };
+
+        const requestMfaCode = async (methodLabel: string): Promise<string> => {
+          renderTerminalPanel(
+            'MFA CODE REQUIRED',
+            [
+              `Method: ${methodLabel}`,
+              'Enter the current code shown in your authenticator app.',
+            ],
+            'info',
+          );
+          const code = (await prompt('Enter verification code: ')).trim();
+          if (!code) {
+            throw new Error('Verification code cannot be empty.');
+          }
+          return code;
+        };
+
+        try {
+          renderTerminalPanel(
+            'GUIDED MONASH SSO',
+            [
+              'Automation started in a hidden browser.',
+              'Follow terminal prompts for MFA: choose method, enter code, or approve push.',
+            ],
+            'info',
+          );
+          const captured = await captureSsoCredentialsWithGuidedLogin(
+            {
+              ssoUrl: redirectTo,
+              apiBaseUrl: api.base,
+              username: guidedUsername,
+              password,
+              timeoutMs: ssoTimeoutSec * 1000,
+              headless: terminalHeadless,
+              chooseMfaMethod,
+              requestMfaCode,
+              onMfaNumberChallenge: (numbers) => {
+                if (numbers.length === 0) {
+                  return;
+                }
+                renderTerminalPanel(
+                  'OKTA VERIFY NUMBER CHALLENGE',
+                  [
+                    `Tap this number in Okta Verify: ${renderChallengeNumbersInline(numbers)}`,
+                    'Use the same number shown in your app challenge list.',
+                  ],
+                  'success',
+                );
+                console.log(`[mfa] Number challenge on page: ${renderChallengeNumbersInline(numbers)}`);
+                console.log('[mfa] Tap the matching number in Okta Verify.');
+              },
+            },
+            (step) => {
+              const message = stepLabels[step];
+              if (message) {
+                renderTerminalEvent(message, step === 'completed' ? 'success' : 'info');
+              }
+            },
+          );
+          authToken = captured.authToken;
+          username = captured.username;
+          credentialExpiresAt = captured.expiresAt;
+          credentialContract = captured.contract;
+          capturedRefreshCookie = captured.refreshCookie;
+          credentialSource =
+            captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
+          pairingHandled = true;
+          renderTerminalEvent(`Guided SSO captured credentials from ${captured.source}.`, 'success');
+        } catch (error) {
+          const reason = classifySsoFallback(error);
+          const detail = toRedactedError(error).message;
+          if (error instanceof SsoFallbackError) {
+            console.log(
+              `[warn] Guided SSO fallback (${error.reason}) at step ${error.step}: ${detail}`,
+            );
+          } else {
+            console.log(`[warn] Guided SSO fallback (${reason}): ${detail}`);
+          }
+
+          try {
+            console.log(
+              '[info] Switching to browser-assisted SSO mode. Complete login in the opened browser window; credentials will be captured automatically.',
+            );
+            const captured = await captureSsoCredentials({
+              ssoUrl: redirectTo,
+              apiBaseUrl: api.base,
+              timeoutMs: ssoTimeoutSec * 1000,
+              headless: !showBrowser,
+            });
+            authToken = captured.authToken;
+            username = captured.username;
+            credentialExpiresAt = captured.expiresAt;
+            credentialContract = captured.contract;
+            capturedRefreshCookie = captured.refreshCookie;
+            credentialSource =
+              captured.contract === 'access-token' ? 'access-token' : 'browser-sso';
+            pairingHandled = true;
+            console.log(`Browser-assisted SSO captured credentials from ${captured.source}.`);
+          } catch (assistedError) {
+            const assistedDetail = toRedactedError(assistedError).message;
+            console.log(`[warn] Browser-assisted SSO failed: ${assistedDetail}`);
+            console.log('[info] Falling back to manual redirect URL flow (last-resort).');
+            await manualRedirectCapture();
+            pairingHandled = true;
+          }
+        } finally {
+          password = '';
+        }
+      }
+
+      // Pairing-relay: the user signs in in their own browser (reusing any
+      // existing OnTrack session); the credential arrives end-to-end encrypted
+      // via a blind relay mailbox. Falls back to the manual redirect paste
+      // when pairing fails or the relay is unreachable.
       if (pairingApplies && relayUrl) {
         try {
           let lastReportedMinute = -1;
@@ -1871,7 +2125,7 @@ async function handleLogin(args: string[]): Promise<void> {
         }
       }
 
-      if (!pairingHandled && loginMode === 'auto') {
+      if (!pairingHandled && chosenMethod === 'browser' && loginMode === 'auto') {
         // Browser capture mode: the user signs in through the real SSO pages in
         // an opened browser window (visible by default on machines with a
         // display); the CLI passively captures the resulting credentials.
@@ -1908,7 +2162,7 @@ async function handleLogin(args: string[]): Promise<void> {
   }
 
   if (!authToken || !username) {
-    throw new Error('Unable to obtain login credentials. Retry login, or use --redirect-url.');
+    throw new Error('Unable to obtain login credentials. Retry login with --sso, --auto, --pair, or --redirect-url.');
   }
 
   const session = await finalizeCapturedLogin(api, {

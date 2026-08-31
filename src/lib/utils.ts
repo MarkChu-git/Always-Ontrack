@@ -94,6 +94,75 @@ export function shouldMaskPromptInput(
   return Boolean(inputStream.isTTY && outputStream.isTTY);
 }
 
+/**
+ * Secure password prompt:
+ * - never echoes raw characters
+ * - supports backspace editing
+ * - exits cleanly on Ctrl+C
+ */
+export async function promptHidden(question: string): Promise<string> {
+  if (!shouldMaskPromptInput()) {
+    return prompt(question);
+  }
+
+  return new Promise<string>((resolvePromise, reject) => {
+    const stdinStream = input;
+    if (!stdinStream.isTTY) {
+      resolvePromise('');
+      return;
+    }
+
+    let answer = '';
+    output.write(question);
+    stdinStream.setRawMode(true);
+    stdinStream.resume();
+    stdinStream.setEncoding('utf8');
+
+    const cleanup = (): void => {
+      stdinStream.removeListener('data', onData);
+      stdinStream.setRawMode(false);
+      stdinStream.pause();
+    };
+
+    const onData = (chunk: string): void => {
+      const data = chunk ?? '';
+      if (!data) {
+        return;
+      }
+
+      for (const char of data) {
+        if (char === '\u0003') {
+          output.write('\n');
+          cleanup();
+          reject(new Error('Input interrupted.'));
+          return;
+        }
+
+        if (char === '\r' || char === '\n') {
+          output.write('\n');
+          cleanup();
+          resolvePromise(answer.trim());
+          return;
+        }
+
+        if (char === '\u007f' || char === '\b') {
+          if (answer.length > 0) {
+            answer = answer.slice(0, -1);
+            output.write('\b \b');
+          }
+          continue;
+        }
+
+        if (char >= ' ' && char !== '\u007f') {
+          answer += char;
+          output.write('*');
+        }
+      }
+    };
+
+    stdinStream.on('data', onData);
+  });
+}
 
 /** Open URL in platform-default browser without blocking current process. */
 export interface ExternalOpenCommand {

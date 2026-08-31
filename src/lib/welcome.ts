@@ -35,7 +35,7 @@ const BASE_WELCOME_MENU: WelcomeMenuItem[] = [
     id: 1,
     title: 'Sign In (Monash SSO)',
     command: 'ontrack login',
-    summary: 'Primary login path with guided Okta Verify push/number.',
+    summary: 'Recommended: a browser here. Pairing or terminal username/password also work.',
     recommended: true,
   },
   {

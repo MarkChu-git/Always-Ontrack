@@ -265,7 +265,19 @@ async function openWizard(setup: TuiSetup) {
   });
 }
 
-// Scenario A: happy path — the wizard starts the runner immediately on open.
+/** Confirm the method picker. Split from openWizard: a mode-change key only
+ *  flushes at an act boundary, so picker paint and confirm must not share one. */
+async function confirmLoginMethod(
+  setup: TuiSetup,
+  key: 'RETURN' | '1' | '2' | '3' = 'RETURN',
+) {
+  await act(async () => {
+    await setup.mockInput.pressKey(key);
+    await settle();
+  });
+}
+
+// Scenario A: happy path — the wizard opens on a method picker, then runs.
 let releaseLogin: (() => void) | null = null;
 const happyRunner: LoginRunner = async (hooks) => {
   await new Promise<void>((resolve) => {
@@ -288,9 +300,17 @@ const wizardSetup = await testRender(
   { width: 100, height: 32 },
 );
 await openWizard(wizardSetup);
-check('l opens the login wizard', wizardSetup.captureCharFrame(), [
+check('l opens the login method picker', wizardSetup.captureCharFrame(), [
   'Sign in to OnTrack',
-  'Preparing sign-in',
+  'Choose how to sign in',
+  'This machine',
+  'recommended',
+  'Pairing',
+  'Terminal',
+]);
+await confirmLoginMethod(wizardSetup, '1');
+check('1 starts this-machine sign-in', wizardSetup.captureCharFrame(), [
+  'Opening a browser on this machine',
 ]);
 
 await act(async () => {
@@ -332,6 +352,10 @@ const pairingSetup = await testRender(
   { width: 100, height: 32 },
 );
 await openWizard(pairingSetup);
+check('l opens the login method picker for pairing', pairingSetup.captureCharFrame(), [
+  'Choose how to sign in',
+]);
+await confirmLoginMethod(pairingSetup, '2');
 await act(async () => {
   await settle();
 });
@@ -354,6 +378,54 @@ await act(async () => {
   pairingSetup.renderer.destroy();
 });
 
+// Scenario B2: 3 opens terminal username/password fields (hidden-browser SSO).
+const terminalSetup = await testRender(
+  <App
+    load={wizardLoader()}
+    auth={{
+      login: happyRunner,
+      logout: async () => ({ remoteSignOutFailed: false }),
+    }}
+  />,
+  { width: 100, height: 32 },
+);
+await openWizard(terminalSetup);
+await confirmLoginMethod(terminalSetup, '3');
+check('3 opens terminal username and password fields', terminalSetup.captureCharFrame(), [
+  'Username',
+  'Password',
+]);
+await act(async () => {
+  terminalSetup.renderer.destroy();
+});
+
+// Scenario B3: pairing off still offers this-machine and terminal, and does not auto-start.
+const noPairPickerSetup = await testRender(
+  <App
+    load={wizardLoader()}
+    auth={{
+      login: happyRunner,
+      logout: async () => ({ remoteSignOutFailed: false }),
+      pairingAvailable: false,
+    }}
+  />,
+  { width: 100, height: 32 },
+);
+await openWizard(noPairPickerSetup);
+check('pairing off still shows this-machine and terminal', noPairPickerSetup.captureCharFrame(), [
+  'This machine',
+  'Terminal',
+]);
+if (noPairPickerSetup.captureCharFrame().includes('Opening a browser')) {
+  failures += 1;
+  console.error('FAIL pairing-off picker auto-started this-machine capture');
+} else {
+  console.log('ok   pairing-off picker does not auto-start');
+}
+await act(async () => {
+  noPairPickerSetup.renderer.destroy();
+});
+
 // Scenario C: classified failure renders, esc leaves the wizard.
 const failRunner: LoginRunner = async () => {
   throw {
@@ -373,6 +445,7 @@ const failSetup = await testRender(
   { width: 100, height: 32 },
 );
 await openWizard(failSetup);
+await confirmLoginMethod(failSetup);
 await act(async () => {
   await settle();
 });
@@ -409,6 +482,7 @@ const retryLoginSetup = await testRender(
   { width: 100, height: 32 },
 );
 await openWizard(retryLoginSetup);
+await confirmLoginMethod(retryLoginSetup);
 await act(async () => {
   await settle();
 });

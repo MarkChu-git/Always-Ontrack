@@ -932,7 +932,7 @@ export function App({
               : screen.kind === 'auth_required'
                 ? [
                     'The TUI needs a stored OnTrack session.',
-                    'Press l to sign in with Monash SSO (guided, hidden browser).',
+                    'Press l to sign in: this machine, pairing, or terminal username/password.',
                   ]
                 : [screen.message]
           }
@@ -1288,6 +1288,7 @@ export function App({
         <LoginWizard
           theme={theme}
           run={auth.login}
+          pairingAvailable={auth.pairingAvailable ?? true}
           onDiagnostic={reportDiagnostic}
           onSignedIn={(name) => {
             setMode('main');

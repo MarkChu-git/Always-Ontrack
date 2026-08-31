@@ -69,11 +69,12 @@ next actions.
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
 | `ontrack auth status --output agent-json` | Read credential lifecycle metadata | Never returns a credential or identity |
 | `ontrack auth ensure --output agent-json` | Ensure a usable credential | Silent by default; structured handoff when required |
-| `ontrack login` | Print a one-time pairing link; sign in in your own browser | Primary login command; no credentials typed into the terminal |
-| `ontrack login --show-browser` | Force visible browser mode with --auto | Explicit override |
+| `ontrack login` | Recommend this-machine browser sign-in; pairing and terminal remain available | Primary login command; interactive method prompt |
+| `ontrack login --show-browser` | Force visible browser mode | Explicit override (this-machine or --sso) |
 | `ontrack login --hide-browser` | Force hidden browser capture | Headless environments, typically with --no-pair |
-| `ontrack login --auto` | Explicit browser-capture mode | Alias of the default capture behavior |
-| `ontrack login --pair` | Force pairing-relay sign-in (already the default) | Sign in on any device; credential arrives E2E-encrypted |
+| `ontrack login --auto` | This-machine browser capture (skips the method prompt) | Renewable session on this computer |
+| `ontrack login --sso` | Terminal username/password; hidden browser fills Okta | Previous default; MFA stays in the terminal |
+| `ontrack login --pair` | Pairing-relay sign-in (skips the method prompt) | Sign in on any device; credential arrives E2E-encrypted |
 | `ontrack login --no-pair` | Opt out of pairing | Falls back to --auto browser-capture/manual flows |
 | `ontrack logout` | Clear local session and browser refresh state | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
