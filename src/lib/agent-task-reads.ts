@@ -23,6 +23,7 @@ import type {
 } from './agent-commands.js';
 import { agentSubmissionStatusOutputSchema } from './agent-commands.js';
 import { AgentProtocolError } from './agent-protocol.js';
+import type { AuthDiagnosticSink } from './auth-diagnostic.js';
 import {
   contentDispositionFilename,
   UnavailableDownloadError,
@@ -137,8 +138,9 @@ function prerequisiteRelationshipId(row: Record<string, unknown>): number | null
 export async function readAgentTaskPrerequisites(
   input: AgentTaskPrerequisitesInput,
   session: SessionData,
+  reportDiagnostic?: AuthDiagnosticSink,
 ): Promise<AgentTaskPrerequisitesOutput> {
-  const api = createAuthenticatedApi(session);
+  const api = createAuthenticatedApi(session, reportDiagnostic);
   const projects = await loadProjectsWithTaskMetadata(
     api,
     session,
@@ -375,8 +377,9 @@ export async function downloadTaskResourceArtifacts(
 export async function readAgentTaskResources(
   input: AgentTaskResourcesInput,
   session: SessionData,
+  reportDiagnostic?: AuthDiagnosticSink,
 ): Promise<AgentTaskResourcesOutput> {
-  const api = createAuthenticatedApi(session);
+  const api = createAuthenticatedApi(session, reportDiagnostic);
   const projects = await loadProjectsWithTaskMetadata(
     api,
     session,
@@ -448,8 +451,9 @@ function buildAgentTaskPdfOutput(
 export async function readAgentTaskPdf(
   input: AgentTaskPdfInput,
   session: SessionData,
+  reportDiagnostic?: AuthDiagnosticSink,
 ): Promise<AgentTaskPdfOutput> {
-  const api = createAuthenticatedApi(session);
+  const api = createAuthenticatedApi(session, reportDiagnostic);
   const projects = await loadProjectsWithTaskMetadata(
     api,
     session,
@@ -545,8 +549,9 @@ function buildAgentSubmissionPdfOutput(
 export async function readAgentSubmissionPdf(
   input: AgentSubmissionPdfInput,
   session: SessionData,
+  reportDiagnostic?: AuthDiagnosticSink,
 ): Promise<AgentSubmissionPdfOutput> {
-  const api = createAuthenticatedApi(session);
+  const api = createAuthenticatedApi(session, reportDiagnostic);
   const projects = await loadProjectsWithTaskMetadata(
     api,
     session,
@@ -580,8 +585,9 @@ export async function readAgentSubmissionPdf(
 export async function readAgentSubmissionStatus(
   input: AgentSubmissionStatusInput,
   session: SessionData,
+  reportDiagnostic?: AuthDiagnosticSink,
 ): Promise<AgentSubmissionStatusOutput> {
-  const api = createAuthenticatedApi(session);
+  const api = createAuthenticatedApi(session, reportDiagnostic);
   const projects = await loadProjectsWithTaskMetadata(
     api,
     session,

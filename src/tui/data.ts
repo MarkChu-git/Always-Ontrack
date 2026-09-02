@@ -8,6 +8,7 @@
  */
 import { OnTrackHttpError } from '../lib/auth';
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
+import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
 import {
   createAuthenticatedApi,
@@ -133,40 +134,47 @@ function uploadSlots(view: StudentTaskView): UploadSlot[] {
   });
 }
 
-export const loadOnTrackTasks: TaskLoader = async () => {
-  try {
-    const broker = createOnTrackAuthBroker({ baseUrl: normalizeBaseUrl() });
-    const auth = await broker.ensure({
-      minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
-      interaction: 'never',
-    });
-    if (auth.status === 'auth_required') return { kind: 'auth_required' };
-    if (auth.status !== 'ready') {
-      return {
-        kind: 'error',
-        message: `Credential refresh failed (${auth.code}). Run \`ontrack login\`.`,
-      };
-    }
-    const session = await broker.currentSession();
-    if (!session) return { kind: 'auth_required' };
+export function createOnTrackTaskLoader(
+  reportDiagnostic: AuthDiagnosticSink,
+): TaskLoader {
+  return async () => {
+    try {
+      const broker = createOnTrackAuthBroker(
+        { baseUrl: normalizeBaseUrl() },
+        { reportDiagnostic },
+      );
+      const auth = await broker.ensure({
+        minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
+        interaction: 'never',
+      });
+      if (auth.status === 'auth_required') return { kind: 'auth_required' };
+      if (auth.status !== 'ready') {
+        return {
+          kind: 'error',
+          message: `Credential refresh failed (${auth.code}). Run \`ontrack login\`.`,
+        };
+      }
+      const session = await broker.currentSession();
+      if (!session) return { kind: 'auth_required' };
 
-    // Same catalogue pipeline the CLI task commands use: per-project/unit
-    // read failures degrade to overview data instead of blanking the TUI.
-    const api = createAuthenticatedApi(session);
-    const projects = await loadProjectsWithTaskMetadata(api, session);
-    const current = projects.filter((project) => isCurrentUnit(project.unit));
-    const tasks = buildStudentTaskViews(current).map(viewToTuiTask);
-    return {
-      kind: 'ready',
-      identity: toWhoAmIView(session),
-      expiresAt: session.expiresAt ?? null,
-      tasks,
-    };
-  } catch (err) {
-    if (err instanceof OnTrackHttpError && err.authFailure !== 'other') {
-      return { kind: 'auth_required' };
+      // Same catalogue pipeline the CLI task commands use: per-project/unit
+      // read failures degrade to overview data instead of blanking the TUI.
+      const api = createAuthenticatedApi(session, reportDiagnostic);
+      const projects = await loadProjectsWithTaskMetadata(api, session);
+      const current = projects.filter((project) => isCurrentUnit(project.unit));
+      const tasks = buildStudentTaskViews(current).map(viewToTuiTask);
+      return {
+        kind: 'ready',
+        identity: toWhoAmIView(session),
+        expiresAt: session.expiresAt ?? null,
+        tasks,
+      };
+    } catch (err) {
+      if (err instanceof OnTrackHttpError && err.authFailure !== 'other') {
+        return { kind: 'auth_required' };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return { kind: 'error', message: redactSensitiveText(message) };
     }
-    const message = err instanceof Error ? err.message : String(err);
-    return { kind: 'error', message: redactSensitiveText(message) };
-  }
-};
+  };
+}

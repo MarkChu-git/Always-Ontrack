@@ -17,6 +17,7 @@
 import { inspectUploadFile } from '../lib/artifact-safety';
 import { OnTrackHttpError } from '../lib/auth';
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
+import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
 import { createAuthenticatedApi } from '../lib/project-catalogue';
 import {
@@ -50,59 +51,64 @@ export interface SubmitActions {
   run(request: SubmitRequest): Promise<SubmitOutcome>;
 }
 
-export const PRODUCTION_SUBMIT_ACTIONS: SubmitActions = {
-  inspect: async (path, allowExternal) => {
-    const artifact = await inspectUploadFile(path, {
-      root: process.cwd(),
-      allowExternal,
+async function runSubmission(
+  request: SubmitRequest,
+  reportDiagnostic: AuthDiagnosticSink,
+): Promise<SubmitOutcome> {
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: normalizeBaseUrl() },
+    { reportDiagnostic },
+  );
+  const auth = await broker.ensure({
+    minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
+    interaction: 'never',
+  });
+  if (auth.status !== 'ready') return { kind: 'auth_required' };
+  const session = await broker.currentSession();
+  if (!session) return { kind: 'auth_required' };
+  const api = createAuthenticatedApi(session, reportDiagnostic);
+  let outcome;
+  try {
+    outcome = await applySubmissionUpload(api, session, {
+      selector: {
+        projectId: request.task.projectId,
+        taskDefinitionId: request.task.taskDefinitionId,
+      },
+      mode: request.mode,
+      files: request.files,
+      allowExternalFile: request.allowExternalFile,
+      trigger: request.trigger,
+      comment: request.comment,
+      confirm: true,
+      idempotencyKey: request.idempotencyKey,
     });
-    return { size: artifact.size };
-  },
+  } catch (error) {
+    // An auth rejection mid-dispatch is not a refusal of the submission.
+    if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
+      return { kind: 'auth_required' };
+    }
+    throw error;
+  }
+  if (outcome.kind === 'replayed') {
+    return { kind: 'replayed', operationId: outcome.claim.operationId };
+  }
+  if (outcome.kind === 'preview') {
+    throw new Error('Submission dispatch returned a dry-run preview.');
+  }
+  return { kind: 'completed', output: outcome.output };
+}
 
-  run: async (request) => {
-    const broker = createOnTrackAuthBroker({ baseUrl: normalizeBaseUrl() });
-    const auth = await broker.ensure({
-      minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
-      interaction: 'never',
-    });
-    if (auth.status !== 'ready') {
-      return { kind: 'auth_required' };
-    }
-    const session = await broker.currentSession();
-    if (!session) {
-      return { kind: 'auth_required' };
-    }
-    const api = createAuthenticatedApi(session);
-    let outcome;
-    try {
-      outcome = await applySubmissionUpload(api, session, {
-        selector: {
-          projectId: request.task.projectId,
-          taskDefinitionId: request.task.taskDefinitionId,
-        },
-        mode: request.mode,
-        files: request.files,
-        allowExternalFile: request.allowExternalFile,
-        trigger: request.trigger,
-        comment: request.comment,
-        confirm: true,
-        idempotencyKey: request.idempotencyKey,
+export function createSubmitActions(
+  reportDiagnostic: AuthDiagnosticSink,
+): SubmitActions {
+  return {
+    inspect: async (path, allowExternal) => {
+      const artifact = await inspectUploadFile(path, {
+        root: process.cwd(),
+        allowExternal,
       });
-    } catch (error) {
-      // The token expired mid-dispatch: not a refusal of the submission —
-      // send the user to re-authentication like every other TUI action.
-      if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
-        return { kind: 'auth_required' };
-      }
-      throw error;
-    }
-    if (outcome.kind === 'replayed') {
-      return { kind: 'replayed', operationId: outcome.claim.operationId };
-    }
-    if (outcome.kind === 'preview') {
-      // The wizard always confirms; a preview here means the wiring drifted.
-      throw new Error('Submission dispatch returned a dry-run preview.');
-    }
-    return { kind: 'completed', output: outcome.output };
-  },
-};
+      return { size: artifact.size };
+    },
+    run: (request) => runSubmission(request, reportDiagnostic),
+  };
+}

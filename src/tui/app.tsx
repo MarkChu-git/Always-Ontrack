@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InputRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer } from '@opentui/react';
+import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import type { StudentStatusTrigger } from '../lib/types';
 import { DEFAULT_TUI_AUTH, type TuiAuthActions } from './auth';
-import { bucketStatus, type LoadState, type TaskLoader } from './data';
+import {
+  bucketStatus,
+  createOnTrackTaskLoader,
+  type LoadState,
+  type TaskLoader,
+} from './data';
 import { LoginWizard } from './login';
-import { runSetStatus, type SetStatusRunner } from './status';
+import { createSetStatusRunner, type SetStatusRunner } from './status';
 import { isFilesRequiredRejection } from '../lib/set-task-status';
-import { PRODUCTION_SUBMIT_ACTIONS, type SubmitActions } from './submit';
+import { createSubmitActions, type SubmitActions } from './submit';
 import { SubmitWizard } from './submit-wizard';
 import {
-  PRODUCTION_TASK_EXTRAS,
+  createTaskExtrasActions,
   type SubmissionStatusInfo,
   type TaskExtrasActions,
 } from './task-extras';
@@ -378,13 +384,13 @@ function NoticeScreen({
 }
 
 export function App({
-  load,
+  load: injectedLoad,
   auth = DEFAULT_TUI_AUTH,
-  setStatus = runSetStatus,
-  extras = PRODUCTION_TASK_EXTRAS,
-  submit = PRODUCTION_SUBMIT_ACTIONS,
+  setStatus: injectedSetStatus,
+  extras: injectedExtras,
+  submit: injectedSubmit,
 }: {
-  load: TaskLoader;
+  load?: TaskLoader;
   auth?: TuiAuthActions;
   setStatus?: SetStatusRunner;
   extras?: TaskExtrasActions;
@@ -404,6 +410,7 @@ export function App({
   const [paletteSelected, setPaletteSelected] = useState(0);
   const [watchOn, setWatchOn] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
+  const [authWarning, setAuthWarning] = useState<string | null>(null);
   /** Trigger selected in the detail pane, awaiting an explicit confirm. */
   const [pendingTrigger, setPendingTrigger] = useState<StudentStatusTrigger | null>(null);
   /** Latest submission-status read per task id, shown on the detail pane. */
@@ -411,12 +418,43 @@ export function App({
   const inputRef = useRef<InputRenderable>(null);
   const paletteInputRef = useRef<InputRenderable>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authWarningTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Double-invoke guard for destructive-ish /logout: first run arms, second
   // within 4s executes. Ref (not state) so the memoized command sees it.
   const logoutArmed = useRef(false);
   const logoutArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Detail extras are fetched once per task until a write invalidates them. */
   const extrasRequested = useRef<Set<string>>(new Set());
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2500);
+  }, []);
+  const reportDiagnostic = useCallback<AuthDiagnosticSink>(
+    (diagnostic) => {
+      setAuthWarning(diagnostic.message);
+      if (authWarningTimer.current) clearTimeout(authWarningTimer.current);
+      authWarningTimer.current = setTimeout(() => setAuthWarning(null), 8000);
+    },
+    [],
+  );
+  const load = useMemo(
+    () => injectedLoad ?? createOnTrackTaskLoader(reportDiagnostic),
+    [injectedLoad, reportDiagnostic],
+  );
+  const setStatus = useMemo(
+    () => injectedSetStatus ?? createSetStatusRunner(reportDiagnostic),
+    [injectedSetStatus, reportDiagnostic],
+  );
+  const extras = useMemo(
+    () => injectedExtras ?? createTaskExtrasActions(reportDiagnostic),
+    [injectedExtras, reportDiagnostic],
+  );
+  const submit = useMemo(
+    () => injectedSubmit ?? createSubmitActions(reportDiagnostic),
+    [injectedSubmit, reportDiagnostic],
+  );
 
   useEffect(() => {
     let live = true;
@@ -444,6 +482,7 @@ export function App({
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (authWarningTimer.current) clearTimeout(authWarningTimer.current);
       if (logoutArmTimer.current) clearTimeout(logoutArmTimer.current);
     },
     [],
@@ -456,12 +495,6 @@ export function App({
     const timer = setInterval(() => setClockTick((n) => n + 1), 60_000);
     return () => clearInterval(timer);
   }, []);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2500);
-  };
 
   const clearFilterInput = () => {
     setQuery('');
@@ -707,12 +740,18 @@ export function App({
           if (logoutArmTimer.current) clearTimeout(logoutArmTimer.current);
           showToast('signing out…');
           void auth
-            .logout()
-            .catch(() => undefined) // local cleanup is best-effort too
-            .then(() => {
+            .logout(reportDiagnostic)
+            .then((result) => {
               setScreen({ kind: 'auth_required' });
               setMode('main');
-              showToast('signed out');
+              showToast(
+                result.remoteSignOutFailed
+                  ? 'signed out locally — remote sign-out failed'
+                  : 'signed out',
+              );
+            })
+            .catch(() => {
+              showToast('sign-out cleanup failed — retry');
             });
         },
       },
@@ -893,7 +932,7 @@ export function App({
               : screen.kind === 'auth_required'
                 ? [
                     'The TUI needs a stored OnTrack session.',
-                    'Press l to sign in with Monash SSO (guided, hidden browser).',
+                    'Press l to sign in: this machine, pairing, or terminal username/password.',
                   ]
                 : [screen.message]
           }
@@ -1208,11 +1247,30 @@ export function App({
         </box>
       ) : null}
 
-      {toast ? (
+      {authWarning ? (
         <box
           style={{
             position: 'absolute',
             top: 1,
+            right: 2,
+            width: 72,
+            border: true,
+            borderStyle: 'rounded',
+            borderColor: theme.urgent,
+            backgroundColor: theme.bg,
+            paddingLeft: 1,
+            paddingRight: 1,
+          }}
+        >
+          <text fg={theme.urgent}>⚠ {authWarning}</text>
+        </box>
+      ) : null}
+
+      {toast ? (
+        <box
+          style={{
+            position: 'absolute',
+            top: authWarning ? 6 : 1,
             right: 2,
             border: true,
             borderStyle: 'rounded',
@@ -1230,6 +1288,8 @@ export function App({
         <LoginWizard
           theme={theme}
           run={auth.login}
+          pairingAvailable={auth.pairingAvailable ?? true}
+          onDiagnostic={reportDiagnostic}
           onSignedIn={(name) => {
             setMode('main');
             showToast(`signed in as ${name}`);

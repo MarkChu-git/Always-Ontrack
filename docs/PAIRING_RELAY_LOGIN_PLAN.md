@@ -22,12 +22,14 @@
 6. bookmarklet 在 OnTrack 源内执行：依次尝试从 URL query（`sign_in?authToken=...&username=...`）、localStorage（`doubtfire_credentials_token` / `doubtfire_user`）提取凭证 → 生成自己的临时 P-256 密钥对，与内嵌的 CLI 公钥做 ECDH → HKDF-SHA256 → AES-256-GCM 加密 JSON `{authToken, username, expiresAt?}` → 投递：
    > 实现记录：doubtfire ≥11 不再把凭证写入 web storage（token 只在 Angular 内存中，`doubtfire_user` 被显式清除），提取顺序改为：`POST /api/auth/access-token`（同源 fetch 自动携带 HttpOnly `refresh_token` cookie，铸一个新 token，与 CLI auto-login 复用的是同一契约）→ URL query → 旧版 localStorage 兜底。铸票放在最前，因为落地 URL 里的 token 是一次性的，Web 应用通常已经先把它换掉了。
    > payload 随之扩为 `{authToken, username, expiresAt?, contract?}`：`contract` 说明这张票是**已经可用的 access token**还是**待兑换的一次性登录票**，两者送错端点的代价是整次登录失败（见第 7 步）。
+   > 关于登录时长的一段弯路（已撤销，留作记录）：access token 很短（生产观察到 10 分钟），而只有 `POST /api/auth` 换票才返回一周的 refresh cookie，于是曾让 bookmarklet 把落地 URL 里的一次性票作为备胎 `exchangeToken` 一并送出、CLI 优先花它。实测两轮都"没票可送"，读 doubtfire 源码后确认这条路构造上不可能生效：那张票由 `generate_temporary_authentication_token!` 签发，**有效期 30 秒**，且前端在 `/api/auth/method` 一返回就拿它去换（`sign-in.component.ts`），服务端换的时候 `token.destroy!` 直接销毁。也就是说页面 JS 永远不可能把一张还能花的票交给 CLI，无论抢得多快。`exchangeToken` 协议与书签侧的取票逻辑（含从 navigation timing entry 里恢复被前端抹掉的 URL）已全部撤掉。
    - 首选 `fetch PUT <relay>/m/<mailboxId>`（中继 CORS 放开）；
    - 若被 OnTrack 页面 CSP `connect-src` 拦截，降级为 `location.href = <pairing-page>#d=<envelope>&m=<mailboxId>` 跳转，配对页检测 `#d=` 后代为 PUT（fragment 不过网络，安全属性不变；`m` 不可缺——仅凭信封无法知道投到哪个信箱）。
    - 页面内提示"已发送，可关闭本标签页"。
 7. CLI 轮询拿到密文（中继一次性读取，读后即删）→ 私钥解密 → 走现有 `finalizeCapturedLogin`（`src/lib/login-finalize.ts`）持久化 session 和 refresh cookie。
    > 实现记录（v2.0.0 的登录失败原因）：初版无条件把配对凭证送去 `POST /api/auth` 换票，而 bookmarklet 铸出来的 access token 在那个端点上一律得到 **419 expired**——一张好票被扔掉，session 写不进去。现在配对凭证默认**直接使用**，落盘前先做一次已认证读（`GET /api/projects`）验证，被拒时分两种情况：显式声明 `contract: 'access-token'` 的直接报 `PairedCredentialRejectedError`（铸出来的票被拒说明它已经死了，再去换票只会又拿一个 419）；什么都没声明的旧书签才回退去换票，覆盖 doubtfire ≤10 落地 URL 的一次性票，两条路都被拒同样报错提示重新配对。显式 `contract: 'legacy-auth'` 不验证，直接换票。403/5xx/网络失败**不算**拒绝——把它们当拒绝就会重演上面那个 bug。
-   > 另外：配对天生拿不到 refresh cookie（它在用户浏览器里是 HttpOnly），所以配对 session 没有静默续期，到期即需重新配对；`login` 结尾对此打 info 而非 warn。
+   > 另外：**配对得到的 session 一定不可续期**，这是 API 的性质而非实现缺口。refresh cookie 在用户浏览器里是 HttpOnly（`path=/api/auth`），书签、配对页、中继都读不到；唯一会下发它的 `POST /api/auth` 只收那张 30 秒的一次性票，而前端在页面加载时就把它花掉了；续期端点 `POST /api/auth/access-token` 又要求 `authenticated_via_refresh_token?`，`authentication_api.rb` 里不存在"凭 access token 续期"的路由。所以配对只能给出一个短 session，长登录态只能来自 `--auto`（CLI 自己控制的浏览器做真实 SSO 登录，带 `remember` 拿到 cookie）。`login` 结尾按"是否真的存下了 cookie"决定是否打那条 info，措辞只陈述事实、不再建议用户去抢时机。
+   > 配对页的"粘贴落地 URL"输入框声明 `contract: 'legacy-auth'`，是唯一走换票、因而理论上能拿到 cookie 的配对路径；同样受 30 秒与"前端已花掉"的约束，实际上多半会被拒——被拒时统一翻译成"重新配对"，不再把 OnTrack 的裸 419 甩给用户。
 
 **移动端/拖拽失败备用路径**：配对页同时保留"粘贴落地 URL"输入框，走第 6 步同一套加密与投递（加密在配对页执行，不在 OnTrack 源内）。
 

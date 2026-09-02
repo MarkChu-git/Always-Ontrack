@@ -1,4 +1,4 @@
-## TUI (experimental)
+## TUI
 
 An OpenTUI/React TUI lives in `src/tui/` (separate from the agent-first CLI
 core in `src/lib/`). It loads the real Student Task View through
@@ -6,13 +6,14 @@ core in `src/lib/`). It loads the real Student Task View through
 and its default view hides completed units (`isCurrentUnit`: web-parity
 with the home page's "all courses" split — `active: false` or a past
 teaching-period `end_date` excludes the unit). It also has an in-TUI login
-wizard with no credential fields (`src/tui/login.tsx`, driver in
+wizard (`src/tui/login.tsx`, driver in
 `src/tui/auth.ts` — both thin compositions over `src/lib/auto-login.ts`,
-`src/lib/pair-login.ts`, and `src/lib/login-finalize.ts`): it runs the
-pairing-relay flow first on every environment (pairing link + code rendered
-in the wizard, reusing any existing OnTrack session in the user's own
-browser), and falls back to a controlled browser window only when pairing is
-disabled. It is not yet wired into the `ontrack` entry point.
+`src/lib/pair-login.ts`, and `src/lib/login-finalize.ts`): the wizard recommends a browser on this machine
+and still offers pairing or terminal username/password (link + code if pairing
+is chosen; a controlled window if this-machine is chosen; self-drawn
+username/password + MFA if terminal is chosen). In
+interactive terminals, the no-argument `ontrack` entry point opens
+this TUI; `ontrack welcome` retains the legacy numbered launcher.
 
 Interactive write/read actions are injectable props with production
 defaults, so the smoke test never touches network or disk state:
@@ -26,8 +27,8 @@ key (`tui:<uuid>`) per attempt, and unknown transport outcomes are surfaced
 without auto-retry.
 
 - `bun run tui` starts it; `bun run typecheck:tui` type-checks it against
-  `tsconfig.tui.json` (the main `tsconfig.json` excludes `src/tui`, so the
-  published `dist/` build is unaffected).
+  `tsconfig.tui.json`. The main `tsconfig.json` still excludes `src/tui`; the
+  release build creates the separate `dist/tui/index.js` bundle.
 - `bun scripts/smoke-tui.tsx` is the headless smoke test; it injects fixture
   loaders/auth drivers, so no network or session is needed. Quirks it
   encapsulates: capture before first paint returns an uninitialized buffer;
@@ -37,7 +38,7 @@ without auto-retry.
   handler can observe a stale render closure under `testRender` (read state
   through ref mirrors instead, like `src/tui/login.tsx` does); a mode-change
   focus effect only flushes at an act boundary (split palette interactions
-  into separate `act` blocks); the detail pane's lazy extras fetch resolves
+  and the login method picker confirm into separate `act` blocks); the detail pane's lazy extras fetch resolves
   outside the act batch (add one more `act` settle after opening it, or
   React prints a "not wrapped in act" warning; a few residual warnings from
   spinner/poll intervals firing outside `act` are cosmetic and tolerated).

@@ -45,3 +45,16 @@ test('CI and release reject modified or unpinned project skills', async () => {
     /Typecheck, test, audit, and build[\s\S]*bun run skills:check[\s\S]*bun run typecheck/,
   );
 });
+
+test('CI and release gate the published TUI', async () => {
+  const [ciWorkflow, releaseWorkflow] = await Promise.all([
+    readFile(new URL('ci.yml', workflowRoot), 'utf8'),
+    readFile(new URL('release.yml', workflowRoot), 'utf8'),
+  ]);
+
+  for (const workflow of [ciWorkflow, releaseWorkflow]) {
+    assert.match(workflow, /bun run typecheck:tui/);
+    assert.match(workflow, /bun run test:tui/);
+    assert.match(workflow, /test -f dist\/tui\/index\.js/);
+  }
+});

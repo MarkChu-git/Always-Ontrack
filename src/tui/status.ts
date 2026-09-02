@@ -8,6 +8,7 @@
  * Injectable into the App so headless smoke tests drive it with fixtures.
  */
 import { createOnTrackAuthBroker } from '../lib/auth-broker';
+import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
 import { createAuthenticatedApi } from '../lib/project-catalogue';
 import {
@@ -31,24 +32,31 @@ export type SetStatusRunner = (input: {
 }) => Promise<SetStatusOutcome>;
 
 /** Production runner: refresh-check the session, then apply the trigger. */
-export const runSetStatus: SetStatusRunner = async ({ task, trigger }) => {
-  const broker = createOnTrackAuthBroker({ baseUrl: normalizeBaseUrl() });
-  const auth = await broker.ensure({
-    minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
-    interaction: 'never',
-  });
-  if (auth.status !== 'ready') {
-    return { kind: 'auth_required' };
-  }
-  const session = await broker.currentSession();
-  if (!session) {
-    return { kind: 'auth_required' };
-  }
-  const api = createAuthenticatedApi(session);
-  return applyStudentStatusTrigger(api, session, {
-    projectId: task.projectId,
-    taskDefinitionId: task.taskDefinitionId,
-    trigger,
-    before: task.statusRaw ?? null,
-  });
-};
+export function createSetStatusRunner(
+  reportDiagnostic: AuthDiagnosticSink,
+): SetStatusRunner {
+  return async ({ task, trigger }) => {
+    const broker = createOnTrackAuthBroker(
+      { baseUrl: normalizeBaseUrl() },
+      { reportDiagnostic },
+    );
+    const auth = await broker.ensure({
+      minTtlSeconds: DEFAULT_AUTH_MIN_TTL_SECONDS,
+      interaction: 'never',
+    });
+    if (auth.status !== 'ready') {
+      return { kind: 'auth_required' };
+    }
+    const session = await broker.currentSession();
+    if (!session) {
+      return { kind: 'auth_required' };
+    }
+    const api = createAuthenticatedApi(session, reportDiagnostic);
+    return applyStudentStatusTrigger(api, session, {
+      projectId: task.projectId,
+      taskDefinitionId: task.taskDefinitionId,
+      trigger,
+      before: task.statusRaw ?? null,
+    });
+  };
+}

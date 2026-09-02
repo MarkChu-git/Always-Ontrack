@@ -50,3 +50,6 @@ npm-debug.log*
 
 # Graphify machine-local vocabulary cache (regenerated on update).
 graphify-out/.vocab.txt
+
+# Files fetched by scripts/smoke-real.mjs against a live OnTrack session.
+/downloads-smoke

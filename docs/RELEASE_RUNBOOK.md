@@ -17,14 +17,29 @@ Do not enable automatic merge for Bun, TypeScript, Playwright, or GitHub Action 
 ## Release procedure
 
 1. Merge the release version change into `master`. `package.json` must contain the final SemVer version and `bun.lock` must be current.
-2. Wait for required checks to pass. Locally, the equivalent non-mutating checks are:
+2. Wait for required checks to pass. Locally, run the equivalent verification gates (package output goes to a temporary directory):
 
    ```bash
    bun install --frozen-lockfile
+   bun run skills:check
+   bun run gitnexus:analyze
+   bun run gitnexus:status
+   bun run gitnexus:check
+   bun run gitnexus:mcp:check
    bun run typecheck
+   bun run typecheck:tui
    bun run test:coverage
+   bun run test:tui
    bun audit
    bun run build
+   bun dist/cli.js --help
+   test -f dist/tui/index.js
+   bun dist/cli.js schema auth.method --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.data?.path !== "auth.method") process.exit(1)'
+   test -x dist/auth-mcp.js
+   bun dist/cli.js capabilities --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.schema_version !== "ontrack.agent/v1") process.exit(1)'
+   release_artifacts="$(mktemp -d)"
+   bun pm pack --ignore-scripts --destination "$release_artifacts" --quiet
+   bun scripts/verify-package.ts "$release_artifacts"/*.tgz
    ```
 
 3. From the exact `master` commit, create an annotated tag whose name is exactly `v` plus `package.json`'s version. Do not reuse, move, or force-push tags.

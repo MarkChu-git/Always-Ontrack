@@ -7,7 +7,7 @@ Command flags and safety rules live in [commands.md](commands.md).
 ## Workflow 1: sign in and find your tasks
 
 ```bash
-ontrack login
+ontrack login          # interactive: this machine, pairing, or terminal username/password
 ontrack whoami
 ontrack projects
 ontrack tasks

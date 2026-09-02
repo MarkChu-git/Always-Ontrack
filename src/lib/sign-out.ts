@@ -4,6 +4,10 @@
  * local session file and any stored browser session state are always cleared.
  */
 import { clearAllBrowserSessionState } from './auto-login.js';
+import {
+  reportAuthDiagnosticToStderr,
+  type AuthDiagnosticSink,
+} from './auth-diagnostic.js';
 import { createAuthenticatedApi } from './project-catalogue.js';
 import { clearSession, loadSession } from './session.js';
 
@@ -12,12 +16,14 @@ export interface SignOutResult {
   remoteSignOutFailed: boolean;
 }
 
-export async function signOutEverywhere(): Promise<SignOutResult> {
+export async function signOutEverywhere(
+  reportDiagnostic: AuthDiagnosticSink = reportAuthDiagnosticToStderr,
+): Promise<SignOutResult> {
   const session = await loadSession();
   let remoteSignOutFailed = false;
   if (session) {
     try {
-      await createAuthenticatedApi(session).signOut(session);
+      await createAuthenticatedApi(session, reportDiagnostic).signOut(session);
     } catch {
       remoteSignOutFailed = true;
     }

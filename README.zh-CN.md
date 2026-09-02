@@ -37,8 +37,7 @@ submission 等操作统一到一个命令面（`ontrack <command>`），默认�
 
 ## 功能概览
 
-- 登录与会话管理——配对中继（pairing relay）登录（所有环境默认）、受控浏览器捕获、
-  手动 redirect URL 导入、直接传入 token、从受限浏览器状态静默续期，以及本地
+- 登录与会话管理——交互选择配对中继或本机浏览器捕获、手动 redirect URL 导入、直接传入 token、从受限浏览器状态静默续期，以及本地
   `ontrack-auth-mcp` 鉴权控制面
 - 学习数据读取——`projects`、`units`、`tasks`、`inbox`、`task show`、`task resources`
 - 反馈与实时跟踪——`feedback list`、`feedback watch`、`watch`
@@ -73,8 +72,8 @@ bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
 
 下面是一套最短、最稳的上手路径。
 
-1. 登录——`ontrack login` 会打印一次性配对链接，在你自己的浏览器（任意设备）里
-   完成登录:
+1. 登录——`ontrack login` 会询问方式：本机打开浏览器（推荐）、配对（任意已登录
+   浏览器），或在终端输入用户名和密码:
 
    ```bash
    ontrack login
@@ -111,16 +110,20 @@ bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
    ontrack submission upload --project-id 87 --abbr D4 --file ./report.pdf --confirm
    ```
 
-不带参数运行 `ontrack` 会打开交互式启动器并引导选择任务。端到端流程见
+在交互式终端中不带参数运行 `ontrack` 会打开全屏 TUI。使用
+`ontrack welcome` 可进入旧的编号启动器。端到端流程见
 [docs/workflows.md](docs/workflows.md)（英文）。
 
 ## 认证
 
-`ontrack login` 在所有环境下默认走配对中继登录：你在自己的浏览器里完成真实的
-Monash SSO 登录，凭证端到端加密传回 CLI。`--auto` 可改用受控浏览器捕获；手动
-redirect URL 导入与直接 `--auth-token` 登录作为后备路径保留。浏览器里捕获的会话可
-通过受限 refresh cookie 静默续期；配对得到的会话不行——那个 cookie 在你自己的浏览器
-里是 HttpOnly 的，到期只能重新登录。全部登录流程、会话缓存位置、登录输出与退出登录详见
+`ontrack login` 在交互式终端里会推荐本机打开浏览器（可静默续期），配对或终端
+用户名/密码仍可作为另两个选项。`--pair` / `--auto` / `--sso` 跳过询问。配对把
+凭证端到端加密传回；`--auto` 能拿到可静默续期的 refresh cookie；`--sso` 在
+终端输入用户名密码，由隐藏浏览器填写 Okta。手动 redirect URL 导入与直接
+`--auth-token` 登录作为后备路径保留。配对得到的会话拿不到 refresh cookie——能续期
+的凭证是浏览器里的 HttpOnly cookie，任何书签都读不到它，所以配对会话只能活到
+access token 过期为止，`login` 会明确提示这一点。
+全部登录流程、会话缓存位置、登录输出与退出登录详见
 [docs/authentication.md](docs/authentication.md)（英文）。
 
 ## Agent-first 使用方式
@@ -205,8 +208,9 @@ MCP、watch 流以及基于幂等键的安全写操作详见
 
 | 命令 | 作用 |
 | --- | --- |
-| `ontrack` / `ontrack welcome` | 交互式启动器，支持引导选择任务 |
-| `ontrack login` / `logout` / `whoami` | 配对登录（默认）、清理会话、查看缓存账号 |
+| `ontrack` | 在交互式终端中打开全屏任务 TUI |
+| `ontrack welcome` | 旧的编号启动器，支持引导选择任务 |
+| `ontrack login` / `logout` / `whoami` | 交互登录（本机 / 配对 / 终端）、清理会话、查看缓存账号 |
 | `ontrack auth-method` / `auth status` / `auth ensure` | 认证方式与 credential 生命周期 |
 | `ontrack projects` / `units` / `tasks` / `inbox` | 列出项目、课程和任务数据 |
 | `ontrack task show` / `task resources` / `task set-status` | 任务详情、资源压缩包、学生侧状态流转 |

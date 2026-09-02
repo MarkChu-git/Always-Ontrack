@@ -47,6 +47,8 @@ const ACCESS_TOKEN = 'e2e-access-token';
 const RENEWED_TOKEN = 'e2e-renewed-token';
 const REFRESH_TOKEN = 'e2e-refresh-token';
 const PAIRED_TOKEN = 'paired-token';
+/** The pending one-time token a bookmarklet can forward from the landing URL. */
+const LANDING_TOKEN = 'landing-url-token';
 const USERNAME = 'student1';
 
 function runCli(
@@ -472,10 +474,13 @@ function startPairableOnTrackMock(
   options: {
     read?: 'accepted' | 'expired';
     exchange?: 'accepted' | 'expired';
+    /** The only token `POST /auth` may be offered; any other fails the test. */
+    exchangeableToken?: string;
   } = {},
 ) {
   const read = options.read ?? 'accepted';
   const exchange = options.exchange ?? 'accepted';
+  const exchangeableToken = options.exchangeableToken ?? PAIRED_TOKEN;
   return startMock((request, body) => {
     if (request.url === '/api/auth/method') {
       return {
@@ -493,9 +498,14 @@ function startPairableOnTrackMock(
     }
     if (request.url === '/api/auth' && request.method === 'POST') {
       const payload = JSON.parse(body) as Record<string, unknown>;
-      assert.equal(payload.auth_token, PAIRED_TOKEN);
       assert.equal(payload.username, USERNAME);
       assert.equal(payload.remember, true);
+      // An already-live token must never be replayed here, whatever the verdict.
+      assert.equal(
+        payload.auth_token,
+        exchangeableToken,
+        'the wrong credential was offered to /auth',
+      );
       return exchange === 'accepted'
         ? {
             status: 201,
@@ -538,6 +548,9 @@ test(
       assert.equal(session.source, 'pair-relay');
       assert.equal(hits.authExchange, 0, '/auth must not be called for a live token');
       assert.equal(hits.projects, 1, 'the credential must be verified exactly once');
+      // The user must be told the session is short, without being told to try
+      // something that cannot work: a minted token can never earn the cookie.
+      assert.match(login.stdout, /A paired session cannot renew itself silently/);
     } finally {
       server.close();
       relay.server.close();
@@ -691,6 +704,52 @@ test(
 );
 
 test(
+  'e2e: a pasted landing URL is exchanged, so that paired session can renew silently',
+  async () => {
+    const home = await makeHome();
+    // The pairing page's paste box reports the legacy contract, which is the one
+    // paired path that goes through `POST /auth` and so can earn the cookie.
+    const { server, baseUrl, hits } = await startPairableOnTrackMock({
+      exchangeableToken: LANDING_TOKEN,
+    });
+    const relay = await startMockRelay();
+
+    try {
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: { ONTRACK_RELAY_URL: relay.relayUrl },
+        payload: {
+          authToken: LANDING_TOKEN,
+          username: USERNAME,
+          contract: 'legacy-auth',
+        },
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      assert.equal(session.authToken, ACCESS_TOKEN);
+      assert.equal(hits.authExchange, 1);
+      assert.equal(hits.projects, 0, 'a declared login token needs no verification read');
+      assert.match(
+        await readFile(home.browserStatePath, 'utf8'),
+        /refresh_token/,
+        'the exchange must leave the refresh cookie behind for silent renewal',
+      );
+      assert.doesNotMatch(login.stdout, /cannot renew itself silently/);
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
   'e2e: pairing works with --relay-url instead of the env var',
   async () => {
     const home = await makeHome();
@@ -732,6 +791,25 @@ test('e2e: --pair conflicts and an empty relay with --pair fail fast', async () 
     });
     assert.notEqual(disabled.exitCode, 0);
     assert.match(disabled.stderr, /Pairing is disabled/);
+  } finally {
+    await cleanupHome(home);
+  }
+});
+
+test('e2e: --sso conflicts with --auto/--pair fail fast', async () => {
+  const home = await makeHome();
+  try {
+    const withAuto = await runCli(['login', '--sso', '--auto'], home, {
+      env: { ONTRACK_HEADLESS: '1' },
+    });
+    assert.notEqual(withAuto.exitCode, 0);
+    assert.match(withAuto.stderr, /either --auto or --sso/);
+
+    const withPair = await runCli(['login', '--sso', '--pair'], home, {
+      env: { ONTRACK_HEADLESS: '1' },
+    });
+    assert.notEqual(withPair.exitCode, 0);
+    assert.match(withPair.stderr, /cannot be combined with --sso/);
   } finally {
     await cleanupHome(home);
   }

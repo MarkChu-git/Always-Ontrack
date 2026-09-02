@@ -5,6 +5,7 @@ import {
   createOnTrackAuthBroker,
   type OnTrackAuthBroker,
 } from './lib/auth-broker.js';
+import { reportAuthDiagnosticToStderr } from './lib/auth-diagnostic.js';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from './lib/auth-runtime.js';
 import { clearSession } from './lib/session.js';
 import { clearAllBrowserSessionState } from './lib/auto-login.js';
@@ -34,7 +35,11 @@ export interface AuthMcpDependencies {
 
 function defaultDependencies(): AuthMcpDependencies {
   return {
-    createBroker: (baseUrl) => createOnTrackAuthBroker({ baseUrl }),
+    createBroker: (baseUrl) =>
+      createOnTrackAuthBroker(
+        { baseUrl },
+        { reportDiagnostic: reportAuthDiagnosticToStderr },
+      ),
     clearSession: () => clearSession(),
     clearBrowserSessionState: async () => clearAllBrowserSessionState(),
   };

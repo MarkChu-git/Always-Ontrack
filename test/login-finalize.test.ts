@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OnTrackApiClient } from '../src/lib/api.js';
+import { OnTrackHttpError, OnTrackTransportError } from '../src/lib/auth.js';
 import {
   finalizeCapturedLogin,
   PairedCredentialRejectedError,
@@ -165,6 +166,50 @@ test('a declared legacy-auth pairing contract exchanges without verifying first'
 
   assert.equal(session.authToken, EXCHANGED_TOKEN);
   assert.deepEqual(calls.map((call) => call.method), ['POST']);
+});
+
+test('a declared legacy-auth pairing contract reports a 419 as re-pairing guidance', async () => {
+  // This is the landing-URL paste path, and a spent token is its normal failure;
+  // the raw 419 would say nothing about what to do next.
+  mockFetch(() => jsonResponse({ error: 'Authentication Timeout' }, 419));
+
+  await assert.rejects(
+    () =>
+      finalizeCapturedLogin(
+        new OnTrackApiClient(BASE_URL),
+        pairedMaterial({ contract: 'legacy-auth' }),
+      ),
+    PairedCredentialRejectedError,
+  );
+});
+
+test('a declared legacy-auth pairing contract preserves 5xx and transport failures', async () => {
+  for (const scenario of [
+    {
+      fetch: () => jsonResponse({ error: 'service unavailable' }, 503),
+      expected: OnTrackHttpError,
+    },
+    {
+      fetch: () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+      expected: OnTrackTransportError,
+    },
+  ]) {
+    mockFetch(scenario.fetch);
+    await assert.rejects(
+      () =>
+        finalizeCapturedLogin(
+          new OnTrackApiClient(BASE_URL),
+          pairedMaterial({ contract: 'legacy-auth' }),
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof scenario.expected);
+        assert.equal(error instanceof PairedCredentialRejectedError, false);
+        return true;
+      },
+    );
+  }
 });
 
 test('a rejected access-token pairing contract is never offered to the exchange', async () => {

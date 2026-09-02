@@ -12,9 +12,19 @@
  * active access token, so replaying a live token there throws away a working
  * credential. The browser capture paths report their contract; pairing
  * bookmarklets old enough to report nothing are resolved against the server.
+ *
+ * It also decides how long the session lives, and a paired credential cannot
+ * win that: only the exchange returns a refresh cookie, only a refresh cookie
+ * lets a session renew silently, and nothing reachable from a page's JavaScript
+ * yields either one (see docs/authentication.md). A paired session therefore
+ * lives exactly as long as the access token it was handed.
  */
 import type { OnTrackApiClient } from './api.js';
-import { classifyAuthFailure, createSessionFromAccessToken } from './auth.js';
+import {
+  classifyAuthFailure,
+  createSessionFromAccessToken,
+  OnTrackHttpError,
+} from './auth.js';
 import {
   persistRefreshCookie,
   type LoginCredentials,
@@ -27,6 +37,11 @@ import type {
   SessionData,
   SignInResponse,
 } from './types.js';
+import {
+  persistRefreshCookieBestEffort,
+  reportAuthDiagnosticToStderr,
+  type AuthDiagnosticSink,
+} from './auth-diagnostic.js';
 
 /**
  * Read-only route used to ask OnTrack whether a credential is already a live
@@ -43,6 +58,25 @@ export class PairedCredentialRejectedError extends Error {
     );
     this.name = 'PairedCredentialRejectedError';
   }
+}
+
+function persistCapturedRefreshCookie(
+  cookie: RefreshCookieMaterial | undefined,
+  baseUrl: string,
+  reportDiagnostic: AuthDiagnosticSink,
+): void {
+  if (!cookie) return;
+  persistRefreshCookieBestEffort(
+    () => persistRefreshCookie(cookie, { targetOrigin: new URL(baseUrl).origin }),
+    reportDiagnostic,
+  );
+}
+
+function translatePairedAuthRejection(error: unknown): never {
+  if (error instanceof OnTrackHttpError && error.authFailure !== 'other') {
+    throw new PairedCredentialRejectedError({ cause: error });
+  }
+  throw error;
 }
 
 /** Convert a credential captured from the verified access-token response into a session. */
@@ -75,17 +109,14 @@ export function sessionFromAccessTokenCapture(
 export async function signInAndPersistRefreshCookie(
   api: OnTrackApiClient,
   payload: { auth_token: string; username: string; remember: boolean },
+  reportDiagnostic: AuthDiagnosticSink = reportAuthDiagnosticToStderr,
 ): Promise<SignInResponse> {
   const result = await api.signInWithCookieCapture(payload);
-  if (result.refreshCookie) {
-    try {
-      persistRefreshCookie(result.refreshCookie, {
-        targetOrigin: new URL(api.base).origin,
-      });
-    } catch {
-      // Refresh-cookie persistence is best effort; the session itself is valid.
-    }
-  }
+  persistCapturedRefreshCookie(
+    result.refreshCookie ?? undefined,
+    api.base,
+    reportDiagnostic,
+  );
   return result.response;
 }
 
@@ -128,12 +159,17 @@ async function sessionFromExchange(
   api: OnTrackApiClient,
   captured: CapturedLoginMaterial,
   savedAt: string,
+  reportDiagnostic: AuthDiagnosticSink,
 ): Promise<SessionData> {
-  const response = await signInAndPersistRefreshCookie(api, {
-    auth_token: captured.authToken,
-    username: captured.username,
-    remember: true,
-  });
+  const response = await signInAndPersistRefreshCookie(
+    api,
+    {
+      auth_token: captured.authToken,
+      username: captured.username,
+      remember: true,
+    },
+    reportDiagnostic,
+  );
   return {
     baseUrl: api.base,
     username: captured.username,
@@ -179,15 +215,22 @@ async function verifyLiveCredential(
  * login instead of failing every later command. Only a rejected credential that
  * declared nothing is worth trying as a pending one-time login token — that is
  * what a bookmarklet predating the contract field may have caught from the
- * `sign_in` landing URL.
+ * `sign_in` landing URL, and what the pairing page's paste box always sends.
  */
 async function sessionFromPairedCredential(
   api: OnTrackApiClient,
   captured: CapturedLoginMaterial,
   savedAt: string,
+  reportDiagnostic: AuthDiagnosticSink,
 ): Promise<SessionData> {
   if (captured.contract === 'legacy-auth') {
-    return sessionFromExchange(api, captured, savedAt);
+    try {
+      return await sessionFromExchange(api, captured, savedAt, reportDiagnostic);
+    } catch (error) {
+      // A spent landing-URL token answers 419 here. Reporting that verbatim is
+      // the raw expiry message this whole path exists to translate.
+      translatePairedAuthRejection(error);
+    }
   }
   const candidate = sessionFromLiveCredential(api.base, captured, savedAt);
   if ((await verifyLiveCredential(api, candidate)) !== 'rejected') {
@@ -200,9 +243,9 @@ async function sessionFromPairedCredential(
     throw new PairedCredentialRejectedError();
   }
   try {
-    return await sessionFromExchange(api, captured, savedAt);
+    return await sessionFromExchange(api, captured, savedAt, reportDiagnostic);
   } catch (error) {
-    throw new PairedCredentialRejectedError({ cause: error });
+    translatePairedAuthRejection(error);
   }
 }
 
@@ -215,11 +258,12 @@ async function sessionFromPairedCredential(
 export async function finalizeCapturedLogin(
   api: OnTrackApiClient,
   captured: CapturedLoginMaterial,
+  reportDiagnostic: AuthDiagnosticSink = reportAuthDiagnosticToStderr,
 ): Promise<SessionData> {
   const savedAt = new Date().toISOString();
   const session =
     captured.source === 'pair-relay'
-      ? await sessionFromPairedCredential(api, captured, savedAt)
+      ? await sessionFromPairedCredential(api, captured, savedAt, reportDiagnostic)
       : captured.contract === 'access-token'
         ? sessionFromAccessTokenCapture(
             api.base,
@@ -232,20 +276,12 @@ export async function finalizeCapturedLogin(
             },
             savedAt,
           )
-        : await sessionFromExchange(api, captured, savedAt);
+        : await sessionFromExchange(api, captured, savedAt, reportDiagnostic);
 
   // Persist session for subsequent CLI/TUI commands.
   await saveSession(session);
 
-  if (captured.refreshCookie) {
-    try {
-      persistRefreshCookie(captured.refreshCookie, {
-        targetOrigin: new URL(api.base).origin,
-      });
-    } catch {
-      // Refresh-cookie persistence is best effort; the session itself is valid.
-    }
-  }
+  persistCapturedRefreshCookie(captured.refreshCookie, api.base, reportDiagnostic);
 
   return session;
 }

@@ -648,14 +648,15 @@ export class OnTrackApiClient {
   }
 
   /**
-   * Exchange a stored refresh cookie for a new access token. The server answers
-   * 201 with an empty body when the cookie is missing or declined, so every
-   * failure shape collapses to null for the caller.
+   * Exchange a stored refresh cookie for a new access token, keeping any
+   * rotated cookie the server sends back. The server answers 201 with an empty
+   * body when the cookie is missing or declined, so every failure shape
+   * collapses to null for the caller.
    */
-  async refreshAccessToken(cookie: {
+  async refreshAccessTokenWithCookieCapture(cookie: {
     username: string;
     refreshToken: string;
-  }): Promise<SignInResponse | null> {
+  }): Promise<CapturedSignIn | null> {
     // Cookie values come from the local restricted store; strip anything that
     // could break header framing before they reach the Cookie header.
     const safeToken = cookie.refreshToken.replace(/[;\r\n]/g, '');
@@ -693,7 +694,10 @@ export class OnTrackApiClient {
     ) {
       return null;
     }
-    return body as SignInResponse;
+    return {
+      response: body as SignInResponse,
+      refreshCookie: extractRefreshCookieFromHeaders(response.headers),
+    };
   }
 
   /** Revoke remote auth session (best effort). */

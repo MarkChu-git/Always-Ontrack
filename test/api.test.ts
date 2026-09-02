@@ -1038,7 +1038,7 @@ test('signIn still resolves the plain response body', async () => {
   assert.equal('refreshCookie' in response, false);
 });
 
-test('refreshAccessToken sends the stored cookie pair and parses the new token', async () => {
+test('the access-token renewal sends the stored cookie pair and parses the new token', async () => {
   const client = new OnTrackApiClient(session.baseUrl);
   let cookieHeader = '';
   mockFetch(async (input, init) => {
@@ -1055,36 +1055,87 @@ test('refreshAccessToken sends the stored cookie pair and parses the new token',
     );
   });
 
-  const renewed = await client.refreshAccessToken({
+  const renewed = await client.refreshAccessTokenWithCookieCapture({
     username: 'student1',
     refreshToken: 'refresh-secret',
   });
   assert.equal(cookieHeader, 'refresh_token=refresh-secret; username=student1');
-  assert.equal(renewed?.auth_token, 'fresh-secret');
+  assert.equal(renewed?.response.auth_token, 'fresh-secret');
 });
 
-test('refreshAccessToken collapses every decline shape to null', async () => {
+test('refreshAccessTokenWithCookieCapture keeps the cookie the renewal rotated', async () => {
+  // The renewal window only rolls forward if the rotated cookie is kept; the
+  // one that was just spent carries the older expiry.
   const client = new OnTrackApiClient(session.baseUrl);
-  // Server answers 201 with an empty body when the cookie is declined.
-  mockFetch(async () => new Response('', { status: 201 }));
-  assert.equal(
-    await client.refreshAccessToken({ username: 'student1', refreshToken: 'stale' }),
-    null,
+  mockFetch(async () => {
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.append(
+      'set-cookie',
+      'refresh_token=rotated-secret; Path=/api/auth; Expires=Wed, 19 Aug 2026 10:00:00 GMT; Secure; HttpOnly; SameSite=Lax',
+    );
+    headers.append('set-cookie', 'username=student1; Path=/api/auth; HttpOnly');
+    return new Response(
+      JSON.stringify({
+        auth_token: 'fresh-secret',
+        auth_token_expiry: '2026-08-12T10:10:00.000Z',
+        user: { username: 'student1' },
+      }),
+      { status: 201, headers },
+    );
+  });
+
+  const renewed = await client.refreshAccessTokenWithCookieCapture({
+    username: 'student1',
+    refreshToken: 'refresh-secret',
+  });
+  assert.equal(renewed?.response.auth_token, 'fresh-secret');
+  assert.deepEqual(renewed?.refreshCookie, {
+    username: 'student1',
+    refreshToken: 'rotated-secret',
+    expiresAt: '2026-08-19T10:00:00.000Z',
+  });
+});
+
+test('refreshAccessTokenWithCookieCapture reports no cookie when none is rotated', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  mockFetch(
+    async () =>
+      new Response(
+        JSON.stringify({
+          auth_token: 'fresh-secret',
+          auth_token_expiry: '2026-08-12T10:10:00.000Z',
+          user: { username: 'student1' },
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      ),
   );
 
+  const renewed = await client.refreshAccessTokenWithCookieCapture({
+    username: 'student1',
+    refreshToken: 'refresh-secret',
+  });
+  assert.equal(renewed?.refreshCookie, null);
+});
+
+test('the access-token renewal collapses every decline shape to null', async () => {
+  const client = new OnTrackApiClient(session.baseUrl);
+  const renew = () =>
+    client.refreshAccessTokenWithCookieCapture({
+      username: 'student1',
+      refreshToken: 'stale',
+    });
+
+  // Server answers 201 with an empty body when the cookie is declined.
+  mockFetch(async () => new Response('', { status: 201 }));
+  assert.equal(await renew(), null);
+
   mockFetch(async () => new Response('nope', { status: 419 }));
-  assert.equal(
-    await client.refreshAccessToken({ username: 'student1', refreshToken: 'stale' }),
-    null,
-  );
+  assert.equal(await renew(), null);
 
   mockFetch(async () => {
     throw new Error('connection reset');
   });
-  assert.equal(
-    await client.refreshAccessToken({ username: 'student1', refreshToken: 'stale' }),
-    null,
-  );
+  assert.equal(await renew(), null);
 });
 
 test('updateTaskStatus PUTs the trigger and returns the resulting entity status', async () => {
