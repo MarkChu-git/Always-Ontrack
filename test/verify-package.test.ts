@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'bun:test';
 import {
   terminateSubprocess,
+  tuiSmokeEnvironment,
   validateTarEntries,
   validateTarEntryTypes,
   verifyInstalledTui,
@@ -55,6 +56,13 @@ async function assertTuiSmokeFailure(
     await rm(root, { recursive: true, force: true });
   }
 }
+
+test('packed TUI smoke env never targets production OnTrack', () => {
+  const env = tuiSmokeEnvironment('/tmp/ontrack-config');
+  assert.equal(env.ONTRACK_BASE_URL, 'http://127.0.0.1:1');
+  assert.equal(env.ONTRACK_HEADLESS, '1');
+  assert.equal(env.ONTRACK_RELAY_URL, '');
+});
 
 test('verifyInstalledTui bounds timeout, output, and nonzero-exit failures', async () => {
   await assertTuiSmokeFailure(

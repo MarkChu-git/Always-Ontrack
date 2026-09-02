@@ -268,13 +268,18 @@ function createTuiCapture(outputLimit: number): TuiCapture {
   };
 }
 
-function tuiSmokeEnvironment(configRoot: string): Record<string, string> {
+export function tuiSmokeEnvironment(configRoot: string): Record<string, string> {
   return {
     APPDATA: configRoot,
     COLORTERM: 'truecolor',
     LANG: 'C.UTF-8',
     LOCALAPPDATA: configRoot,
     NO_COLOR: '1',
+    // The packed no-arg CLI loads the real TUI, which probes auth on startup.
+    // Pin a refused loopback so CI never calls production or launches a browser.
+    ONTRACK_BASE_URL: 'http://127.0.0.1:1',
+    ONTRACK_HEADLESS: '1',
+    ONTRACK_RELAY_URL: '',
     TEMP: configRoot,
     TERM: 'xterm-256color',
     TMP: configRoot,
