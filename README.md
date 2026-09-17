@@ -3,11 +3,11 @@
 [简体中文](./README.zh-CN.md)
 
 <p align="center">
-  <img src="./always-ontrack-poster.png" alt="Always OnTrack — agent-first CLI for Monash OnTrack / Doubtfire" width="720" />
+  <img src="./always-ontrack-poster.jpg" alt="Always OnTrack — agent-first CLI and TUI for Monash OnTrack / Doubtfire" width="720" />
 </p>
 
 <p align="center">
-  An agent-first CLI and authentication MCP for Monash OnTrack / Doubtfire
+  An agent-first CLI, TUI, and authentication MCP for Monash OnTrack / Doubtfire
 </p>
 
 `ontrack-cli` turns common Monash OnTrack workflows into a single command

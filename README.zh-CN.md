@@ -3,11 +3,11 @@
 [English](./README.md)
 
 <p align="center">
-  <img src="./always-ontrack-poster.png" alt="Always OnTrack — 面向 Agent 的 Monash OnTrack / Doubtfire CLI" width="720" />
+  <img src="./always-ontrack-poster.jpg" alt="Always OnTrack — 面向 Agent 的 Monash OnTrack / Doubtfire CLI 与 TUI" width="720" />
 </p>
 
 <p align="center">
-  面向 Agent 的 Monash OnTrack / Doubtfire CLI 与鉴权 MCP
+  面向 Agent 的 Monash OnTrack / Doubtfire CLI、TUI 与鉴权 MCP
 </p>
 
 `ontrack-cli` 把 Monash OnTrack 中常见的登录、查看任务、跟踪反馈、下载 PDF、上传
