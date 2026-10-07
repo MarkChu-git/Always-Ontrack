@@ -1734,12 +1734,12 @@ export function buildContextOptionsWithStoredSession(
 }
 
 /**
- * Whether a request is the page spending the one-time landing token through
+ * Whether a request is the page spending the one-time login token through
  * `POST /api/auth`. The CLI exchanges that token itself, and doubtfire-api
  * destroys it on the first exchange and answers any later one with 419, so the
  * capture browser must never send this request.
  */
-export function isLandingTokenExchange(
+export function isLoginTokenExchange(
   method: string,
   url: string,
   postData: string | null,
@@ -3401,17 +3401,17 @@ async function captureSsoCredentialsInternal(
   const context = captureBrowser.context;
 
   try {
-    // The CLI exchanges the landing token itself (finalizeCapturedLogin), so
-    // the page's own exchange never reaches the server: whichever side spends
-    // the token first leaves the other with a 419. Test doubles without
-    // routing support simply skip the guard.
+    // The CLI exchanges the one-time login token itself
+    // (finalizeCapturedLogin), so the page's own exchange never reaches the
+    // server: whichever side spends the token first leaves the other with a
+    // 419. Test doubles without routing support simply skip the guard.
     if (typeof context.route === "function") {
       await context.route(
         (url) => url.origin === targetOrigin && url.pathname.startsWith("/api/auth"),
         async (route) => {
           const request = route.request();
           if (
-            isLandingTokenExchange(
+            isLoginTokenExchange(
               request.method(),
               request.url(),
               request.postData(),
@@ -3653,10 +3653,11 @@ async function captureSsoCredentialsInternal(
         "Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.",
       );
     }
-    // A landing token (URL/request capture) is exchanged by the CLI, and that
-    // exchange issues its own refresh cookie. Any cookie already in this jar is
-    // restored state, which would overwrite the fresh one once the session is
-    // persisted, so only a credential the page itself holds takes the jar's.
+    // A one-time login token (URL/request capture) is exchanged by the CLI,
+    // and that exchange issues its own refresh cookie. Any cookie already in
+    // this jar is restored state, which would overwrite the fresh one once
+    // the session is persisted, so only a credential the page itself holds
+    // takes the jar's.
     const capturedFinal = captured as LoginCredentials;
     if (capturedFinal.source !== "url" && capturedFinal.source !== "auth_request") {
       try {

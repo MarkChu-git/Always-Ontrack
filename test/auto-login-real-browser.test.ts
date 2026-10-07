@@ -18,11 +18,11 @@ import { finalizeCapturedLogin } from '../src/lib/login-finalize.js';
 
 /**
  * The controlled browser runs the real OnTrack web app, and that app spends
- * the one-time landing token itself (doubtfire-web sign-in.component). These
- * tests drive a real Chromium against a loopback stand-in for both Okta and
- * OnTrack, because the bug lived in how the two sides race for that token —
- * something no fake browser can reproduce. They skip where no system browser
- * is installed.
+ * the one-time login token from the landing URL itself (doubtfire-web
+ * sign-in.component). These tests drive a real Chromium against a loopback
+ * stand-in for both Okta and OnTrack, because the bug lived in how the two
+ * sides race for that token — something no fake browser can reproduce. They
+ * skip where no system browser is installed.
  */
 
 const USERNAME = 'student1';
@@ -83,7 +83,7 @@ function cookieValue(request: IncomingMessage, name: string): string | undefined
 }
 
 /**
- * Worst case for the CLI: the page spends the landing token the moment it
+ * Worst case for the CLI: the page spends the login token the moment it
  * loads, before the CLI can close the window. The real app first waits for
  * `/auth/method`, which only gives the CLI more time.
  */
@@ -232,7 +232,7 @@ afterEach(async () => {
 });
 
 browserTest(
-  'a first login completes although the page tries to spend the landing token itself',
+  'a first login completes although the page tries to spend the login token itself',
   async () => {
     const onTrack = await startFakeOnTrack();
     try {

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import {
   buildContextOptionsWithStoredSession,
   captureCredentialsFromStoredBrowserSession,
-  isLandingTokenExchange,
+  isLoginTokenExchange,
   persistRefreshCookie,
   readStoredRefreshCookie,
   setBrowserSessionStatePathForTests,
@@ -761,7 +761,7 @@ test("failed exclusive publication removes its partial file before restoring sta
   );
 });
 
-test("isLandingTokenExchange matches only the page's one-time token exchange", () => {
+test("isLoginTokenExchange matches only the page's one-time token exchange", () => {
   const origin = "https://ontrack.infotech.monash.edu";
   const exchange = '{"auth_token":"t","username":"u1","remember":true}';
   const cases: Array<[string, string, string | null, boolean]> = [
@@ -769,7 +769,7 @@ test("isLandingTokenExchange matches only the page's one-time token exchange", (
     ["POST", `${origin}/api/auth.json`, exchange, true],
     ["POST", `${origin}/api/auth/`, exchange, true],
     ["POST", `${origin}/api/auth`, '{"authToken":"t","username":"u1"}', true],
-    // Renewal and password sign-in carry no landing token and must go through.
+    // Renewal and password sign-in carry no login token and must go through.
     ["POST", `${origin}/api/auth/access-token`, "{}", false],
     ["POST", `${origin}/api/auth`, '{"username":"u1","password":"p"}', false],
     ["GET", `${origin}/api/auth`, exchange, false],
@@ -779,7 +779,7 @@ test("isLandingTokenExchange matches only the page's one-time token exchange", (
   ];
   for (const [method, url, body, expected] of cases) {
     assert.equal(
-      isLandingTokenExchange(method, url, body, origin),
+      isLoginTokenExchange(method, url, body, origin),
       expected,
       `${method} ${url} ${body}`,
     );

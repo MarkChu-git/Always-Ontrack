@@ -461,10 +461,11 @@ test('credential capture fails closed before launching unauthenticated Lightpand
   assert.equal(launchCalls, 0);
 });
 
-test('a landing-token capture leaves the refresh cookie to the CLI exchange', async () => {
-  // The CLI spends a landing token itself and that exchange issues a fresh
-  // refresh cookie. One already in the jar is restored state, and reporting it
-  // would overwrite the fresh cookie once the session is persisted.
+test('a login-token capture leaves the refresh cookie to the CLI exchange', async () => {
+  // The CLI spends a one-time login token itself and that exchange issues a
+  // fresh refresh cookie. One already in the jar is restored state, and
+  // reporting it would overwrite the fresh cookie once the session is
+  // persisted.
   const credentials = await captureSsoCredentials({
     ssoUrl: 'https://sso.example/login',
     apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
