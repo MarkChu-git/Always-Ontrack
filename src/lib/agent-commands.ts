@@ -671,7 +671,7 @@ const authStatusOutputSchema = z
     status: z.enum(['signed_out', 'usable', 'expired', 'unknown']),
     source: z.string().min(1).optional(),
     expiresAt: z.string().min(1).optional(),
-    renewableUntil: z.string().min(1).optional(),
+    renewableUntil: agentRfc3339TimestampSchema.optional(),
     baseUrl: z.string().url(),
   })
   .strict();

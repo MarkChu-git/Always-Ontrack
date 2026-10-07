@@ -140,6 +140,23 @@ test('broker status reports how long a stored refresh cookie can renew the sessi
   assert.equal(JSON.stringify(status).includes('refresh-secret'), false);
 });
 
+test('broker status reports renewableUntil as a canonical UTC instant', async () => {
+  // The agent contract validates RFC 3339 instants, so a stored expiry in
+  // another valid form must not reach it verbatim.
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({
+      readStoredRefreshCookie: () => ({
+        username: 'student1',
+        refreshToken: 'refresh-secret',
+        expiresAt: '2026-08-07T10:30:00+10:00',
+      }),
+    }),
+  );
+  const status = await broker.status();
+  assert.equal(status.renewableUntil, '2026-08-07T00:30:00.000Z');
+});
+
 test('broker status claims no renewal from an expired, undated, or foreign refresh cookie', async () => {
   const cookies: RefreshCookieMaterial[] = [
     { username: 'student1', refreshToken: 'stale', expiresAt: '2026-07-31T00:59:00.000Z' },

@@ -259,7 +259,7 @@ function renewableUntil(
   }
   const until = Date.parse(cookie.expiresAt);
   return Number.isFinite(until) && until > context.dependencies.now().getTime()
-    ? cookie.expiresAt
+    ? new Date(until).toISOString()
     : undefined;
 }
 

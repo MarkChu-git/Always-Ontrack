@@ -365,6 +365,20 @@ test('auth.status carries how long the session can renew itself', async () => {
   );
 });
 
+test('auth.status refuses a renewableUntil that is not an RFC 3339 instant', async () => {
+  const engine = createAgentExecutionEngine(
+    createNativeAgentCommands({
+      authStatus: async () => ({
+        status: 'usable',
+        renewableUntil: '2026-10-14',
+        baseUrl: 'https://ontrack.example/api',
+      }),
+    } as Partial<NativeAgentCommandHandlers> as NativeAgentCommandHandlers),
+  );
+  const result = await engine.call({ command: 'auth.status', input: {} });
+  assert.notEqual(result.status, 'success', JSON.stringify(result));
+});
+
 test('native definitions keep safety metadata aligned with the compatibility projection', () => {
   const commands = createNativeAgentCommands({
     authStatus: async () => ({ status: 'signed_out', baseUrl: 'https://example.test/api' }),
