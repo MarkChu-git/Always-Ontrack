@@ -214,7 +214,7 @@ export function createAuthMcpServer(
     {
       title: 'Clear local OnTrack authentication',
       description:
-        'Clears the local CLI credential. This does not automate or bypass Monash logout.',
+        'Clears the local CLI credential, browser refresh state, and SSO browser profile. This does not automate or bypass Monash logout.',
       inputSchema: z.object({
         confirm: z.boolean().default(false),
       }).strict(),
