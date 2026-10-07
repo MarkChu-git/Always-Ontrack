@@ -21,7 +21,7 @@ This flow:
 1. first probes the CLI's previously saved, OnTrack-only browser state and reuses it when valid
 2. in an interactive terminal, recommends a browser window on this machine and still offers pairing or terminal username/password (`--pair` / `--auto` / `--sso` skip the prompt; non-interactive login still defaults to pairing when a relay is configured)
 3. pairing prints a one-time link — you sign in in your own browser on any device, reusing an existing OnTrack session if you have one, and the credential arrives end-to-end encrypted (see the pairing section below)
-4. this-machine / `--auto` opens a visible browser window on machines with a display and passively captures the resulting credentials, including a refresh cookie
+4. this-machine / `--auto` opens a visible browser window on machines with a display, captures the one-time login token from the sign-in redirect, and exchanges it itself, which also stores a refresh cookie
 5. terminal / `--sso` asks for Monash username and password in the terminal and fills Okta in a hidden browser; MFA stays in the CLI or TUI
 6. captures the resulting credentials, exchanging them through `/api/auth` only when they are not already API credentials
 7. stores a local session cache
@@ -145,6 +145,12 @@ The capture implementation can read credentials from:
 - `/api/auth` response body
 - `localStorage`
 - cookies
+
+The `sign_in?authToken=...` landing URL carries a one-time login token: OnTrack
+destroys it on the first `POST /api/auth` exchange and answers any later one
+with 419. The OnTrack web app in the capture window would spend it as soon as it
+loads, so the capture stops the page's own exchange and the CLI exchanges the
+token itself, which is also what returns the refresh cookie.
 
 ### System browser profile reuse
 
