@@ -39,12 +39,12 @@ bunx playwright@1.58.2 install chromium
 
 ## `Input closed before "..." was answered`
 
-The command reached an interactive prompt after stdin had already ended, as in
-a script or CI job with no input attached, so it fails with a non-zero exit
-instead of continuing without an answer. Run it in an interactive terminal.
-From `login`, this is the manual sign_in URL paste that follows a failed browser
-capture or pairing attempt; see [authentication.md](authentication.md) for the
-other ways to sign in.
+Stdin ended before an interactive prompt got an answer, as in a script or CI
+job with no input attached, so the command fails with a non-zero exit instead
+of continuing without one. Run it in an interactive terminal. From `login`, the
+prompt is most often the manual redirect URL paste that follows a failed browser
+capture or pairing attempt (`--sso` also prompts for the username, password, and
+MFA); see [authentication.md](authentication.md) for the other ways to sign in.
 
 ## `419 Authentication Timeout`
 
