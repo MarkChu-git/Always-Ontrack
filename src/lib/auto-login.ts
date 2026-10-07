@@ -959,6 +959,27 @@ function preparePrivateSsoBrowserProfileDir(): string | null {
 }
 
 /**
+ * Forget the SSO browser profile: the identity provider's session and the
+ * device cookie that lets it skip MFA. A symlink or stray file at the managed
+ * path is removed itself and never followed.
+ */
+export function clearSsoBrowserProfile(): void {
+  const profileDir = resolveManagedSsoBrowserProfileDir();
+  let metadata: ReturnType<typeof lstatSync>;
+  try {
+    // codeql[js/path-injection]
+    metadata = lstatSync(profileDir);
+  } catch {
+    return;
+  }
+  // codeql[js/path-injection]
+  rmSync(profileDir, {
+    recursive: metadata.isDirectory() && !metadata.isSymbolicLink(),
+    force: true,
+  });
+}
+
+/**
  * Resolve the private directory containing an existing browser-state file.
  * The filename is fixed and the directory is canonicalized inside the local
  * operator's home before any atomic state operation receives it.
@@ -1270,12 +1291,21 @@ export function clearBrowserSessionState(storagePath?: string): void {
 }
 
 /**
- * Clear the managed browser credential store plus a safe legacy configured
- * location from pre-managed releases. Legacy cleanup is restricted to the
- * current operator home and never follows a final-component symlink.
+ * Clear the managed browser credential store, the SSO browser profile, plus a
+ * safe legacy configured location from pre-managed releases. Legacy cleanup is
+ * restricted to the current operator home and never follows a final-component
+ * symlink. The profile goes even when the state files cannot.
  */
 export function clearAllBrowserSessionState(): void {
-  clearBrowserSessionState();
+  try {
+    clearBrowserSessionState();
+    clearLegacyBrowserSessionState();
+  } finally {
+    clearSsoBrowserProfile();
+  }
+}
+
+function clearLegacyBrowserSessionState(): void {
   const managedPath = resolve(resolveManagedBrowserSessionStatePath());
   const legacyPath = resolve(resolveBrowserSessionStatePath());
   const trustedRoot = realpathSync(homedir());

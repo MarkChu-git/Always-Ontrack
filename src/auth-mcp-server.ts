@@ -249,7 +249,8 @@ export function createAuthMcpServer(
       ]);
       return toolResponse({
         status: 'success',
-        summary: 'The local OnTrack credential and browser refresh state were cleared.',
+        summary:
+          'The local OnTrack credential, browser refresh state, and SSO browser profile were cleared.',
         data: { status: 'signed_out' },
         next_actions: [],
         artifacts: [],
