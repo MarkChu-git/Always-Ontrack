@@ -206,7 +206,8 @@ an expired access token is routine. `ontrack auth status` reports it as
 same user can still renew the session: that is when the next sign-in is due.
 Until then an expired access token has the status `renewable`, not `expired`.
 The TUI header counts down to that time rather than to the access token's
-expiry, and says `session expired` once nothing can renew the session.
+expiry, shows no countdown for a refresh cookie that names no expiry, and says
+`session expired` once nothing can renew the session.
 
 The API client authenticates with these headers:
 
