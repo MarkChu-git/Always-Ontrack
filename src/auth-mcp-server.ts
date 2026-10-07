@@ -103,7 +103,11 @@ export function createAuthMcpServer(
         .status();
       return toolResponse({
         status: 'success',
-        summary: `OnTrack authentication is ${status.status}.`,
+        // The access token is short-lived; a stored refresh cookie keeps the
+        // session renewing silently, which "expired" alone would hide.
+        summary: status.renewableUntil
+          ? `OnTrack authentication is ${status.status}; it renews silently until ${status.renewableUntil}.`
+          : `OnTrack authentication is ${status.status}.`,
         data: { ...status },
         next_actions:
           status.status === 'usable'

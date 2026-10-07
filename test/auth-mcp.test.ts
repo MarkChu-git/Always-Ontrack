@@ -220,3 +220,42 @@ test('Auth MCP refuses caller-controlled origins before creating a broker', asyn
     },
   );
 });
+
+test('Auth MCP status says how long an expired access token keeps renewing', async () => {
+  await withClient(
+    {
+      createBroker: () => ({
+        status: async () => ({
+          status: 'expired',
+          source: 'browser-sso',
+          expiresAt: '2026-10-07T15:30:13.454Z',
+          renewableUntil: '2026-10-14T15:06:16.000Z',
+          baseUrl: 'https://ontrack.example/api',
+        }),
+        ensure: async () => ({
+          status: 'ready',
+          expiresAt: '2026-10-07T15:40:13.454Z',
+          refreshed: true,
+        }),
+        currentSession: async () => null,
+      }),
+      clearSession: async () => undefined,
+      clearBrowserSessionState: async () => undefined,
+    },
+    async (client) => {
+      const status = await client.callTool({ name: 'auth_status', arguments: {} });
+      const content = status.structuredContent as {
+        summary: string;
+        data: { renewableUntil?: string };
+        next_actions: Array<{ action: string; arguments: { interaction?: string } }>;
+      };
+      // "expired" alone reads as "sign in again"; the summary has to say the
+      // session still renews silently, and when that stops.
+      assert.match(content.summary, /renews silently until 2026-10-14T15:06:16\.000Z/);
+      assert.equal(content.data.renewableUntil, '2026-10-14T15:06:16.000Z');
+      assert.deepEqual(content.next_actions, [
+        { action: 'auth.ensure', arguments: { interaction: 'never' } },
+      ]);
+    },
+  );
+});
