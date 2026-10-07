@@ -3438,13 +3438,17 @@ async function captureSsoCredentialsInternal(
       methodLabel: string,
     ) => Promise<string | null | undefined>;
     onMfaNumberChallenge?: (numbers: string[]) => void;
+    /** False signs in without the SSO profile and its Okta session. */
+    useSsoProfile?: boolean;
   },
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
   const deadline = new SsoCaptureDeadline(timeoutMs);
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   const captureBrowser =
-    (await openPersistentSsoCapture(options, deadline)) ??
+    (guidedLogin?.useSsoProfile === false
+      ? null
+      : await openPersistentSsoCapture(options, deadline)) ??
     (await openThrowawaySsoCapture(options, targetOrigin, deadline));
   const context = captureBrowser.context;
 
@@ -4179,24 +4183,50 @@ export async function captureSsoCredentialsWithGuidedLogin(
   options: SsoLoginOptions,
   onStep?: (step: SsoStep) => void,
 ): Promise<LoginCredentials> {
-  const credentials = await captureSsoCredentialsInternal(
-    {
-      ssoUrl: options.ssoUrl,
-      apiBaseUrl: options.apiBaseUrl,
-      timeoutMs: options.timeoutMs,
-      headless: options.headless,
-      browserAdapter: options.browserAdapter,
-      onNotice: options.onNotice,
-    },
-    {
-      username: options.username,
-      password: options.password,
-      onStep,
-      chooseMfaMethod: options.chooseMfaMethod,
-      requestMfaCode: options.requestMfaCode,
-      onMfaNumberChallenge: options.onMfaNumberChallenge,
-    },
-  );
+  const attempt = async (useSsoProfile: boolean) => {
+    let askedForUsername = false;
+    const credentials = await captureSsoCredentialsInternal(
+      {
+        ssoUrl: options.ssoUrl,
+        apiBaseUrl: options.apiBaseUrl,
+        timeoutMs: options.timeoutMs,
+        headless: options.headless,
+        browserAdapter: options.browserAdapter,
+        onNotice: options.onNotice,
+      },
+      {
+        username: options.username,
+        password: options.password,
+        onStep: (step) => {
+          if (step === "username") askedForUsername = true;
+          onStep?.(step);
+        },
+        chooseMfaMethod: options.chooseMfaMethod,
+        requestMfaCode: options.requestMfaCode,
+        onMfaNumberChallenge: options.onMfaNumberChallenge,
+        useSsoProfile,
+      },
+    );
+    // Okta skips its prompts for an identity the SSO profile still holds,
+    // which need not be the one the user typed.
+    return askedForUsername || isSameSsoUser(options.username, credentials.username)
+      ? credentials
+      : null;
+  };
+  const credentials = (await attempt(true)) ?? (await attempt(false));
+  if (!credentials) {
+    throw new SsoFallbackError(
+      "automation_error",
+      "username",
+      `Okta signed in as another user than ${options.username}. Run \`ontrack logout\` to forget that session, then sign in again.`,
+    );
+  }
   onStep?.("completed");
   return credentials;
+}
+
+/** Whether a typed sign-in name and an OnTrack username name the same account. */
+function isSameSsoUser(typed: string, username: string): boolean {
+  const account = (name: string) => name.trim().toLowerCase().split("@")[0];
+  return account(typed) === account(username);
 }

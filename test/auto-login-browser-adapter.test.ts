@@ -726,3 +726,50 @@ test('a guided login left waiting on Okta Verify reports the MFA timeout', async
       /Okta Verify/.test(error.message),
   );
 });
+
+test('terminal sign-in retries without the profile when it holds another Okta user', async () => {
+  // Okta skips its prompts for the identity the profile still holds, so the
+  // capture would otherwise save that user's session for whoever typed a name.
+  await withSsoProfileDir(async () => {
+    const launches: PersistentLaunch[] = [];
+    const contextOptions: unknown[] = [];
+    await assert.rejects(
+      () => captureSsoCredentialsWithGuidedLogin({
+        ssoUrl: 'https://sso.example/login',
+        apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+        username: 'student2',
+        password: 'secret',
+        browserAdapter: createBrowserAdapter({
+          urlAfterGoto: LANDING_URL,
+          persistent: { launches },
+          contextOptions,
+        }),
+      }),
+      (error: unknown) =>
+        error instanceof SsoFallbackError && /another user/.test(error.message),
+    );
+    assert.equal(launches.length, 1);
+    assert.equal(contextOptions.length, 1, 'the retry runs in a throwaway browser');
+  });
+});
+
+test('terminal sign-in keeps a profile session that belongs to the typed user', async () => {
+  await withSsoProfileDir(async () => {
+    const launches: PersistentLaunch[] = [];
+    const contextOptions: unknown[] = [];
+    const credentials = await captureSsoCredentialsWithGuidedLogin({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      username: 'URL-User@student.monash.edu',
+      password: 'secret',
+      browserAdapter: createBrowserAdapter({
+        urlAfterGoto: LANDING_URL,
+        persistent: { launches },
+        contextOptions,
+      }),
+    });
+    assert.equal(credentials.username, 'url-user');
+    assert.equal(launches.length, 1);
+    assert.equal(contextOptions.length, 0);
+  });
+});
