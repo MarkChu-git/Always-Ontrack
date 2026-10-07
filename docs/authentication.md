@@ -180,8 +180,13 @@ challenge on every push.
 The profile can hold your Okta session, so treat it like a signed-in browser.
 `ontrack logout` deletes it, and the next login asks for MFA again; log out
 before signing in as a different user. Set `ONTRACK_SSO_PROFILE=ephemeral` to
-sign in with a throwaway browser every time. A login that finds the profile in
-use by another login falls back to a throwaway browser.
+sign in with a throwaway browser every time. A login that cannot open the
+profile, for example because another login holds it, falls back to a throwaway
+browser that Okta does not recognize.
+
+The guard that keeps the page from spending the one-time login token covers
+this-machine and terminal sign-in. The opt-in system browser fast path below
+does not have it yet.
 
 ### System browser profile reuse
 
