@@ -70,7 +70,7 @@
     "dist"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@opentui/core": "^0.5.1",
     "@opentui/react": "^0.5.1",
     "playwright-core": "^1.58.2",
