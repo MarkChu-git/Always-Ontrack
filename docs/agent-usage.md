@@ -157,6 +157,11 @@ for a specific operation.
 The CLI applies the same lifecycle automatically. A rejected read may silently
 refresh and replay once. Mutations are never automatically replayed.
 
+`auth_status` (and `auth.status`) report the access token's `expiresAt`, which
+OnTrack keeps short, plus `renewableUntil` while a stored refresh cookie can
+still renew the session. An `expired` status with a future `renewableUntil`
+needs only `auth_ensure` with `interaction: "never"`, not a human.
+
 ## Apply writes safely
 
 Writes remain dry-run by default. A confirmed Agent write also requires a stable

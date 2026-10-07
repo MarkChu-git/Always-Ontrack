@@ -200,6 +200,13 @@ silently over plain HTTP when possible, without launching a browser, so users
 do not normally sign in for every run. Monash can still require verification
 when its refresh or SSO policy expires.
 
+OnTrack's access token is short-lived (Monash currently issues ten minutes), so
+an expired access token is routine. `ontrack auth status` reports it as
+`expiresAt`, and adds `renewableUntil` while a stored refresh cookie for the
+same user can still renew the session: that is when the next sign-in is due.
+The TUI header counts down to that time rather than to the access token's
+expiry, and says `session expired` once nothing can renew the session.
+
 The API client authenticates with these headers:
 
 - `Auth-Token`
