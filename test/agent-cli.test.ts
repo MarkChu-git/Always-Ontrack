@@ -19,8 +19,11 @@ async function runCli(
       [resolve(process.cwd(), "src/cli.ts"), ...args],
       {
         cwd: process.cwd(),
+        // HOME too: browser state and the SSO profile live at fixed paths
+        // under it, and logout deletes them.
         env: {
           ...process.env,
+          HOME: configRoot,
           XDG_CONFIG_HOME: configRoot,
           NO_COLOR: "1",
         },
@@ -55,7 +58,7 @@ async function runStreamingCliUntilFirstFrame(
       [resolve(process.cwd(), "src/cli.ts"), ...args],
       {
         cwd: process.cwd(),
-        env: { ...process.env, XDG_CONFIG_HOME: configRoot, NO_COLOR: "1" },
+        env: { ...process.env, HOME: configRoot, XDG_CONFIG_HOME: configRoot, NO_COLOR: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
