@@ -26,7 +26,7 @@ export type LoadState =
       kind: 'ready';
       identity: WhoAmIView;
       /** When the next sign-in is due; see OnTrackAuthBroker.signInDueAt. */
-      expiresAt: string | null;
+      signInDueAt: string | null;
       tasks: TuiTask[];
     }
   | { kind: 'auth_required' }
@@ -162,7 +162,7 @@ export function createOnTrackTaskLoader(
       }
       const session = await broker.currentSession();
       if (!session) return { kind: 'auth_required' };
-      const signInDue = await broker.signInDueAt();
+      const signInDueAt = await broker.signInDueAt();
 
       // Same catalogue pipeline the CLI task commands use: per-project/unit
       // read failures degrade to overview data instead of blanking the TUI.
@@ -173,7 +173,7 @@ export function createOnTrackTaskLoader(
       return {
         kind: 'ready',
         identity: toWhoAmIView(session),
-        expiresAt: signInDue,
+        signInDueAt,
         tasks,
       };
     } catch (err) {

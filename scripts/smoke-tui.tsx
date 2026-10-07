@@ -49,7 +49,7 @@ function locate(frame: string, text: string): { x: number; y: number } {
 const readyLoad = async (): Promise<LoadState> => ({
   kind: 'ready',
   identity: { username: 'alice.zhang', savedAt: '2026-08-12T00:00:00.000Z' },
-  expiresAt: new Date(Date.now() + 5.5 * 86_400_000).toISOString(),
+  signInDueAt: new Date(Date.now() + 5.5 * 86_400_000).toISOString(),
   tasks: FAKE_TASKS,
 });
 
@@ -216,7 +216,7 @@ const lapsedSessionSetup = await testRender(
     load={async (): Promise<LoadState> => ({
       kind: 'ready',
       identity: { username: 'alice.zhang', savedAt: '2026-08-12T00:00:00.000Z' },
-      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      signInDueAt: new Date(Date.now() - 60_000).toISOString(),
       tasks: FAKE_TASKS,
     })}
     extras={stubExtras}

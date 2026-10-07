@@ -96,9 +96,9 @@ function dueBadge(task: TuiTask, theme: Theme): { text: string; fg: string } {
 }
 
 /** Colour-coded pill for the time left until the next sign-in is due. */
-function sessionBadge(expiresAt: string | null, theme: Theme): { text: string; fg: string } | null {
-  if (!expiresAt) return null;
-  const ms = Date.parse(expiresAt) - Date.now();
+function sessionBadge(signInDueAt: string | null, theme: Theme): { text: string; fg: string } | null {
+  if (!signInDueAt) return null;
+  const ms = Date.parse(signInDueAt) - Date.now();
   if (!Number.isFinite(ms)) return null;
   if (ms <= 0) return { text: 'session expired', fg: theme.urgent };
   const minutes = Math.floor(ms / 60_000);
@@ -134,7 +134,7 @@ function Header({
   watchOn,
   onToggleWatch,
   username,
-  expiresAt,
+  signInDueAt,
   unitLabel,
   onCycleUnit,
 }: {
@@ -142,11 +142,11 @@ function Header({
   watchOn: boolean;
   onToggleWatch: () => void;
   username: string | null;
-  expiresAt: string | null;
+  signInDueAt: string | null;
   unitLabel: string;
   onCycleUnit: () => void;
 }) {
-  const lifetime = sessionBadge(expiresAt, theme);
+  const lifetime = sessionBadge(signInDueAt, theme);
   return (
     <box
       style={{
@@ -489,7 +489,7 @@ export function App({
   );
 
   // Re-render once a minute so the header's session-lifetime pill decays while
-  // the app idles (the pill is computed from the load-time expiresAt snapshot).
+  // the app idles (the pill is computed from the load-time signInDueAt snapshot).
   const [, setClockTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setClockTick((n) => n + 1), 60_000);
@@ -911,7 +911,7 @@ export function App({
         watchOn={watchOn}
         onToggleWatch={toggleWatch}
         username={screen.kind === 'ready' ? screen.identity.username : null}
-        expiresAt={screen.kind === 'ready' ? screen.expiresAt : null}
+        signInDueAt={screen.kind === 'ready' ? screen.signInDueAt : null}
         unitLabel={unitLabel}
         onCycleUnit={cycleUnit}
       />
