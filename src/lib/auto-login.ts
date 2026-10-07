@@ -969,7 +969,7 @@ function preparePrivateSsoBrowserProfileDir(): string | null {
  * device cookie that lets it skip MFA. A symlink or stray file at the managed
  * path is removed itself and never followed.
  */
-export function clearSsoBrowserProfile(): void {
+function clearSsoBrowserProfile(): void {
   const profileDir = resolveManagedSsoBrowserProfileDir();
   let metadata: ReturnType<typeof lstatSync>;
   try {
