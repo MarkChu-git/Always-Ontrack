@@ -76,7 +76,7 @@ next actions.
 | `ontrack login --sso` | Terminal username/password; hidden browser fills Okta | Previous default; MFA stays in the terminal |
 | `ontrack login --pair` | Pairing-relay sign-in (skips the method prompt) | Sign in on any device; credential arrives E2E-encrypted |
 | `ontrack login --no-pair` | Opt out of pairing | Falls back to --auto browser-capture/manual flows |
-| `ontrack logout` | Clear local session and browser refresh state | Switch accounts, reset state, troubleshoot |
+| `ontrack logout` | Clear the local session, browser refresh state, and SSO browser profile | Switch accounts, reset state, troubleshoot |
 | `ontrack whoami` | Show the cached account | Confirm who is currently logged in |
 | `ontrack doctor` | Probe key endpoints | Quickly identify session or permission issues |
 

@@ -54,14 +54,14 @@ export interface SsoLoginOptions {
   password: string;
   timeoutMs?: number;
   headless?: boolean;
-  /** How long to poll for the refresh-cookie pair after a URL/request capture. */
-  refreshCookieWaitMs?: number;
   chooseMfaMethod?: (
     options: MfaMethodOption[],
   ) => Promise<number | null | undefined>;
   requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
   onMfaNumberChallenge?: (numbers: string[]) => void;
   browserAdapter?: BrowserLaunchAdapter;
+  /** Tells the user why this sign-in could not use the SSO browser profile. */
+  onNotice?: (message: string) => void;
 }
 
 /** One CLI-presented MFA option extracted from page controls. */
@@ -177,6 +177,11 @@ export interface BrowserLaunchAdapter {
     headless: boolean;
     executablePath?: string;
   }): Promise<Pick<Browser, "newContext" | "close">>;
+  /** Present when the double also stands in for the persistent SSO profile. */
+  launchPersistentContext?(
+    userDataDir: string,
+    options: PersistentContextLaunchOptions,
+  ): Promise<BrowserContext>;
 }
 
 const DEFAULT_ONTRACK_ORIGIN = "https://ontrack.infotech.monash.edu";
@@ -808,8 +813,6 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
-  /** How long to poll for the refresh-cookie pair after a URL/request capture. */
-  refreshCookieWaitMs?: number;
   /** Trusted test/diagnostic seam; production resolves the operator environment. */
   browserPlan?: BrowserLaunchPlan;
   /** Trusted adapter seam for isolating live-profile policy in tests. */
@@ -818,6 +821,8 @@ export interface AutoLoginOptions {
   systemBrowserProfileCandidates?: SystemBrowserProfileLocation[];
   /** Trusted test seam for the persistent-context launcher. */
   systemBrowserProfileAdapter?: SystemBrowserProfileAdapter;
+  /** Tells the user why this sign-in could not use the SSO browser profile. */
+  onNotice?: (message: string) => void;
 }
 
 /** Candidate system browser profile location used for direct session reuse probe. */
@@ -887,6 +892,101 @@ function resolveManagedBrowserSessionStatePath(): string {
   return process.platform === "win32"
     ? join(home, "AppData", "Roaming", "ontrack-cli", "browser-state.json")
     : join(home, ".config", "ontrack-cli", "browser-state.json");
+}
+
+let ssoBrowserProfileDirForTests: string | undefined;
+
+/** @internal Isolate SSO-profile tests from the operator's real profile. */
+export function setSsoBrowserProfileDirForTests(
+  profileDir: string | undefined,
+): void {
+  ssoBrowserProfileDirForTests = profileDir ? resolve(profileDir) : undefined;
+}
+
+/**
+ * The CLI's own browser profile for SSO sign-in, at one operator-owned path
+ * that ignores environment overrides like the browser-state file. Keeping it
+ * between logins is what lets the identity provider recognize this machine:
+ * Okta's "keep me signed in" and "do not challenge me on this device" ride on
+ * a device cookie that a throwaway browser never brings back.
+ */
+function resolveManagedSsoBrowserProfileDir(): string {
+  if (ssoBrowserProfileDirForTests) {
+    return ssoBrowserProfileDirForTests;
+  }
+  const home = homedir();
+  return process.platform === "win32"
+    ? join(home, "AppData", "Roaming", "ontrack-cli", "sso-browser-profile")
+    : join(home, ".config", "ontrack-cli", "sso-browser-profile");
+}
+
+/** `ONTRACK_SSO_PROFILE=ephemeral` signs in with a throwaway browser every time. */
+function isSsoBrowserProfileEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.ONTRACK_SSO_PROFILE?.trim().toLowerCase() !== "ephemeral";
+}
+
+/**
+ * Create the profile directory owner-only. Returns null when the managed path
+ * resolves outside the operator home or is not a private directory this user
+ * owns, so the capture falls back to a throwaway browser instead of trusting it.
+ */
+function preparePrivateSsoBrowserProfileDir(): string | null {
+  const profileDir = resolveManagedSsoBrowserProfileDir();
+  try {
+    // The profile path is fixed under the operator home (or a test seam).
+    // codeql[js/path-injection]
+    mkdirSync(dirname(profileDir), { recursive: true, mode: 0o700 });
+    // Like the browser-state file, the profile holds credentials, so a
+    // relocated parent (a symlinked ~/.config) must not carry them elsewhere.
+    const trustedRoot = realpathSync(homedir());
+    // codeql[js/path-injection]
+    const parent = realpathSync(dirname(profileDir));
+    if (parent !== trustedRoot && !parent.startsWith(`${trustedRoot}${sep}`)) {
+      return null;
+    }
+    // codeql[js/path-injection]
+    mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+    // codeql[js/path-injection]
+    const metadata = lstatSync(profileDir);
+    if (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      (typeof process.getuid === "function" &&
+        metadata.uid !== process.getuid())
+    ) {
+      return null;
+    }
+    if (process.platform !== "win32") {
+      // codeql[js/path-injection]
+      chmodSync(profileDir, 0o700);
+    }
+    return profileDir;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Forget the SSO browser profile: the identity provider's session and the
+ * device cookie that lets it skip MFA. A symlink or stray file at the managed
+ * path is removed itself and never followed.
+ */
+function clearSsoBrowserProfile(): void {
+  const profileDir = resolveManagedSsoBrowserProfileDir();
+  let metadata: ReturnType<typeof lstatSync>;
+  try {
+    // codeql[js/path-injection]
+    metadata = lstatSync(profileDir);
+  } catch {
+    return;
+  }
+  // codeql[js/path-injection]
+  rmSync(profileDir, {
+    recursive: metadata.isDirectory() && !metadata.isSymbolicLink(),
+    force: true,
+  });
 }
 
 /**
@@ -1201,12 +1301,21 @@ export function clearBrowserSessionState(storagePath?: string): void {
 }
 
 /**
- * Clear the managed browser credential store plus a safe legacy configured
- * location from pre-managed releases. Legacy cleanup is restricted to the
- * current operator home and never follows a final-component symlink.
+ * Clear the managed browser credential store, the SSO browser profile, plus a
+ * safe legacy configured location from pre-managed releases. Legacy cleanup is
+ * restricted to the current operator home and never follows a final-component
+ * symlink. The profile goes even when the state files cannot.
  */
 export function clearAllBrowserSessionState(): void {
-  clearBrowserSessionState();
+  try {
+    clearBrowserSessionState();
+    clearLegacyBrowserSessionState();
+  } finally {
+    clearSsoBrowserProfile();
+  }
+}
+
+function clearLegacyBrowserSessionState(): void {
   const managedPath = resolve(resolveManagedBrowserSessionStatePath());
   const legacyPath = resolve(resolveBrowserSessionStatePath());
   const trustedRoot = realpathSync(homedir());
@@ -1628,39 +1737,40 @@ export function buildContextOptionsWithStoredSession(
   }
 }
 
+/** Whether a URL is OnTrack's token-exchange endpoint, `/api/auth` (or `.json`). */
+function isTokenExchangeUrl(url: URL, targetOrigin: string): boolean {
+  return (
+    url.origin === targetOrigin &&
+    url.pathname.replace(/\/+$/, "").replace(/\.json$/, "") === "/api/auth"
+  );
+}
+
 /**
- * Rewrite the frontend's POST /api/auth exchange body to request a persistent
- * ("remember me") session, so the server also issues the one-week refresh
- * cookie into the captured browser state. Returns null when the request is
- * not the token-exchange call or needs no change.
+ * Whether a request is the page spending the one-time login token through
+ * `POST /api/auth`. The CLI exchanges that token itself, and doubtfire-api
+ * destroys it on the first exchange and answers any later one with 419, so the
+ * capture browser must never send this request.
  */
-export function injectRememberIntoAuthExchange(
+export function isLoginTokenExchange(
   method: string,
   url: string,
   postData: string | null,
   targetOrigin: string,
-): string | null {
+): boolean {
   if (method.toUpperCase() !== "POST" || !postData) {
-    return null;
+    return false;
   }
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return null;
+    return false;
   }
-  if (parsed.origin !== targetOrigin) {
-    return null;
-  }
-  const pathname = parsed.pathname.replace(/\/+$/, "").replace(/\.json$/, "");
-  if (pathname !== "/api/auth") {
-    return null;
+  if (!isTokenExchangeUrl(parsed, targetOrigin)) {
+    return false;
   }
   const body = tryParseJson(postData);
-  if (!isRecord(body) || body.remember === true) {
-    return null;
-  }
-  return JSON.stringify({ ...body, remember: true });
+  return isRecord(body) && (hasValue(body.auth_token) || hasValue(body.authToken));
 }
 
 /** Read and structurally validate the managed browser-state file, or null. */
@@ -1720,35 +1830,6 @@ export function extractRefreshCookieMaterial(
       ? { expiresAt: new Date(refresh.expires * 1000).toISOString() }
       : {}),
   };
-}
-
-/**
- * The refresh-cookie Set-Cookie can land slightly after the first captured
- * credential signal (the frontend exchanges asynchronously after landing).
- * Poll briefly so the pair is present before the browser state snapshot.
- */
-export async function waitForRefreshCookieInContext(
-  context: Pick<BrowserContext, "cookies">,
-  targetOrigin: string,
-  budgetMs = 8_000,
-): Promise<RefreshCookieMaterial | null> {
-  const deadlineAt = Date.now() + Math.max(0, budgetMs);
-  for (;;) {
-    let cookies: Array<{ name: string; value: string; domain?: string; expires?: number }>;
-    try {
-      cookies = await context.cookies();
-    } catch {
-      return null;
-    }
-    const material = extractRefreshCookieMaterial(cookies, targetOrigin);
-    if (material) {
-      return material;
-    }
-    if (Date.now() >= deadlineAt) {
-      return null;
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
-  }
 }
 
 /**
@@ -3097,6 +3178,16 @@ async function advanceGuidedSsoOnPage(
   }
 }
 
+/** Launch arguments for a plan: its executable when it names one. */
+function browserLaunchArgs(
+  plan: BrowserLaunchPlan,
+  headless: boolean,
+): { headless: boolean; executablePath?: string } {
+  return plan.executablePath !== undefined
+    ? { headless, executablePath: plan.executablePath }
+    : { headless };
+}
+
 /** Launch a credential-safe Playwright Chromium provider. */
 async function launchBrowserForCapture(options: {
   headless: boolean;
@@ -3115,15 +3206,7 @@ async function launchBrowserForCapture(options: {
       "Experimental Lightpanda uses unauthenticated local CDP and is restricted to credential-free compatibility spikes. Unset ONTRACK_BROWSER for real authentication.",
     );
   }
-  const launchArgs =
-    plan.executablePath !== undefined
-      ? {
-          headless: options.headless,
-          executablePath: plan.executablePath,
-        }
-      : {
-          headless: options.headless,
-        };
+  const launchArgs = browserLaunchArgs(plan, options.headless);
 
   try {
     if (options.browserAdapter) {
@@ -3183,6 +3266,159 @@ async function launchBrowserForCapture(options: {
   }
 }
 
+/** The SSO capture's browser context and how to release it. */
+interface SsoCaptureBrowser {
+  context: BrowserContext;
+  /** True for the persistent SSO profile, which keeps its own state. */
+  persistent: boolean;
+  close(): Promise<void>;
+}
+
+/**
+ * Open the capture in the CLI's persistent SSO profile. Returns null when the
+ * profile is disabled or cannot be opened (another login may hold it), so the
+ * capture falls back to a throwaway browser; onNotice says why unless the
+ * profile is disabled on purpose. Service workers are blocked
+ * because routes never see the requests one handles, and doubtfire-web
+ * registers one that would otherwise control the page on the next login.
+ */
+async function openPersistentSsoCapture(
+  options: AutoLoginOptions,
+  deadline: SsoCaptureDeadline,
+): Promise<SsoCaptureBrowser | null> {
+  if (!isSsoBrowserProfileEnabled()) {
+    return null;
+  }
+  // A test double opts in by offering a persistent launch.
+  const adapter = options.browserAdapter;
+  if (adapter && !adapter.launchPersistentContext) {
+    return null;
+  }
+  let plan: BrowserLaunchPlan;
+  try {
+    plan = options.browserPlan ?? resolveBrowserLaunchPlan();
+  } catch {
+    // The throwaway launch reports the same problem with its remediation.
+    return null;
+  }
+  if (plan.source === "lightpanda") {
+    return null;
+  }
+  const profileDir = preparePrivateSsoBrowserProfileDir();
+  if (!profileDir) {
+    options.onNotice?.(
+      "The SSO browser profile directory is unusable (it must be a private directory inside your home), so this sign-in uses a throwaway browser that Okta will not recognize.",
+    );
+    return null;
+  }
+  const launchOptions: PersistentContextLaunchOptions = {
+    ...browserLaunchArgs(plan, options.headless ?? false),
+    // Playwright blocks registration only, which suffices because this is
+    // the only code that opens the profile and it always passes this.
+    serviceWorkers: "block",
+    // Playwright abandons the launch itself at the deadline, so a browser
+    // that starts too late never keeps the profile locked.
+    timeout: Math.max(1, deadline.remainingMs()),
+  };
+  try {
+    const context = await deadline.run(async () => {
+      if (adapter?.launchPersistentContext) {
+        return adapter.launchPersistentContext(profileDir, launchOptions);
+      }
+      const playwrightModule = await import("playwright-core");
+      return playwrightModule.chromium.launchPersistentContext(
+        profileDir,
+        launchOptions,
+      );
+    });
+    return {
+      context,
+      persistent: true,
+      // Chrome writes the identity provider's cookies to disk as it shuts
+      // down, so the profile gets longer than a throwaway browser to close.
+      close: () => closeBrowserAtMost(context, 10_000),
+    };
+  } catch (error) {
+    if (error instanceof SsoFallbackError && error.reason === "timeout") {
+      throw error;
+    }
+    options.onNotice?.(
+      "The SSO browser profile could not be opened (another login may be using it), so this sign-in uses a throwaway browser that Okta will not recognize. If this keeps happening, `ontrack logout` resets the profile.",
+    );
+    return null;
+  }
+}
+
+/**
+ * Keep the page from spending the one-time login token. The CLI exchanges it
+ * itself (finalizeCapturedLogin), so the page's own exchange never reaches the
+ * server: whichever side spends the token first leaves the other with a 419.
+ * Test doubles without routing support simply skip the guard.
+ */
+async function guardLoginTokenExchange(
+  context: BrowserContext,
+  targetOrigin: string,
+): Promise<void> {
+  if (typeof context.route !== "function") {
+    return;
+  }
+  await context.route(
+    (url) => isTokenExchangeUrl(url, targetOrigin),
+    async (route) => {
+      const request = route.request();
+      if (
+        isLoginTokenExchange(
+          request.method(),
+          request.url(),
+          request.postData(),
+          targetOrigin,
+        )
+      ) {
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    },
+  );
+}
+
+/**
+ * Open the capture in a throwaway context that loads only sanitized,
+ * OnTrack-only persisted state when available.
+ */
+async function openThrowawaySsoCapture(
+  options: AutoLoginOptions,
+  targetOrigin: string,
+  deadline: SsoCaptureDeadline,
+): Promise<SsoCaptureBrowser> {
+  // Browser launch plan supports env override, system browser, then bundled Chromium.
+  const launch = await deadline.run(() =>
+    launchBrowserForCapture({
+      headless: options.headless ?? false,
+      browserAdapter: options.browserAdapter,
+      browserPlan: options.browserPlan,
+      startupTimeoutMs: Math.max(1, deadline.remainingMs()),
+    }),
+  );
+  const browser = launch.browser;
+  try {
+    const context = await deadline.run(() =>
+      browser.newContext({
+        ...buildContextOptionsWithStoredSession({ targetOrigin }),
+        serviceWorkers: "block",
+      }),
+    );
+    return {
+      context,
+      persistent: false,
+      close: () => closeBrowserAtMost(browser),
+    };
+  } catch (error) {
+    await closeBrowserAtMost(browser);
+    throw error;
+  }
+}
+
 /**
  * Core capture loop:
  * - optionally drives guided SSO interactions
@@ -3202,51 +3438,25 @@ async function captureSsoCredentialsInternal(
       methodLabel: string,
     ) => Promise<string | null | undefined>;
     onMfaNumberChallenge?: (numbers: string[]) => void;
+    /** False signs in without the SSO profile and its Okta session. */
+    useSsoProfile?: boolean;
   },
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
   const deadline = new SsoCaptureDeadline(timeoutMs);
-
-  // Browser launch plan supports env override, system browser, then bundled Chromium.
-  const launch = await deadline.run(() =>
-    launchBrowserForCapture({
-      headless: options.headless ?? false,
-      browserAdapter: options.browserAdapter,
-      browserPlan: options.browserPlan,
-      startupTimeoutMs: Math.max(1, deadline.remainingMs()),
-    }),
-  );
-  const browser = launch.browser;
+  const targetOrigin = new URL(options.apiBaseUrl).origin;
+  const captureBrowser =
+    (guidedLogin?.useSsoProfile === false
+      ? null
+      : await openPersistentSsoCapture(options, deadline)) ??
+    (await openThrowawaySsoCapture(options, targetOrigin, deadline));
+  const context = captureBrowser.context;
 
   try {
-    const targetOrigin = new URL(options.apiBaseUrl).origin;
-    // Isolated context loads only sanitized, OnTrack-only persisted state when available.
-    const context = await deadline.run(() =>
-      browser.newContext(buildContextOptionsWithStoredSession({ targetOrigin })),
-    );
-    // Ask the frontend's token exchange for a persistent session so the
-    // one-week refresh cookie lands in the captured browser state. Test
-    // doubles without routing support simply skip the rewrite.
-    if (typeof context.route === "function") {
-      await context.route(
-        (url) =>
-          url.origin === targetOrigin &&
-          url.pathname.replace(/\.json$/, "") === "/api/auth",
-        async (route) => {
-          const request = route.request();
-          const rewritten = injectRememberIntoAuthExchange(
-            request.method(),
-            request.url(),
-            request.postData(),
-            targetOrigin,
-          );
-          await route.continue(
-            rewritten === null ? undefined : { postData: rewritten },
-          );
-        },
-      );
-    }
-    const page = await deadline.run(() => context.newPage());
+    await guardLoginTokenExchange(context, targetOrigin);
+    // A persistent profile opens with a blank tab already; reuse it.
+    const page =
+      context.pages()[0] ?? (await deadline.run(() => context.newPage()));
     const seenPages = new Set<Page>();
     let captured: LoginCredentials | null = null;
 
@@ -3446,10 +3656,13 @@ async function captureSsoCredentialsInternal(
     if (!captured) {
       if (guidedLogin) {
         const pageSnapshot = summarizePageLocations(context.pages());
+        // A profile Okta remembers can go straight to the push prompt, so an
+        // unanswered push is an MFA timeout rather than missing fields.
         if (
           guidedState &&
           !guidedState.sawUsernameField &&
-          !guidedState.sawPasswordField
+          !guidedState.sawPasswordField &&
+          !sawOktaVerifyChallenge
         ) {
           throw new SsoFallbackError(
             "selector_missing",
@@ -3469,32 +3682,40 @@ async function captureSsoCredentialsInternal(
         "Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.",
       );
     }
-    // The refresh-cookie Set-Cookie can land slightly after a URL/request
-    // capture (the frontend exchanges asynchronously after landing), so wait
-    // briefly for it before snapshotting. Response/storage/cookie captures
-    // already imply the exchange completed and get one immediate check.
+    // A one-time login token (URL/request capture) is exchanged by the CLI,
+    // and that exchange issues its own refresh cookie. Any cookie already in
+    // this jar is restored state, which would overwrite the fresh one once
+    // the session is persisted, so only a credential the page itself holds
+    // takes the jar's.
     const capturedFinal = captured as LoginCredentials;
-    const waitBudgetMs =
-      capturedFinal.source === "url" || capturedFinal.source === "auth_request"
-        ? Math.min(options.refreshCookieWaitMs ?? 8_000, Math.max(0, deadline.remainingMs()))
-        : 0;
-    const capturedRefreshCookie = await waitForRefreshCookieInContext(
-      context,
-      targetOrigin,
-      waitBudgetMs,
-    );
-    if (capturedRefreshCookie) {
-      capturedFinal.refreshCookie = capturedRefreshCookie;
+    if (capturedFinal.source !== "url" && capturedFinal.source !== "auth_request") {
+      try {
+        const capturedRefreshCookie = extractRefreshCookieMaterial(
+          await deadline.run(() => context.cookies()),
+          targetOrigin,
+        );
+        if (capturedRefreshCookie) {
+          capturedFinal.refreshCookie = capturedRefreshCookie;
+        }
+      } catch {
+        // Best-effort: the credential is already captured, and a closed
+        // window or a spent deadline only costs the optional cookie.
+      }
     }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
-    try {
-      await deadline.run(() => saveBrowserSessionState(context, { targetOrigin }));
-    } catch {
-      // non-fatal: login should still succeed even if state persistence is blocked
+    // The persistent profile keeps its own state, and its snapshot never holds
+    // the refresh cookie (the CLI's exchange stores that), so writing it here
+    // would drop the stored cookie before that exchange has even run.
+    if (!captureBrowser.persistent) {
+      try {
+        await deadline.run(() => saveBrowserSessionState(context, { targetOrigin }));
+      } catch {
+        // non-fatal: login should still succeed even if state persistence is blocked
+      }
     }
     return captured;
   } finally {
-    await closeBrowserAtMost(browser);
+    await captureBrowser.close();
   }
 }
 
@@ -3907,8 +4128,15 @@ async function captureCredentialsFromSystemBrowserProfile(
           headless: options.headless ?? true,
           executablePath: launchPlan.executablePath,
           args: [`--profile-directory=${candidate.profileDir}`],
+          // A service worker would hide the page's token exchange from the
+          // guard below, as in the SSO profile.
+          serviceWorkers: "block",
           timeout: remaining,
         }),
+      );
+      await guardLoginTokenExchange(
+        context,
+        new URL(options.apiBaseUrl).origin,
       );
 
       const page =
@@ -3955,24 +4183,50 @@ export async function captureSsoCredentialsWithGuidedLogin(
   options: SsoLoginOptions,
   onStep?: (step: SsoStep) => void,
 ): Promise<LoginCredentials> {
-  const credentials = await captureSsoCredentialsInternal(
-    {
-      ssoUrl: options.ssoUrl,
-      apiBaseUrl: options.apiBaseUrl,
-      timeoutMs: options.timeoutMs,
-      headless: options.headless,
-      refreshCookieWaitMs: options.refreshCookieWaitMs,
-      browserAdapter: options.browserAdapter,
-    },
-    {
-      username: options.username,
-      password: options.password,
-      onStep,
-      chooseMfaMethod: options.chooseMfaMethod,
-      requestMfaCode: options.requestMfaCode,
-      onMfaNumberChallenge: options.onMfaNumberChallenge,
-    },
-  );
+  const attempt = async (useSsoProfile: boolean) => {
+    let askedForUsername = false;
+    const credentials = await captureSsoCredentialsInternal(
+      {
+        ssoUrl: options.ssoUrl,
+        apiBaseUrl: options.apiBaseUrl,
+        timeoutMs: options.timeoutMs,
+        headless: options.headless,
+        browserAdapter: options.browserAdapter,
+        onNotice: options.onNotice,
+      },
+      {
+        username: options.username,
+        password: options.password,
+        onStep: (step) => {
+          if (step === "username") askedForUsername = true;
+          onStep?.(step);
+        },
+        chooseMfaMethod: options.chooseMfaMethod,
+        requestMfaCode: options.requestMfaCode,
+        onMfaNumberChallenge: options.onMfaNumberChallenge,
+        useSsoProfile,
+      },
+    );
+    // Okta skips its prompts for an identity the SSO profile still holds,
+    // which need not be the one the user typed.
+    return askedForUsername || isSameSsoUser(options.username, credentials.username)
+      ? credentials
+      : null;
+  };
+  const credentials = (await attempt(true)) ?? (await attempt(false));
+  if (!credentials) {
+    throw new SsoFallbackError(
+      "automation_error",
+      "username",
+      `Okta signed in as another user than ${options.username}. Run \`ontrack logout\` to forget that session, then sign in again.`,
+    );
+  }
   onStep?.("completed");
   return credentials;
+}
+
+/** Whether a typed sign-in name and an OnTrack username name the same account. */
+function isSameSsoUser(typed: string, username: string): boolean {
+  const account = (name: string) => name.trim().toLowerCase().split("@")[0];
+  return account(typed) === account(username);
 }

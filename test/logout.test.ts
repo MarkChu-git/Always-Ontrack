@@ -8,6 +8,37 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { test } from 'bun:test';
 
+interface LogoutResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/** Run `ontrack logout` in a child process with these environment overrides. */
+function runLogout(env: Record<string, string>): Promise<LogoutResult> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(process.execPath, [resolve(process.cwd(), 'src/cli.ts'), 'logout'], {
+      cwd: process.cwd(),
+      env: { ...process.env, NO_COLOR: '1', ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      resolveResult({ stdout, stderr, exitCode: code ?? 1 });
+    });
+  });
+}
+
 test('logout clears the local session and emits no remote error detail', async () => {
   const exposureMarker = 'logout-redaction-test-marker';
   const configRoot = await mkdtemp(join(tmpdir(), 'ontrack-logout-'));
@@ -21,6 +52,7 @@ test('logout clears the local session and emits no remote error detail', async (
     'ontrack-cli',
     'browser-state.json',
   );
+  const ssoProfileDir = join(configRoot, '.config', 'ontrack-cli', 'sso-browser-profile');
   const server = createServer((_, response) => {
     response.writeHead(400, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ error: `auth_token=${exposureMarker}` }));
@@ -58,32 +90,10 @@ test('logout clears the local session and emits no remote error detail', async (
       JSON.stringify({ cookies: [], origins: [] }),
       'utf8',
     );
-    const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolveResult, reject) => {
-      const child = spawn(process.execPath, [resolve(process.cwd(), 'src/cli.ts'), 'logout'], {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          HOME: configRoot,
-          XDG_CONFIG_HOME: xdgConfigRoot,
-          NO_COLOR: '1',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout.setEncoding('utf8');
-      child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk: string) => {
-        stdout += chunk;
-      });
-      child.stderr.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-      child.once('error', reject);
-      child.once('close', (code) => {
-        resolveResult({ stdout, stderr, exitCode: code ?? 1 });
-      });
-    });
+    // The SSO browser profile holds the identity provider's session cookies.
+    await mkdir(join(ssoProfileDir, 'Default'), { recursive: true, mode: 0o700 });
+    await writeFile(join(ssoProfileDir, 'Default', 'Cookies'), 'idp-session', 'utf8');
+    const result = await runLogout({ HOME: configRoot, XDG_CONFIG_HOME: xdgConfigRoot });
 
     assert.equal(result.exitCode, 0, result.stderr);
     assert.equal(
@@ -94,9 +104,37 @@ test('logout clears the local session and emits no remote error detail', async (
     assert.equal(existsSync(sessionPath), false);
     assert.equal(existsSync(legacyBrowserStatePath), false);
     assert.equal(existsSync(managedBrowserStatePath), false);
+    assert.equal(existsSync(ssoProfileDir), false);
   } finally {
     server.close();
     await rm(configRoot, { recursive: true, force: true });
+  }
+});
+
+test('logout removes a symlinked SSO profile path without following it', async () => {
+  if (process.platform === 'win32') {
+    return;
+  }
+  const isolatedHome = await mkdtemp(join(tmpdir(), 'ontrack-logout-profile-home-'));
+  const externalRoot = await mkdtemp(join(tmpdir(), 'ontrack-logout-profile-external-'));
+  const externalFile = join(externalRoot, 'keep.txt');
+  const profileLink = join(isolatedHome, '.config', 'ontrack-cli', 'sso-browser-profile');
+  try {
+    await writeFile(externalFile, 'unrelated data', 'utf8');
+    await mkdir(join(isolatedHome, '.config', 'ontrack-cli'), { recursive: true, mode: 0o700 });
+    await symlink(externalRoot, profileLink);
+
+    const result = await runLogout({
+      HOME: isolatedHome,
+      XDG_CONFIG_HOME: join(isolatedHome, '.config'),
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(existsSync(profileLink), false);
+    assert.equal(existsSync(externalFile), true);
+  } finally {
+    await rm(isolatedHome, { recursive: true, force: true });
+    await rm(externalRoot, { recursive: true, force: true });
   }
 });
 
@@ -116,37 +154,11 @@ test('logout never follows a legacy browser-state parent symlink outside home', 
     );
     await symlink(externalRoot, linkedDirectory);
 
-    const result = await new Promise<{ stderr: string; exitCode: number }>(
-      (resolveResult, reject) => {
-        const child = spawn(
-          process.execPath,
-          [resolve(process.cwd(), 'src/cli.ts'), 'logout'],
-          {
-            cwd: process.cwd(),
-            env: {
-              ...process.env,
-              HOME: isolatedHome,
-              XDG_CONFIG_HOME: join(isolatedHome, '.config'),
-              ONTRACK_BROWSER_STATE_PATH: join(
-                linkedDirectory,
-                'browser-state.json',
-              ),
-              NO_COLOR: '1',
-            },
-            stdio: ['ignore', 'ignore', 'pipe'],
-          },
-        );
-        let stderr = '';
-        child.stderr.setEncoding('utf8');
-        child.stderr.on('data', (chunk: string) => {
-          stderr += chunk;
-        });
-        child.once('error', reject);
-        child.once('close', (code) => {
-          resolveResult({ stderr, exitCode: code ?? 1 });
-        });
-      },
-    );
+    const result = await runLogout({
+      HOME: isolatedHome,
+      XDG_CONFIG_HOME: join(isolatedHome, '.config'),
+      ONTRACK_BROWSER_STATE_PATH: join(linkedDirectory, 'browser-state.json'),
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
     assert.equal(existsSync(externalStatePath), true);
