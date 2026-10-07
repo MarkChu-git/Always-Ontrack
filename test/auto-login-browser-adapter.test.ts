@@ -8,6 +8,9 @@ import {
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
   type BrowserLaunchAdapter,
+  persistRefreshCookie,
+  readStoredRefreshCookie,
+  setBrowserSessionStatePathForTests,
   setSsoBrowserProfileDirForTests,
   SsoFallbackError,
 } from '../src/lib/auto-login.js';
@@ -26,6 +29,8 @@ interface FakeBrowserOptions {
   refreshCookie?: boolean;
   /** Makes reading the cookie jar fail, as it does once the window is closed. */
   cookiesError?: Error;
+  /** OnTrack cookies the context's storage-state snapshot reports. */
+  storageCookies?: unknown[];
   /** Records the options of every throwaway context the capture creates. */
   contextOptions?: unknown[];
   /** Offers a persistent-profile launch, recording each one; `failure` makes it throw. */
@@ -176,7 +181,7 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
         : []),
       ];
     },
-    storageState: async () => ({ cookies: [], origins: [] }),
+    storageState: async () => ({ cookies: options.storageCookies ?? [], origins: [] }),
   };
   const persistent = options.persistent;
   return {
@@ -203,16 +208,18 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
   };
 }
 
-/** Point the SSO profile at a private temporary directory for one test. */
+/** Point the SSO profile and the browser-state file at a private temporary directory. */
 async function withSsoProfileDir(run: (profileDir: string) => Promise<void>): Promise<void> {
-  // Inside the operator home, like the managed path this seam replaces.
+  // Inside the operator home, like the managed paths these seams replace.
   const root = await mkdtemp(join(homedir(), '.ontrack-sso-profile-'));
   const profileDir = join(root, 'sso-browser-profile');
   setSsoBrowserProfileDirForTests(profileDir);
+  setBrowserSessionStatePathForTests(join(root, 'browser-state.json'));
   try {
     await run(profileDir);
   } finally {
     setSsoBrowserProfileDirForTests(undefined);
+    setBrowserSessionStatePathForTests(undefined);
     await rm(root, { recursive: true, force: true });
   }
 }
@@ -582,4 +589,40 @@ test('ONTRACK_SSO_PROFILE=ephemeral keeps every capture in a throwaway browser',
       process.env.ONTRACK_SSO_PROFILE = previous;
     }
   }
+});
+
+test('a profile sign-in keeps the stored refresh cookie until the CLI exchange replaces it', async () => {
+  // The profile never holds OnTrack's refresh cookie (the CLI's own exchange
+  // stores it), so its snapshot must not overwrite the one on disk before that
+  // exchange has even run: if the exchange then failed, renewal would be gone.
+  await withSsoProfileDir(async () => {
+    persistRefreshCookie(
+      { username: 'url-user', refreshToken: 'stored-refresh', expiresAt: '2099-01-01T00:00:00.000Z' },
+      { targetOrigin: 'https://ontrack.infotech.monash.edu' },
+    );
+    await captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      browserAdapter: createBrowserAdapter({
+        urlAfterGoto: LANDING_URL,
+        persistent: { launches: [] },
+        storageCookies: [
+          {
+            name: 'TS01dc4fc6',
+            value: 'load-balancer',
+            domain: 'ontrack.infotech.monash.edu',
+            path: '/',
+            expires: -1,
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Strict',
+          },
+        ],
+      }),
+    });
+    assert.equal(
+      readStoredRefreshCookie({ targetOrigin: 'https://ontrack.infotech.monash.edu' })?.refreshToken,
+      'stored-refresh',
+    );
+  });
 });

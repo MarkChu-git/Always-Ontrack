@@ -3253,6 +3253,8 @@ async function launchBrowserForCapture(options: {
 /** The SSO capture's browser context and how to release it. */
 interface SsoCaptureBrowser {
   context: BrowserContext;
+  /** True for the persistent SSO profile, which keeps its own state. */
+  persistent: boolean;
   close(): Promise<void>;
 }
 
@@ -3309,6 +3311,7 @@ async function openPersistentSsoCapture(
     });
     return {
       context,
+      persistent: true,
       // Chrome writes the identity provider's cookies to disk as it shuts
       // down, so the profile gets longer than a throwaway browser to close.
       close: () => closeBrowserAtMost(context, 10_000),
@@ -3347,7 +3350,11 @@ async function openThrowawaySsoCapture(
         serviceWorkers: "block",
       }),
     );
-    return { context, close: () => closeBrowserAtMost(browser) };
+    return {
+      context,
+      persistent: false,
+      close: () => closeBrowserAtMost(browser),
+    };
   } catch (error) {
     await closeBrowserAtMost(browser);
     throw error;
@@ -3653,10 +3660,15 @@ async function captureSsoCredentialsInternal(
       }
     }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
-    try {
-      await deadline.run(() => saveBrowserSessionState(context, { targetOrigin }));
-    } catch {
-      // non-fatal: login should still succeed even if state persistence is blocked
+    // The persistent profile keeps its own state, and its snapshot never holds
+    // the refresh cookie (the CLI's exchange stores that), so writing it here
+    // would drop the stored cookie before that exchange has even run.
+    if (!captureBrowser.persistent) {
+      try {
+        await deadline.run(() => saveBrowserSessionState(context, { targetOrigin }));
+      } catch {
+        // non-fatal: login should still succeed even if state persistence is blocked
+      }
     }
     return captured;
   } finally {
