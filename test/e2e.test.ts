@@ -57,6 +57,8 @@ function runCli(
   options: {
     env?: Record<string, string>;
     onStdout?: (chunk: string) => void;
+    /** Kill the CLI and fail instead of hanging when it outlives this deadline. */
+    timeoutMs?: number;
   } = {},
 ): Promise<CliResult> {
   return new Promise((resolveResult, reject) => {
@@ -71,6 +73,13 @@ function runCli(
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const deadline =
+      options.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(new Error(`CLI still running after ${options.timeoutMs}ms: ${args.join(' ')}`));
+          }, options.timeoutMs);
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -82,8 +91,12 @@ function runCli(
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    child.once('error', reject);
+    child.once('error', (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
     child.once('close', (code) => {
+      clearTimeout(deadline);
       resolveResult({ stdout, stderr, exitCode: code ?? 1 });
     });
   });
@@ -814,3 +827,40 @@ test('e2e: --sso conflicts with --auto/--pair fail fast', async () => {
     await cleanupHome(home);
   }
 });
+
+test(
+  'e2e: a non-interactive login that cannot obtain credentials fails instead of exiting 0',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl } = await startMock((request) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      return null;
+    });
+
+    try {
+      // No relay and no launchable browser leave only the manual paste, and
+      // runCli's stdin is already at EOF, so no sign_in URL can ever arrive.
+      const login = await runCli(['login', '--base-url', baseUrl, '--no-open'], home, {
+        env: {
+          ONTRACK_HEADLESS: '1',
+          ONTRACK_RELAY_URL: '',
+          ONTRACK_BROWSER_PATH: '/nonexistent',
+        },
+        timeoutMs: 15_000,
+      });
+      assert.notEqual(login.exitCode, 0, 'a login that saved nothing must not report success');
+      assert.match(login.stderr, /sign_in URL/);
+      assert.match(login.stderr, /\bclosed\b/i);
+      await assert.rejects(() => stat(home.sessionPath));
+    } finally {
+      server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);

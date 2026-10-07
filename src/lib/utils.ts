@@ -77,10 +77,24 @@ export function parseSsoRedirectUrl(redirectUrl: string): { authToken: string; u
 }
 
 /** Prompt for a visible (non-sensitive) input value. */
-export async function prompt(question: string): Promise<string> {
-  const rl = createInterface({ input, output });
+export async function prompt(
+  question: string,
+  streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream } = { input, output },
+): Promise<string> {
+  const rl = createInterface({ input: streams.input, output: streams.output });
+  // `rl.question` never settles when input ends without an answer (EOF, a
+  // closed pipe), so the drained event loop would exit 0 mid-command; reject
+  // instead. Wait one turn: a terminal Ctrl+C/Ctrl+D closes the interface
+  // before readline rejects with its own AbortError, which should win.
+  const inputClosed = new Promise<never>((_, reject) => {
+    rl.once('close', () => {
+      setImmediate(() => {
+        reject(new Error(`Input closed before "${question.trim().replace(/:$/, '')}" was answered.`));
+      });
+    });
+  });
   try {
-    return (await rl.question(question)).trim();
+    return (await Promise.race([rl.question(question), inputClosed])).trim();
   } finally {
     rl.close();
   }

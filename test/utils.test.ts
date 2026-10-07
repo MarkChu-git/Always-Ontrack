@@ -1,10 +1,12 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
+import { PassThrough } from 'node:stream';
 import {
   isHeadlessServerEnvironment,
   normalizeBaseUrl,
   resolveExternalOpenCommand,
   parseSsoRedirectUrl,
+  prompt,
   redactSensitiveText,
   resolveLoginMode,
   safeTextForHumanDisplay,
@@ -146,6 +148,28 @@ test('parseSsoRedirectUrl extracts auth token and username', () => {
     authToken: 'abc123',
     username: 'student1',
   });
+});
+
+/** In-memory prompt streams; `terminal` makes readline treat them as a TTY. */
+function promptStreams(terminal = false) {
+  const input = Object.assign(new PassThrough(), terminal ? { isTTY: true, setRawMode: () => {} } : {});
+  const output = Object.assign(new PassThrough(), terminal ? { isTTY: true } : {});
+  output.resume();
+  return { input, output };
+}
+
+test('prompt rejects, naming the question, when input ends before an answer', async () => {
+  const streams = promptStreams();
+  const answer = prompt('Paste the sign_in URL from your browser history: ', streams);
+  streams.input.end();
+  await assert.rejects(answer, /closed\b.*Paste the sign_in URL from your browser history/i);
+});
+
+test('prompt leaves a terminal Ctrl+C abort to readline', async () => {
+  const streams = promptStreams(true);
+  const answer = prompt('Choose method [1]: ', streams);
+  streams.input.write('\x03');
+  await assert.rejects(answer, { name: 'AbortError' });
 });
 
 test('shouldMaskPromptInput only masks on tty streams', () => {
