@@ -107,7 +107,9 @@ export function createAuthMcpServer(
         // session renewing silently, which the summary has to say.
         summary:
           status.status === 'renewable'
-            ? `OnTrack authentication is renewable: the access token expired, and the session renews silently until ${status.renewableUntil}.`
+            ? `OnTrack authentication is renewable: the access token expired, and the session renews silently${
+                status.renewableUntil ? ` until ${status.renewableUntil}` : ''
+              }.`
             : status.renewableUntil
               ? `OnTrack authentication is ${status.status}; it renews silently until ${status.renewableUntil}.`
               : `OnTrack authentication is ${status.status}.`,

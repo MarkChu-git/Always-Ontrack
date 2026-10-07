@@ -180,10 +180,23 @@ test('broker matches a URL-encoded username cookie to its session', async () => 
   assert.equal(status.renewableUntil, '2026-08-07T00:30:00.000Z');
 });
 
+test('broker status calls a session renewable when its refresh cookie names no expiry', async () => {
+  // The broker renews with such a cookie all the same; it just cannot say
+  // until when.
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({
+      readStoredRefreshCookie: () => ({ username: 'student1', refreshToken: 'undated' }),
+    }),
+  );
+  const status = await broker.status();
+  assert.equal(status.status, 'renewable');
+  assert.equal('renewableUntil' in status, false);
+});
+
 test('broker status keeps an expired access token expired without a usable refresh cookie', async () => {
   const cookies: RefreshCookieMaterial[] = [
     { username: 'student1', refreshToken: 'stale', expiresAt: '2026-07-31T00:59:00.000Z' },
-    { username: 'student1', refreshToken: 'undated' },
     { username: 'someone-else', refreshToken: 'foreign', expiresAt: '2026-08-07T00:30:00.000Z' },
   ];
   for (const cookie of cookies) {

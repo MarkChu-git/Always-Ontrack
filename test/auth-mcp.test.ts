@@ -221,6 +221,37 @@ test('Auth MCP refuses caller-controlled origins before creating a broker', asyn
   );
 });
 
+test('Auth MCP status of a renewable session without a known end names no date', async () => {
+  await withClient(
+    {
+      createBroker: () => ({
+        status: async () => ({
+          status: 'renewable',
+          source: 'browser-sso',
+          expiresAt: '2026-10-07T15:30:13.454Z',
+          baseUrl: 'https://ontrack.example/api',
+        }),
+        ensure: async () => ({
+          status: 'ready',
+          expiresAt: '2026-10-07T15:40:13.454Z',
+          refreshed: true,
+        }),
+        currentSession: async () => null,
+      }),
+      clearSession: async () => undefined,
+      clearBrowserSessionState: async () => undefined,
+    },
+    async (client) => {
+      const status = await client.callTool({ name: 'auth_status', arguments: {} });
+      const content = status.structuredContent as { summary: string };
+      assert.equal(
+        content.summary,
+        'OnTrack authentication is renewable: the access token expired, and the session renews silently.',
+      );
+    },
+  );
+});
+
 test('Auth MCP status says how long an expired access token keeps renewing', async () => {
   await withClient(
     {

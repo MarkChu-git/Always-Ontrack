@@ -257,40 +257,42 @@ function decodeCookieValue(value: string): string {
 }
 
 /**
- * When the stored refresh cookie stops renewing this session, or undefined
- * when there is none, it has run out, it names no expiry, or it belongs to
+ * Whether the stored refresh cookie renews this session, and until when if it
+ * names an expiry. Null when there is none, it has run out, or it belongs to
  * another user (renewing with it would sign that user in instead).
  */
-function renewableUntil(
+function storedRenewal(
   context: AuthBrokerContext,
   session: SessionData,
-): string | undefined {
+): { readonly until?: string } | null {
   const cookie = context.dependencies.readStoredRefreshCookie(context.targetBaseUrl);
-  if (!cookie?.expiresAt) return undefined;
+  if (!cookie) return null;
   const cookieUser = decodeCookieValue(cookie.username).trim().toLowerCase();
   if (cookieUser !== session.username.trim().toLowerCase()) {
-    return undefined;
+    return null;
   }
-  const until = Date.parse(cookie.expiresAt);
-  return Number.isFinite(until) && until > context.dependencies.now().getTime()
-    ? new Date(until).toISOString()
-    : undefined;
+  // The broker renews with a cookie that names no expiry all the same.
+  const until = cookie.expiresAt ? Date.parse(cookie.expiresAt) : Number.NaN;
+  if (!Number.isFinite(until)) return {};
+  return until > context.dependencies.now().getTime()
+    ? { until: new Date(until).toISOString() }
+    : null;
 }
 
 async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView> {
   const session = await loadScopedSession(context);
   if (!session) return { status: 'signed_out', baseUrl: context.targetBaseUrl };
   const usability = sessionUsability(session, context.dependencies.now());
-  const renewable = renewableUntil(context, session);
+  const renewal = storedRenewal(context, session);
   return {
-    status: usability.state === 'expired' && renewable ? 'renewable' : usability.state,
+    status: usability.state === 'expired' && renewal ? 'renewable' : usability.state,
     source: session.source,
     ...(usability.state === 'usable' || usability.state === 'expired'
       ? usability.expiresAt
         ? { expiresAt: usability.expiresAt }
         : {}
       : {}),
-    ...(renewable ? { renewableUntil: renewable } : {}),
+    ...(renewal?.until ? { renewableUntil: renewal.until } : {}),
     baseUrl: context.targetBaseUrl,
   };
 }
