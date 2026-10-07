@@ -57,6 +57,8 @@ function runCli(
   options: {
     env?: Record<string, string>;
     onStdout?: (chunk: string) => void;
+    /** Piped to the CLI, then closed; without it stdin is at EOF from the start. */
+    stdin?: string;
     /** Kill the CLI and fail instead of hanging when it outlives this deadline. */
     timeoutMs?: number;
   } = {},
@@ -71,8 +73,11 @@ function runCli(
         NO_COLOR: '1',
         ...options.env,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
+    if (options.stdin !== undefined) {
+      child.stdin?.end(options.stdin);
+    }
     const deadline =
       options.timeoutMs === undefined
         ? undefined
@@ -857,6 +862,52 @@ test(
       assert.match(login.stderr, /sign_in URL/);
       assert.match(login.stderr, /\bclosed\b/i);
       await assert.rejects(() => stat(home.sessionPath));
+    } finally {
+      server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a sign_in URL piped into the manual fallback still completes login',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startMock((request, body) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      if (request.url === '/api/auth' && request.method === 'POST') {
+        const payload = JSON.parse(body) as Record<string, unknown>;
+        assert.equal(payload.auth_token, LANDING_TOKEN);
+        assert.equal(payload.username, USERNAME);
+        return { status: 201, json: signInPayload(ACCESS_TOKEN) };
+      }
+      return null;
+    });
+
+    try {
+      // No relay and no launchable browser again leave only the manual paste,
+      // but this time the URL is piped in before stdin closes.
+      const login = await runCli(['login', '--base-url', baseUrl, '--no-open'], home, {
+        env: {
+          ONTRACK_HEADLESS: '1',
+          ONTRACK_RELAY_URL: '',
+          ONTRACK_BROWSER_PATH: '/nonexistent',
+        },
+        stdin: `https://ontrack.example.test/sign_in?authToken=${LANDING_TOKEN}&username=${USERNAME}\n`,
+        timeoutMs: 15_000,
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+      assert.equal(hits.authExchange, 1);
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      assert.equal(session.authToken, ACCESS_TOKEN);
     } finally {
       server.close();
       await cleanupHome(home);
