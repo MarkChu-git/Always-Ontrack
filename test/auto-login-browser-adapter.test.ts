@@ -1,4 +1,4 @@
-import { test } from 'bun:test';
+import { afterEach, beforeEach, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { access, mkdtemp, rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -217,18 +217,31 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
   };
 }
 
-/** Point the SSO profile and the browser-state file at a private temporary directory. */
+// A capture in a throwaway browser reads, migrates and rewrites the stored
+// browser state, so every test gets its own file instead of the operator's
+// ~/.config/ontrack-cli/browser-state.json.
+let browserStateRoot = '';
+
+beforeEach(async () => {
+  browserStateRoot = await mkdtemp(join(tmpdir(), 'ontrack-browser-state-'));
+  setBrowserSessionStatePathForTests(join(browserStateRoot, 'browser-state.json'));
+});
+
+afterEach(async () => {
+  setBrowserSessionStatePathForTests(undefined);
+  await rm(browserStateRoot, { recursive: true, force: true });
+});
+
+/** Point the SSO profile at a private temporary directory. */
 async function withSsoProfileDir(run: (profileDir: string) => Promise<void>): Promise<void> {
-  // Inside the operator home, like the managed paths these seams replace.
+  // Inside the operator home, like the managed path this seam replaces.
   const root = await mkdtemp(join(homedir(), '.ontrack-sso-profile-'));
   const profileDir = join(root, 'sso-browser-profile');
   setSsoBrowserProfileDirForTests(profileDir);
-  setBrowserSessionStatePathForTests(join(root, 'browser-state.json'));
   try {
     await run(profileDir);
   } finally {
     setSsoBrowserProfileDirForTests(undefined);
-    setBrowserSessionStatePathForTests(undefined);
     await rm(root, { recursive: true, force: true });
   }
 }
