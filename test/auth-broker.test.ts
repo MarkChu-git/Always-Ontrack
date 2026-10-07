@@ -157,6 +157,29 @@ test('broker status reports renewableUntil as a canonical UTC instant', async ()
   assert.equal(status.renewableUntil, '2026-08-07T00:30:00.000Z');
 });
 
+test('broker matches a URL-encoded username cookie to its session', async () => {
+  // Rails URL-encodes cookie values, so "student@example.edu" is stored as
+  // "student%40example.edu".
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({
+      loadSession: async () => ({
+        ...expiredSession,
+        username: 'student@example.edu',
+        user: { username: 'student@example.edu' },
+      }),
+      readStoredRefreshCookie: () => ({
+        username: 'student%40example.edu',
+        refreshToken: 'refresh-secret',
+        expiresAt: '2026-08-07T00:30:00.000Z',
+      }),
+    }),
+  );
+  const status = await broker.status();
+  assert.equal(status.status, 'renewable');
+  assert.equal(status.renewableUntil, '2026-08-07T00:30:00.000Z');
+});
+
 test('broker status keeps an expired access token expired without a usable refresh cookie', async () => {
   const cookies: RefreshCookieMaterial[] = [
     { username: 'student1', refreshToken: 'stale', expiresAt: '2026-07-31T00:59:00.000Z' },

@@ -247,6 +247,15 @@ async function refreshSession(
   return captureSession(context, interactive);
 }
 
+/** A cookie value as OnTrack set it: Rails URL-encodes cookie values. */
+function decodeCookieValue(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
+}
+
 /**
  * When the stored refresh cookie stops renewing this session, or undefined
  * when there is none, it has run out, it names no expiry, or it belongs to
@@ -258,7 +267,8 @@ function renewableUntil(
 ): string | undefined {
   const cookie = context.dependencies.readStoredRefreshCookie(context.targetBaseUrl);
   if (!cookie?.expiresAt) return undefined;
-  if (cookie.username.trim().toLowerCase() !== session.username.trim().toLowerCase()) {
+  const cookieUser = decodeCookieValue(cookie.username).trim().toLowerCase();
+  if (cookieUser !== session.username.trim().toLowerCase()) {
     return undefined;
   }
   const until = Date.parse(cookie.expiresAt);
