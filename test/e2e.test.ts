@@ -833,6 +833,26 @@ test('e2e: --sso conflicts with --auto/--pair fail fast', async () => {
   }
 });
 
+/**
+ * Run `login` where only the manual sign_in URL paste is left: no relay and no
+ * launchable browser. Without `stdin`, the paste prompt finds stdin at EOF.
+ */
+function runManualPasteLogin(options: {
+  home: TestHome;
+  baseUrl: string;
+  stdin?: string;
+}): Promise<CliResult> {
+  return runCli(['login', '--base-url', options.baseUrl, '--no-open'], options.home, {
+    env: {
+      ONTRACK_HEADLESS: '1',
+      ONTRACK_RELAY_URL: '',
+      ONTRACK_BROWSER_PATH: '/nonexistent',
+    },
+    stdin: options.stdin,
+    timeoutMs: 15_000,
+  });
+}
+
 test(
   'e2e: a non-interactive login that cannot obtain credentials fails instead of exiting 0',
   async () => {
@@ -848,16 +868,7 @@ test(
     });
 
     try {
-      // No relay and no launchable browser leave only the manual paste, and
-      // runCli's stdin is already at EOF, so no sign_in URL can ever arrive.
-      const login = await runCli(['login', '--base-url', baseUrl, '--no-open'], home, {
-        env: {
-          ONTRACK_HEADLESS: '1',
-          ONTRACK_RELAY_URL: '',
-          ONTRACK_BROWSER_PATH: '/nonexistent',
-        },
-        timeoutMs: 15_000,
-      });
+      const login = await runManualPasteLogin({ home, baseUrl });
       assert.notEqual(login.exitCode, 0, 'a login that saved nothing must not report success');
       assert.match(login.stderr, /sign_in URL/);
       assert.match(login.stderr, /\bclosed\b/i);
@@ -891,16 +902,10 @@ test(
     });
 
     try {
-      // No relay and no launchable browser again leave only the manual paste,
-      // but this time the URL is piped in before stdin closes.
-      const login = await runCli(['login', '--base-url', baseUrl, '--no-open'], home, {
-        env: {
-          ONTRACK_HEADLESS: '1',
-          ONTRACK_RELAY_URL: '',
-          ONTRACK_BROWSER_PATH: '/nonexistent',
-        },
+      const login = await runManualPasteLogin({
+        home,
+        baseUrl,
         stdin: `https://ontrack.example.test/sign_in?authToken=${LANDING_TOKEN}&username=${USERNAME}\n`,
-        timeoutMs: 15_000,
       });
       assert.equal(login.exitCode, 0, login.stderr);
       assert.equal(hits.authExchange, 1);
