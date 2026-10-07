@@ -516,7 +516,7 @@ test('a captured live credential survives a cookie jar that can no longer be rea
 
 test('a throwaway capture context blocks service workers', async () => {
   // doubtfire-web ships an Angular service worker, and Playwright routes never
-  // see requests a service worker handles, so the page could spend the landing
+  // see requests a service worker handles, so the page could spend the login
   // token behind the route that stops it.
   const contextOptions: unknown[] = [];
   await captureSsoCredentials({
