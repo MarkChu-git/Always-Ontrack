@@ -59,6 +59,16 @@ itself reports that OnTrack rejected the paired credential, the pairing
 bookmarklet delivered a token the server no longer accepts: pair again, and if
 that keeps happening reinstall the bookmarklet from the pairing page.
 
+## Okta asks for MFA or a number challenge on every login
+
+This-machine and terminal sign-in keep a private
+[SSO browser profile](authentication.md#sso-browser-profile) so Okta can
+recognize this machine. Tick "Keep me signed in" when Okta offers it during a
+this-machine sign-in; terminal sign-in fills Okta in a hidden browser and
+cannot tick it. Expect a prompt again after `ontrack logout`, which deletes the
+profile, and on every login while `ONTRACK_SSO_PROFILE=ephemeral` is set. Okta
+can still require MFA, or the number challenge on every push, by Monash policy.
+
 ## `Task abbreviation "... " is ambiguous`
 
 The abbreviation is not unique inside that project. Use the task-definition id:

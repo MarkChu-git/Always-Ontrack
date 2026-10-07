@@ -128,8 +128,10 @@ hidden. If guided SSO fails, login falls back to visible browser-assisted
 capture, then to the manual redirect paste.
 
 This path can persist a refresh cookie the same way this-machine capture does,
-because the CLI controls the browser. Prefer this-machine / `--auto` when a
-display is available and you want to sign in through the real pages yourself.
+because the CLI controls the browser, and it signs in through the same
+[SSO browser profile](#sso-browser-profile). Prefer this-machine / `--auto`
+when a display is available and you want to sign in through the real pages
+yourself.
 
 ## Browser capture: `--auto`, `--show-browser`, `--hide-browser`
 
@@ -151,6 +153,35 @@ destroys it on the first `POST /api/auth` exchange and answers any later one
 with 419. The OnTrack web app in the capture window would spend it as soon as it
 loads, so the capture stops the page's own exchange and the CLI exchanges the
 token itself, which is also what returns the refresh cookie.
+
+### SSO browser profile
+
+This-machine and terminal sign-in run in a browser profile the CLI keeps for
+itself:
+
+- macOS / Linux: `~/.config/ontrack-cli/sso-browser-profile`
+- Windows: `%USERPROFILE%\AppData\Roaming\ontrack-cli\sso-browser-profile`
+
+The directory is restricted to `0700` where supported, and the CLI does not use
+it if it resolves outside your home directory. Its cookies are protected by
+those file permissions, not by the system keychain.
+
+Keeping the profile between logins lets Okta recognize this machine: its device
+cookie survives, so choices such as "Keep me signed in" or "Do not challenge me
+on this device" stick, and its risk checks see a known device instead of a new
+one every time. Tick "Keep me signed in" during a this-machine sign-in (the
+hidden browser of terminal sign-in cannot). While that Okta session lasts, the
+next this-machine login finishes without a password or MFA prompt, and
+terminal sign-in, which uses the same profile, no longer needs the password it
+asks for. Whether Okta skips MFA or the Okta Verify number challenge beyond
+that is Monash's policy, not the CLI's: an organization can require the number
+challenge on every push.
+
+The profile can hold your Okta session, so treat it like a signed-in browser.
+`ontrack logout` deletes it, and the next login asks for MFA again; log out
+before signing in as a different user. Set `ONTRACK_SSO_PROFILE=ephemeral` to
+sign in with a throwaway browser every time. A login that finds the profile in
+use by another login falls back to a throwaway browser.
 
 ### System browser profile reuse
 
@@ -257,3 +288,6 @@ omitted when the relay URL is empty; this-machine and terminal remain.
 ```bash
 ontrack logout
 ```
+
+Logout signs out of OnTrack and deletes the local session, the browser-state
+file, and the SSO browser profile, so the next login starts over, MFA included.

@@ -119,7 +119,8 @@ bun dist/cli.js auth-method   # 或: bun run dev -- auth-method
 `ontrack login` 在交互式终端里会推荐本机打开浏览器（可静默续期），配对或终端
 用户名/密码仍可作为另两个选项。`--pair` / `--auto` / `--sso` 跳过询问。配对把
 凭证端到端加密传回；`--auto` 能拿到可静默续期的 refresh cookie；`--sso` 在
-终端输入用户名密码，由隐藏浏览器填写 Okta。手动 redirect URL 导入与直接
+终端输入用户名密码，由隐藏浏览器填写 Okta。这两种方式都在 CLI 自己保留的私有
+浏览器 profile 里登录，Okta 能在多次登录之间认出这台机器。手动 redirect URL 导入与直接
 `--auth-token` 登录作为后备路径保留。配对得到的会话拿不到 refresh cookie——能续期
 的凭证是浏览器里的 HttpOnly cookie，任何书签都读不到它，所以配对会话只能活到
 access token 过期为止，`login` 会明确提示这一点。
@@ -232,6 +233,7 @@ MCP、watch 流以及基于幂等键的安全写操作详见
 | `ONTRACK_BROWSER` | 仅在同时满足两道 Lightpanda 闸门时设为 `lightpanda` | 无凭证兼容性 spike；真实登录 fail closed |
 | `ONTRACK_EXPERIMENTAL_LIGHTPANDA` | 设为 `1` 以确认启用 Lightpanda 实验 | 必须与 `ONTRACK_BROWSER=lightpanda` 同时设置 |
 | `ONTRACK_LIGHTPANDA_PATH` | 经过审核的本地 Lightpanda 二进制绝对路径 | 实验必需；CLI 不会从 `PATH` 自动发现 Lightpanda |
+| `ONTRACK_SSO_PROFILE` | 设为 `ephemeral` 则每次都用一次性浏览器登录 | 默认保留私有 SSO 浏览器 profile，让 Okta 认出这台机器；`ontrack logout` 会删除它 |
 | `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | 显式允许读取系统浏览器 profile 以发现凭据 | 默认关闭；请勿用于共享/不受信任 profile |
 | `ONTRACK_BROWSER_USER_DATA_DIR` | 覆盖 Chromium/Chrome 用户数据根目录 | 仅在 `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` 时生效 |
 | `ONTRACK_BROWSER_PROFILE_DIR` | 覆盖用户数据根目录下的 profile 目录名 | 仅在显式启用 profile 复用时生效；默认 `Default` |
