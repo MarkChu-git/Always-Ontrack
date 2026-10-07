@@ -313,7 +313,7 @@ Notes:
   - --task-definition-id is the unambiguous selector. Deprecated --task-id remains available for legacy definition/instance ids.
   - Interactive "ontrack login" (and the TUI sign-in wizard) recommends a browser window on this machine (renewable session) and still offers pairing or terminal username/password. --pair / --auto / --sso skip the prompt. Non-interactive login still defaults to pairing when a relay is configured.
   - Pairing prints a one-time link; you sign in in your own browser on any device (reusing an existing OnTrack session if you have one), and the credential arrives end-to-end encrypted via a blind relay. The session lasts only as long as the access token.
-  - "ontrack login --auto" (or choosing this machine) opens a visible browser window on machines with a display and passively captures the resulting credentials, including a refresh cookie that can renew silently for about a week.
+  - "ontrack login --auto" (or choosing this machine) opens a visible browser window on machines with a display, captures the one-time login token from the sign-in redirect, and exchanges it itself, which also stores a refresh cookie that can renew silently for about a week.
   - "ontrack login --sso" (or choosing terminal) asks for Monash username and password in the terminal and fills Okta in a hidden browser. MFA (method pick, TOTP, Okta Verify) stays in the terminal. Passwords must never be passed on the command line.
   - Use --no-pair to opt out of pairing, --relay-url or ONTRACK_RELAY_URL to point at another relay (empty disables pairing).
   - Before opening a browser, login reuses only its saved OnTrack browser state. Live system browser-profile reuse is disabled unless ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1.
@@ -2128,7 +2128,8 @@ async function handleLogin(args: string[]): Promise<void> {
       if (!pairingHandled && chosenMethod === 'browser' && loginMode === 'auto') {
         // Browser capture mode: the user signs in through the real SSO pages in
         // an opened browser window (visible by default on machines with a
-        // display); the CLI passively captures the resulting credentials.
+        // display); the CLI captures the one-time login token and exchanges it
+        // itself.
         // Falls back to the manual redirect paste on failure.
         console.log('Opening a browser window for SSO sign-in. Complete login there; credentials will be captured automatically.');
         try {
