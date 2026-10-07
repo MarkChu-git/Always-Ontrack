@@ -174,6 +174,13 @@ test('prompt rejects at once when its input already ended', async () => {
   await assert.rejects(prompt('Password: ', streams), /closed\b.*Password/i);
 });
 
+test('prompt takes an unterminated last line as the answer', async () => {
+  const streams = promptStreams();
+  const answer = prompt('Paste the sign_in URL from your browser history: ', streams);
+  streams.input.end('https://ontrack.example.test/sign_in?authToken=t&username=u');
+  assert.equal(await answer, 'https://ontrack.example.test/sign_in?authToken=t&username=u');
+});
+
 test('prompt leaves a terminal Ctrl+C abort to readline', async () => {
   const streams = promptStreams(true);
   const answer = prompt('Choose method [1]: ', streams);

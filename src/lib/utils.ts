@@ -88,6 +88,11 @@ export async function prompt(
     throw inputClosed();
   }
   const rl = createInterface({ input: streams.input, output: streams.output });
+  // At EOF readline hands an unterminated last line to 'line' listeners, not
+  // to the pending question.
+  const lastLine = new Promise<string>((resolveLine) => {
+    rl.once('line', resolveLine);
+  });
   // `rl.question` never settles when input ends without an answer (EOF, a
   // closed pipe), so the drained event loop would exit 0 mid-command; reject
   // instead. Wait one turn: a terminal Ctrl+C/Ctrl+D closes the interface
@@ -98,7 +103,7 @@ export async function prompt(
     });
   });
   try {
-    return (await Promise.race([rl.question(question), closed])).trim();
+    return (await Promise.race([rl.question(question), lastLine, closed])).trim();
   } finally {
     rl.close();
   }
