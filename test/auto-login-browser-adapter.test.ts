@@ -20,6 +20,12 @@ type Handler = (...args: unknown[]) => void;
 const LANDING_URL =
   'https://ontrack.infotech.monash.edu/sign_in?authToken=url-token&username=url-user';
 
+/** One persistent-profile launch the fake adapter recorded. */
+interface PersistentLaunch {
+  userDataDir: string;
+  options: Record<string, unknown>;
+}
+
 interface FakeBrowserOptions {
   urlAfterGoto?: string;
   request?: { url: string; method: string; postData: string };
@@ -35,7 +41,7 @@ interface FakeBrowserOptions {
   contextOptions?: unknown[];
   /** Offers a persistent-profile launch, recording each one; `failure` makes it throw. */
   persistent?: {
-    launches: Array<{ userDataDir: string; options: Record<string, unknown> }>;
+    launches: PersistentLaunch[];
     failure?: Error;
   };
   storageCredentials?: boolean;
@@ -240,9 +246,7 @@ test('injected browser Adapter captures credentials from an exact OnTrack redire
   const credentials = await captureSsoCredentials({
     ssoUrl: 'https://sso.example/login',
     apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
-    browserAdapter: createBrowserAdapter({
-      urlAfterGoto: 'https://ontrack.infotech.monash.edu/sign_in?authToken=url-token&username=url-user',
-    }),
+    browserAdapter: createBrowserAdapter({ urlAfterGoto: LANDING_URL }),
   });
   assert.deepEqual(credentials, { authToken: 'url-token', username: 'url-user', source: 'url' });
 });
@@ -513,7 +517,7 @@ test('a throwaway capture context blocks service workers', async () => {
 
 test('capture signs in through a private, persistent SSO profile', async () => {
   await withSsoProfileDir(async (profileDir) => {
-    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const launches: PersistentLaunch[] = [];
     const contextOptions: unknown[] = [];
     const lifecycle = { closeCalls: 0 };
     const credentials = await captureSsoCredentials({
@@ -545,7 +549,7 @@ test('capture signs in through a private, persistent SSO profile', async () => {
 
 test('a profile held by another login falls back to a throwaway browser', async () => {
   await withSsoProfileDir(async () => {
-    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const launches: PersistentLaunch[] = [];
     const contextOptions: unknown[] = [];
     const credentials = await captureSsoCredentials({
       ssoUrl: 'https://sso.example/login',
@@ -571,7 +575,7 @@ test('ONTRACK_SSO_PROFILE=ephemeral keeps every capture in a throwaway browser',
   process.env.ONTRACK_SSO_PROFILE = 'ephemeral';
   try {
     await withSsoProfileDir(async () => {
-      const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+      const launches: PersistentLaunch[] = [];
       const contextOptions: unknown[] = [];
       await captureSsoCredentials({
         ssoUrl: 'https://sso.example/login',
@@ -635,7 +639,7 @@ test('the profile launch cannot outlive the login deadline', async () => {
   // A launch still running when the login gives up would keep the profile
   // locked, so the next login could only fall back to a throwaway browser.
   await withSsoProfileDir(async () => {
-    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const launches: PersistentLaunch[] = [];
     await captureSsoCredentials({
       ssoUrl: 'https://sso.example/login',
       apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
@@ -656,7 +660,7 @@ test('a profile path that resolves outside the operator home stays unused', asyn
   const profileDir = join(outside, 'sso-browser-profile');
   setSsoBrowserProfileDirForTests(profileDir);
   try {
-    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const launches: PersistentLaunch[] = [];
     const contextOptions: unknown[] = [];
     const credentials = await captureSsoCredentials({
       ssoUrl: 'https://sso.example/login',
