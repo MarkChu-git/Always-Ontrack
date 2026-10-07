@@ -128,7 +128,8 @@ machine (renewable session) and still offers pairing or terminal
 username/password. `--pair` / `--auto` / `--sso` skip the prompt. Pairing sends
 the credential end-to-end encrypted; `--auto` captures a refresh cookie that can
 renew silently; `--sso` types credentials in the terminal and fills Okta in a
-hidden browser. Manual redirect URL import and direct
+hidden browser. Both sign in through a private browser profile the CLI keeps, so
+Okta can recognize this machine between logins. Manual redirect URL import and direct
 `--auth-token` login remain as fallbacks. A paired session cannot renew: the
 credential that renews a session is an HttpOnly cookie no bookmark can read, so
 it lasts as long as its access token and `login` says so. See
@@ -244,6 +245,7 @@ The full reference with every flag and safety note: [docs/commands.md](docs/comm
 | `ONTRACK_BROWSER` | Set to `lightpanda` only with the two Lightpanda gates below | Credential-free compatibility spike; real login fails closed |
 | `ONTRACK_EXPERIMENTAL_LIGHTPANDA` | Set to `1` to acknowledge the Lightpanda experiment | Required together with `ONTRACK_BROWSER=lightpanda` |
 | `ONTRACK_LIGHTPANDA_PATH` | Absolute path to the reviewed local Lightpanda binary | Required for the experiment; the CLI never discovers Lightpanda from `PATH` |
+| `ONTRACK_SSO_PROFILE` | Set to `ephemeral` to sign in with a throwaway browser every time | By default the CLI keeps a private SSO browser profile so Okta recognizes this machine; `ontrack logout` deletes it |
 | `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE` | Explicitly allow live browser-profile credential discovery | Disabled by default; do not enable for shared/untrusted profiles |
 | `ONTRACK_BROWSER_USER_DATA_DIR` | Override Chromium/Chrome user data root | Used only with `ONTRACK_ENABLE_SYSTEM_BROWSER_PROFILE=1` |
 | `ONTRACK_BROWSER_PROFILE_DIR` | Override profile directory name under user data root | Used only with explicit profile reuse; defaults to `Default` |

@@ -82,6 +82,12 @@ The repository currently includes:
   - SSO credential capture helpers
   - OnTrack origin/domain isolation
   - private, filtered browser-state persistence
+- [auto-login-real-browser.test.ts](../test/auto-login-real-browser.test.ts)
+  - real Chromium against loopback Okta and OnTrack stand-ins, with no external
+    network; skipped where no system Chromium is installed
+  - the first login succeeds although the page tries to spend the one-time
+    login token
+  - the identity provider recognizes the device on the next login
 - [discovery.test.ts](../test/discovery.test.ts)
   - frontend bundle route and API extraction
 - [logout.test.ts](../test/logout.test.ts)

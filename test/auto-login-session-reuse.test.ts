@@ -15,7 +15,7 @@ import { join } from "node:path";
 import {
   buildContextOptionsWithStoredSession,
   captureCredentialsFromStoredBrowserSession,
-  injectRememberIntoAuthExchange,
+  isLoginTokenExchange,
   persistRefreshCookie,
   readStoredRefreshCookie,
   setBrowserSessionStatePathForTests,
@@ -449,6 +449,84 @@ test("opted-in system profile launch cannot exceed the shared silent-auth deadli
   );
 });
 
+test("opted-in system profile probe keeps the page from spending the login token", async () => {
+  // The probe can land on the sign_in redirect, where doubtfire-web would
+  // spend the one-time login token before the CLI exchanges it (419).
+  await withBrowserState("ontrack-system-profile-guard-", async () => {
+    const launchOptions: Array<Record<string, unknown>> = [];
+    const routes: Array<{
+      matches: (url: URL) => boolean;
+      handle: (route: unknown) => Promise<void>;
+    }> = [];
+    let landed = "about:blank";
+    const page = {
+      on: () => undefined,
+      url: () => landed,
+      goto: async (url: string) => {
+        landed =
+          url === SSO_URL
+            ? `${TARGET_ORIGIN}/sign_in?authToken=login-token&username=student1`
+            : url;
+      },
+      evaluate: async () => null,
+    };
+    const context = {
+      route: async (
+        matches: (url: URL) => boolean,
+        handle: (route: unknown) => Promise<void>,
+      ) => {
+        routes.push({ matches, handle });
+      },
+      pages: () => [page],
+      newPage: async () => page,
+      cookies: async () => [],
+      close: async () => undefined,
+    };
+
+    const credentials = await captureCredentialsFromStoredBrowserSession({
+      ssoUrl: SSO_URL,
+      apiBaseUrl: API_BASE_URL,
+      timeoutMs: 5_000,
+      headless: true,
+      systemBrowserProfileReuseEnabled: () => true,
+      systemBrowserProfileCandidates: [{
+        label: "Test profile",
+        userDataDir: "/trusted/profile",
+        profileDir: "Default",
+      }],
+      browserPlan: { source: "system", executablePath: "/trusted/chrome" },
+      systemBrowserProfileAdapter: {
+        launchPersistentContext: async (_userDataDir, options) => {
+          launchOptions.push(options as Record<string, unknown>);
+          return context as never;
+        },
+      },
+    });
+
+    assert.equal(credentials?.authToken, "login-token");
+    assert.equal(launchOptions[0]?.serviceWorkers, "block");
+    const exchange = routes.find((entry) =>
+      entry.matches(new URL(`${TARGET_ORIGIN}/api/auth`)),
+    );
+    assert.ok(exchange, "the token-exchange path is routed");
+    let outcome = "";
+    await exchange.handle({
+      request: () => ({
+        method: () => "POST",
+        url: () => `${TARGET_ORIGIN}/api/auth`,
+        postData: () => JSON.stringify({ auth_token: "login-token", username: "student1" }),
+      }),
+      abort: async () => {
+        outcome = "aborted";
+      },
+      continue: async () => {
+        outcome = "continued";
+      },
+    });
+    assert.equal(outcome, "aborted");
+  });
+});
+
 test("stored browser capture does not expose its claimed state while the browser runs", async () => {
   await withBrowserState(
     "ontrack-browser-state-private-claim-",
@@ -761,52 +839,29 @@ test("failed exclusive publication removes its partial file before restoring sta
   );
 });
 
-test("injectRememberIntoAuthExchange only rewrites the token-exchange POST", () => {
+test("isLoginTokenExchange matches only the page's one-time token exchange", () => {
   const origin = "https://ontrack.infotech.monash.edu";
-  assert.equal(
-    injectRememberIntoAuthExchange(
-      "POST",
-      `${origin}/api/auth`,
-      '{"username":"u1","auth_token":"t"}',
-      origin,
-    ),
-    '{"username":"u1","auth_token":"t","remember":true}',
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange(
-      "POST",
-      `${origin}/api/auth.json`,
-      '{"username":"u1"}',
-      origin,
-    ),
-    '{"username":"u1","remember":true}',
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange(
-      "POST",
-      `${origin}/api/auth/access-token`,
-      '{"x":1}',
-      origin,
-    ),
-    null,
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange("GET", `${origin}/api/auth`, '{"x":1}', origin),
-    null,
-  );
-  assert.equal(injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, null, origin), null);
-  assert.equal(
-    injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, "not json", origin),
-    null,
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, '{"remember":true}', origin),
-    null,
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange("POST", "https://evil.example/api/auth", '{"x":1}', origin),
-    null,
-  );
+  const exchange = '{"auth_token":"t","username":"u1","remember":true}';
+  const cases: Array<[string, string, string | null, boolean]> = [
+    ["POST", `${origin}/api/auth`, exchange, true],
+    ["POST", `${origin}/api/auth.json`, exchange, true],
+    ["POST", `${origin}/api/auth/`, exchange, true],
+    ["POST", `${origin}/api/auth`, '{"authToken":"t","username":"u1"}', true],
+    // Renewal and password sign-in carry no login token and must go through.
+    ["POST", `${origin}/api/auth/access-token`, "{}", false],
+    ["POST", `${origin}/api/auth`, '{"username":"u1","password":"p"}', false],
+    ["GET", `${origin}/api/auth`, exchange, false],
+    ["POST", `${origin}/api/auth`, null, false],
+    ["POST", `${origin}/api/auth`, "not json", false],
+    ["POST", "https://evil.example/api/auth", exchange, false],
+  ];
+  for (const [method, url, body, expected] of cases) {
+    assert.equal(
+      isLoginTokenExchange(method, url, body, origin),
+      expected,
+      `${method} ${url} ${body}`,
+    );
+  }
 });
 
 test("persisted refresh cookies roundtrip through the trusted state store", async () => {
