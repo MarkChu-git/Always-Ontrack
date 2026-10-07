@@ -3339,6 +3339,39 @@ async function openPersistentSsoCapture(
 }
 
 /**
+ * Keep the page from spending the one-time login token. The CLI exchanges it
+ * itself (finalizeCapturedLogin), so the page's own exchange never reaches the
+ * server: whichever side spends the token first leaves the other with a 419.
+ * Test doubles without routing support simply skip the guard.
+ */
+async function guardLoginTokenExchange(
+  context: BrowserContext,
+  targetOrigin: string,
+): Promise<void> {
+  if (typeof context.route !== "function") {
+    return;
+  }
+  await context.route(
+    (url) => isTokenExchangeUrl(url, targetOrigin),
+    async (route) => {
+      const request = route.request();
+      if (
+        isLoginTokenExchange(
+          request.method(),
+          request.url(),
+          request.postData(),
+          targetOrigin,
+        )
+      ) {
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    },
+  );
+}
+
+/**
  * Open the capture in a throwaway context that loads only sanitized,
  * OnTrack-only persisted state when available.
  */
@@ -3405,30 +3438,7 @@ async function captureSsoCredentialsInternal(
   const context = captureBrowser.context;
 
   try {
-    // The CLI exchanges the one-time login token itself
-    // (finalizeCapturedLogin), so the page's own exchange never reaches the
-    // server: whichever side spends the token first leaves the other with a
-    // 419. Test doubles without routing support simply skip the guard.
-    if (typeof context.route === "function") {
-      await context.route(
-        (url) => isTokenExchangeUrl(url, targetOrigin),
-        async (route) => {
-          const request = route.request();
-          if (
-            isLoginTokenExchange(
-              request.method(),
-              request.url(),
-              request.postData(),
-              targetOrigin,
-            )
-          ) {
-            await route.abort();
-            return;
-          }
-          await route.continue();
-        },
-      );
-    }
+    await guardLoginTokenExchange(context, targetOrigin);
     // A persistent profile opens with a blank tab already; reuse it.
     const page =
       context.pages()[0] ?? (await deadline.run(() => context.newPage()));
@@ -4103,8 +4113,15 @@ async function captureCredentialsFromSystemBrowserProfile(
           headless: options.headless ?? true,
           executablePath: launchPlan.executablePath,
           args: [`--profile-directory=${candidate.profileDir}`],
+          // A service worker would hide the page's token exchange from the
+          // guard below, as in the SSO profile.
+          serviceWorkers: "block",
           timeout: remaining,
         }),
+      );
+      await guardLoginTokenExchange(
+        context,
+        new URL(options.apiBaseUrl).origin,
       );
 
       const page =
