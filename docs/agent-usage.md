@@ -158,9 +158,13 @@ The CLI applies the same lifecycle automatically. A rejected read may silently
 refresh and replay once. Mutations are never automatically replayed.
 
 `auth_status` (and `auth.status`) report the access token's `expiresAt`, which
-OnTrack keeps short, plus `renewableUntil` while a stored refresh cookie can
-still renew the session. An `expired` status with a future `renewableUntil`
-needs only `auth_ensure` with `interaction: "never"`, not a human.
+OnTrack keeps short, plus `renewableUntil`, an RFC 3339 instant, while a stored
+refresh cookie can still renew the session. Once the access token has expired,
+the status is `renewable` while that cookie lasts and `expired` after it. A
+`renewable` session needs only `auth_ensure` with `interaction: "never"`, not a
+human. `renewableUntil` is a local estimate: a refresh token the server has
+revoked still reports one until `auth_ensure` fails and the user signs in again
+or logs out.
 
 ## Apply writes safely
 

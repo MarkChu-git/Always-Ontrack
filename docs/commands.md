@@ -67,7 +67,7 @@ next actions.
 | `ontrack capabilities --output agent-json` | Discover the Agent protocol | Offline; no credential required |
 | `ontrack schema <command> --output agent-json` | Read one command schema | Offline; no credential required |
 | `ontrack auth-method` | Show the advertised authentication method | Verify whether the server is using SSO |
-| `ontrack auth status --output agent-json` | Read credential lifecycle metadata, including `renewableUntil` while a refresh cookie can renew the session | Never returns a credential or identity |
+| `ontrack auth status --output agent-json` | Read credential lifecycle metadata: the status is `renewable` while a refresh cookie can renew an expired access token, and `renewableUntil` says until when | Never returns a credential or identity |
 | `ontrack auth ensure --output agent-json` | Ensure a usable credential | Silent by default; structured handoff when required |
 | `ontrack login` | Recommend this-machine browser sign-in; pairing and terminal remain available | Primary login command; interactive method prompt |
 | `ontrack login --show-browser` | Force visible browser mode | Explicit override (this-machine or --sso) |
