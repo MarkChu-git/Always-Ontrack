@@ -81,20 +81,24 @@ export async function prompt(
   question: string,
   streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream } = { input, output },
 ): Promise<string> {
+  const inputClosed = (): Error =>
+    new Error(`Input closed before "${question.trim().replace(/:$/, '')}" was answered.`);
+  // Spent input never emits again, so an interface on it would wait forever.
+  if (!streams.input.readable) {
+    throw inputClosed();
+  }
   const rl = createInterface({ input: streams.input, output: streams.output });
   // `rl.question` never settles when input ends without an answer (EOF, a
   // closed pipe), so the drained event loop would exit 0 mid-command; reject
   // instead. Wait one turn: a terminal Ctrl+C/Ctrl+D closes the interface
   // before readline rejects with its own AbortError, which should win.
-  const inputClosed = new Promise<never>((_, reject) => {
+  const closed = new Promise<never>((_, reject) => {
     rl.once('close', () => {
-      setImmediate(() => {
-        reject(new Error(`Input closed before "${question.trim().replace(/:$/, '')}" was answered.`));
-      });
+      setImmediate(() => reject(inputClosed()));
     });
   });
   try {
-    return (await Promise.race([rl.question(question), inputClosed])).trim();
+    return (await Promise.race([rl.question(question), closed])).trim();
   } finally {
     rl.close();
   }

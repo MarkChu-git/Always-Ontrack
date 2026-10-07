@@ -165,6 +165,15 @@ test('prompt rejects, naming the question, when input ends before an answer', as
   await assert.rejects(answer, /closed\b.*Paste the sign_in URL from your browser history/i);
 });
 
+test('prompt rejects at once when its input already ended', async () => {
+  const streams = promptStreams();
+  const first = prompt('Monash username: ', streams);
+  streams.input.end();
+  await assert.rejects(first);
+  // A later prompt on the spent input must not wait for events that never come.
+  await assert.rejects(prompt('Password: ', streams), /closed\b.*Password/i);
+});
+
 test('prompt leaves a terminal Ctrl+C abort to readline', async () => {
   const streams = promptStreams(true);
   const answer = prompt('Choose method [1]: ', streams);
