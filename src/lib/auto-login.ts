@@ -60,6 +60,8 @@ export interface SsoLoginOptions {
   requestMfaCode?: (methodLabel: string) => Promise<string | null | undefined>;
   onMfaNumberChallenge?: (numbers: string[]) => void;
   browserAdapter?: BrowserLaunchAdapter;
+  /** Tells the user why this sign-in could not use the SSO browser profile. */
+  onNotice?: (message: string) => void;
 }
 
 /** One CLI-presented MFA option extracted from page controls. */
@@ -819,6 +821,8 @@ export interface AutoLoginOptions {
   systemBrowserProfileCandidates?: SystemBrowserProfileLocation[];
   /** Trusted test seam for the persistent-context launcher. */
   systemBrowserProfileAdapter?: SystemBrowserProfileAdapter;
+  /** Tells the user why this sign-in could not use the SSO browser profile. */
+  onNotice?: (message: string) => void;
 }
 
 /** Candidate system browser profile location used for direct session reuse probe. */
@@ -3273,7 +3277,8 @@ interface SsoCaptureBrowser {
 /**
  * Open the capture in the CLI's persistent SSO profile. Returns null when the
  * profile is disabled or cannot be opened (another login may hold it), so the
- * capture falls back to a throwaway browser. Service workers are blocked
+ * capture falls back to a throwaway browser; onNotice says why unless the
+ * profile is disabled on purpose. Service workers are blocked
  * because routes never see the requests one handles, and doubtfire-web
  * registers one that would otherwise control the page on the next login.
  */
@@ -3301,6 +3306,9 @@ async function openPersistentSsoCapture(
   }
   const profileDir = preparePrivateSsoBrowserProfileDir();
   if (!profileDir) {
+    options.onNotice?.(
+      "The SSO browser profile directory is unusable (it must be a private directory inside your home), so this sign-in uses a throwaway browser that Okta will not recognize.",
+    );
     return null;
   }
   const launchOptions: PersistentContextLaunchOptions = {
@@ -3334,6 +3342,9 @@ async function openPersistentSsoCapture(
     if (error instanceof SsoFallbackError && error.reason === "timeout") {
       throw error;
     }
+    options.onNotice?.(
+      "The SSO browser profile could not be opened (another login may be using it), so this sign-in uses a throwaway browser that Okta will not recognize. If this keeps happening, `ontrack logout` resets the profile.",
+    );
     return null;
   }
 }
@@ -4175,6 +4186,7 @@ export async function captureSsoCredentialsWithGuidedLogin(
       timeoutMs: options.timeoutMs,
       headless: options.headless,
       browserAdapter: options.browserAdapter,
+      onNotice: options.onNotice,
     },
     {
       username: options.username,

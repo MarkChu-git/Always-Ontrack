@@ -1994,6 +1994,7 @@ async function handleLogin(args: string[]): Promise<void> {
               password,
               timeoutMs: ssoTimeoutSec * 1000,
               headless: terminalHeadless,
+              onNotice: (message) => console.log(`[warn] ${message}`),
               chooseMfaMethod,
               requestMfaCode,
               onMfaNumberChallenge: (numbers) => {
@@ -2048,6 +2049,7 @@ async function handleLogin(args: string[]): Promise<void> {
               apiBaseUrl: api.base,
               timeoutMs: ssoTimeoutSec * 1000,
               headless: !showBrowser,
+              onNotice: (message) => console.log(`[warn] ${message}`),
             });
             authToken = captured.authToken;
             username = captured.username;
@@ -2138,6 +2140,7 @@ async function handleLogin(args: string[]): Promise<void> {
             apiBaseUrl: api.base,
             timeoutMs: autoTimeoutSec * 1000,
             headless: !showBrowser,
+            onNotice: (message) => console.log(`[warn] ${message}`),
           });
           authToken = captured.authToken;
           capturedRefreshCookie = captured.refreshCookie;

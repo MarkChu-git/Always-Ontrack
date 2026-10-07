@@ -560,13 +560,15 @@ test('capture signs in through a private, persistent SSO profile', async () => {
   });
 });
 
-test('a profile held by another login falls back to a throwaway browser', async () => {
+test('a profile held by another login falls back to a throwaway browser and says so', async () => {
   await withSsoProfileDir(async () => {
     const launches: PersistentLaunch[] = [];
     const contextOptions: unknown[] = [];
+    const notices: string[] = [];
     const credentials = await captureSsoCredentials({
       ssoUrl: 'https://sso.example/login',
       apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      onNotice: (message) => notices.push(message),
       browserAdapter: createBrowserAdapter({
         urlAfterGoto: LANDING_URL,
         persistent: {
@@ -580,6 +582,10 @@ test('a profile held by another login falls back to a throwaway browser', async 
     assert.equal(credentials.authToken, 'url-token');
     assert.equal(launches.length, 1);
     assert.equal(contextOptions.length, 1);
+    // Without the profile Okta does not recognize the device, so the user
+    // has to learn why this sign-in asked for MFA again.
+    assert.equal(notices.length, 1);
+    assert.match(notices[0] ?? '', /throwaway browser/);
   });
 });
 
@@ -675,9 +681,11 @@ test('a profile path that resolves outside the operator home stays unused', asyn
   try {
     const launches: PersistentLaunch[] = [];
     const contextOptions: unknown[] = [];
+    const notices: string[] = [];
     const credentials = await captureSsoCredentials({
       ssoUrl: 'https://sso.example/login',
       apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      onNotice: (message) => notices.push(message),
       browserAdapter: createBrowserAdapter({
         urlAfterGoto: LANDING_URL,
         persistent: { launches },
@@ -689,6 +697,8 @@ test('a profile path that resolves outside the operator home stays unused', asyn
     assert.equal(launches.length, 0);
     assert.equal(contextOptions.length, 1);
     await assert.rejects(access(profileDir), 'the profile directory is never created');
+    assert.equal(notices.length, 1);
+    assert.match(notices[0] ?? '', /inside your home/);
   } finally {
     setSsoBrowserProfileDirForTests(undefined);
     await rm(outside, { recursive: true, force: true });
