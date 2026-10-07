@@ -3639,12 +3639,17 @@ async function captureSsoCredentialsInternal(
     // persisted, so only a credential the page itself holds takes the jar's.
     const capturedFinal = captured as LoginCredentials;
     if (capturedFinal.source !== "url" && capturedFinal.source !== "auth_request") {
-      const capturedRefreshCookie = extractRefreshCookieMaterial(
-        await deadline.run(() => context.cookies()),
-        targetOrigin,
-      );
-      if (capturedRefreshCookie) {
-        capturedFinal.refreshCookie = capturedRefreshCookie;
+      try {
+        const capturedRefreshCookie = extractRefreshCookieMaterial(
+          await deadline.run(() => context.cookies()),
+          targetOrigin,
+        );
+        if (capturedRefreshCookie) {
+          capturedFinal.refreshCookie = capturedRefreshCookie;
+        }
+      } catch {
+        // Best-effort: the credential is already captured, and a closed
+        // window or a spent deadline only costs the optional cookie.
       }
     }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.

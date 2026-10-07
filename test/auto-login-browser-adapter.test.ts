@@ -24,6 +24,8 @@ interface FakeBrowserOptions {
   cookieCredentials?: boolean;
   /** A refresh-cookie pair already in the jar, as restored browser state leaves it. */
   refreshCookie?: boolean;
+  /** Makes reading the cookie jar fail, as it does once the window is closed. */
+  cookiesError?: Error;
   /** Records the options of every throwaway context the capture creates. */
   contextOptions?: unknown[];
   /** Offers a persistent-profile launch, recording each one; `failure` makes it throw. */
@@ -157,7 +159,9 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
     newPage: async () => page,
     on: () => undefined,
     pages: () => [page],
-    cookies: async () => [
+    cookies: async () => {
+      if (options.cookiesError) throw options.cookiesError;
+      return [
       ...(options.cookieCredentials
         ? [
             { name: 'auth_token', value: 'cookie-token', domain: 'ontrack.infotech.monash.edu' },
@@ -170,7 +174,8 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
             { name: 'username', value: 'url-user', domain: 'ontrack.infotech.monash.edu' },
           ]
         : []),
-    ],
+      ];
+    },
     storageState: async () => ({ cookies: [], origins: [] }),
   };
   const persistent = options.persistent;
@@ -456,6 +461,29 @@ test('a landing-token capture leaves the refresh cookie to the CLI exchange', as
     browserAdapter: createBrowserAdapter({ urlAfterGoto: LANDING_URL, refreshCookie: true }),
   });
   assert.deepEqual(credentials, { authToken: 'url-token', username: 'url-user', source: 'url' });
+});
+
+test('a captured live credential survives a cookie jar that can no longer be read', async () => {
+  // The refresh cookie is extra; once the credential is in hand, closing the
+  // window early must not turn a successful sign-in into a failure.
+  const credentials = await captureSsoCredentials({
+    ssoUrl: 'https://sso.example/login',
+    apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+    browserAdapter: createBrowserAdapter({
+      response: {
+        url: 'https://ontrack.infotech.monash.edu/api/auth/access-token',
+        status: 201,
+        body: {
+          auth_token: 'access-token-value',
+          auth_token_expiry: '2030-01-01T00:00:00.000Z',
+          user: { username: 'access-user' },
+        },
+      },
+      cookiesError: new Error('Target page, context or browser has been closed'),
+    }),
+  });
+  assert.equal(credentials.authToken, 'access-token-value');
+  assert.equal(credentials.refreshCookie, undefined);
 });
 
 test('a throwaway capture context blocks service workers', async () => {
