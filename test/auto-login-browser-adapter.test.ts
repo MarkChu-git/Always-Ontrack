@@ -626,3 +626,20 @@ test('a profile sign-in keeps the stored refresh cookie until the CLI exchange r
     );
   });
 });
+
+test('the profile launch cannot outlive the login deadline', async () => {
+  // A launch still running when the login gives up would keep the profile
+  // locked, so the next login could only fall back to a throwaway browser.
+  await withSsoProfileDir(async () => {
+    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    await captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      timeoutMs: 30_000,
+      browserAdapter: createBrowserAdapter({ urlAfterGoto: LANDING_URL, persistent: { launches } }),
+    });
+    const timeout = launches[0]?.options.timeout;
+    assert.equal(typeof timeout, 'number');
+    assert.ok((timeout as number) > 0 && (timeout as number) <= 30_000, String(timeout));
+  });
+});

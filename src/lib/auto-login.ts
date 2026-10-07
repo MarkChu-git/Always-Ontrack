@@ -178,11 +178,7 @@ export interface BrowserLaunchAdapter {
   /** Present when the double also stands in for the persistent SSO profile. */
   launchPersistentContext?(
     userDataDir: string,
-    options: {
-      headless: boolean;
-      executablePath?: string;
-      serviceWorkers: "block";
-    },
+    options: PersistentContextLaunchOptions,
   ): Promise<BrowserContext>;
 }
 
@@ -3164,6 +3160,16 @@ async function advanceGuidedSsoOnPage(
   }
 }
 
+/** Launch arguments for a plan: its executable when it names one. */
+function browserLaunchArgs(
+  plan: BrowserLaunchPlan,
+  headless: boolean,
+): { headless: boolean; executablePath?: string } {
+  return plan.executablePath !== undefined
+    ? { headless, executablePath: plan.executablePath }
+    : { headless };
+}
+
 /** Launch a credential-safe Playwright Chromium provider. */
 async function launchBrowserForCapture(options: {
   headless: boolean;
@@ -3182,15 +3188,7 @@ async function launchBrowserForCapture(options: {
       "Experimental Lightpanda uses unauthenticated local CDP and is restricted to credential-free compatibility spikes. Unset ONTRACK_BROWSER for real authentication.",
     );
   }
-  const launchArgs =
-    plan.executablePath !== undefined
-      ? {
-          headless: options.headless,
-          executablePath: plan.executablePath,
-        }
-      : {
-          headless: options.headless,
-        };
+  const launchArgs = browserLaunchArgs(plan, options.headless);
 
   try {
     if (options.browserAdapter) {
@@ -3291,12 +3289,14 @@ async function openPersistentSsoCapture(
   if (!profileDir) {
     return null;
   }
-  const launchOptions = {
-    headless: options.headless ?? false,
-    ...(plan.executablePath !== undefined
-      ? { executablePath: plan.executablePath }
-      : {}),
-    serviceWorkers: "block" as const,
+  const launchOptions: PersistentContextLaunchOptions = {
+    ...browserLaunchArgs(plan, options.headless ?? false),
+    // Playwright blocks registration only, which suffices because this is
+    // the only code that opens the profile and it always passes this.
+    serviceWorkers: "block",
+    // Playwright abandons the launch itself at the deadline, so a browser
+    // that starts too late never keeps the profile locked.
+    timeout: Math.max(1, deadline.remainingMs()),
   };
   try {
     const context = await deadline.run(async () => {
