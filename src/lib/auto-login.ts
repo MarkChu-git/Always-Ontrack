@@ -175,6 +175,15 @@ export interface BrowserLaunchAdapter {
     headless: boolean;
     executablePath?: string;
   }): Promise<Pick<Browser, "newContext" | "close">>;
+  /** Present when the double also stands in for the persistent SSO profile. */
+  launchPersistentContext?(
+    userDataDir: string,
+    options: {
+      headless: boolean;
+      executablePath?: string;
+      serviceWorkers: "block";
+    },
+  ): Promise<BrowserContext>;
 }
 
 const DEFAULT_ONTRACK_ORIGIN = "https://ontrack.infotech.monash.edu";
@@ -883,6 +892,70 @@ function resolveManagedBrowserSessionStatePath(): string {
   return process.platform === "win32"
     ? join(home, "AppData", "Roaming", "ontrack-cli", "browser-state.json")
     : join(home, ".config", "ontrack-cli", "browser-state.json");
+}
+
+let ssoBrowserProfileDirForTests: string | undefined;
+
+/** @internal Isolate SSO-profile tests from the operator's real profile. */
+export function setSsoBrowserProfileDirForTests(
+  profileDir: string | undefined,
+): void {
+  ssoBrowserProfileDirForTests = profileDir ? resolve(profileDir) : undefined;
+}
+
+/**
+ * The CLI's own browser profile for SSO sign-in, at one operator-owned path
+ * that ignores environment overrides like the browser-state file. Keeping it
+ * between logins is what lets the identity provider recognize this machine:
+ * Okta's "keep me signed in" and "do not challenge me on this device" ride on
+ * a device cookie that a throwaway browser never brings back.
+ */
+function resolveManagedSsoBrowserProfileDir(): string {
+  if (ssoBrowserProfileDirForTests) {
+    return ssoBrowserProfileDirForTests;
+  }
+  const home = homedir();
+  return process.platform === "win32"
+    ? join(home, "AppData", "Roaming", "ontrack-cli", "sso-browser-profile")
+    : join(home, ".config", "ontrack-cli", "sso-browser-profile");
+}
+
+/** `ONTRACK_SSO_PROFILE=ephemeral` signs in with a throwaway browser every time. */
+function isSsoBrowserProfileEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.ONTRACK_SSO_PROFILE?.trim().toLowerCase() !== "ephemeral";
+}
+
+/**
+ * Create the profile directory owner-only. Returns null when the managed path
+ * is not a private directory this user owns, so the capture falls back to a
+ * throwaway browser instead of trusting it.
+ */
+function preparePrivateSsoBrowserProfileDir(): string | null {
+  const profileDir = resolveManagedSsoBrowserProfileDir();
+  try {
+    // The profile path is fixed under the operator home (or a test seam).
+    // codeql[js/path-injection]
+    mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+    // codeql[js/path-injection]
+    const metadata = lstatSync(profileDir);
+    if (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      (typeof process.getuid === "function" &&
+        metadata.uid !== process.getuid())
+    ) {
+      return null;
+    }
+    if (process.platform !== "win32") {
+      // codeql[js/path-injection]
+      chmodSync(profileDir, 0o700);
+    }
+    return profileDir;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -3147,6 +3220,110 @@ async function launchBrowserForCapture(options: {
   }
 }
 
+/** The SSO capture's browser context and how to release it. */
+interface SsoCaptureBrowser {
+  context: BrowserContext;
+  close(): Promise<void>;
+}
+
+/**
+ * Open the capture in the CLI's persistent SSO profile. Returns null when the
+ * profile is disabled or cannot be opened (another login may hold it), so the
+ * capture falls back to a throwaway browser. Service workers are blocked
+ * because routes never see the requests one handles, and doubtfire-web
+ * registers one that would otherwise control the page on the next login.
+ */
+async function openPersistentSsoCapture(
+  options: AutoLoginOptions,
+  deadline: SsoCaptureDeadline,
+): Promise<SsoCaptureBrowser | null> {
+  if (!isSsoBrowserProfileEnabled()) {
+    return null;
+  }
+  // A test double opts in by offering a persistent launch.
+  const adapter = options.browserAdapter;
+  if (adapter && !adapter.launchPersistentContext) {
+    return null;
+  }
+  let plan: BrowserLaunchPlan;
+  try {
+    plan = options.browserPlan ?? resolveBrowserLaunchPlan();
+  } catch {
+    // The throwaway launch reports the same problem with its remediation.
+    return null;
+  }
+  if (plan.source === "lightpanda") {
+    return null;
+  }
+  const profileDir = preparePrivateSsoBrowserProfileDir();
+  if (!profileDir) {
+    return null;
+  }
+  const launchOptions = {
+    headless: options.headless ?? false,
+    ...(plan.executablePath !== undefined
+      ? { executablePath: plan.executablePath }
+      : {}),
+    serviceWorkers: "block" as const,
+  };
+  try {
+    const context = await deadline.run(async () => {
+      if (adapter?.launchPersistentContext) {
+        return adapter.launchPersistentContext(profileDir, launchOptions);
+      }
+      const playwrightModule = await import("playwright-core");
+      return playwrightModule.chromium.launchPersistentContext(
+        profileDir,
+        launchOptions,
+      );
+    });
+    return {
+      context,
+      // Chrome writes the identity provider's cookies to disk as it shuts
+      // down, so the profile gets longer than a throwaway browser to close.
+      close: () => closeBrowserAtMost(context, 10_000),
+    };
+  } catch (error) {
+    if (error instanceof SsoFallbackError && error.reason === "timeout") {
+      throw error;
+    }
+    return null;
+  }
+}
+
+/**
+ * Open the capture in a throwaway context that loads only sanitized,
+ * OnTrack-only persisted state when available.
+ */
+async function openThrowawaySsoCapture(
+  options: AutoLoginOptions,
+  targetOrigin: string,
+  deadline: SsoCaptureDeadline,
+): Promise<SsoCaptureBrowser> {
+  // Browser launch plan supports env override, system browser, then bundled Chromium.
+  const launch = await deadline.run(() =>
+    launchBrowserForCapture({
+      headless: options.headless ?? false,
+      browserAdapter: options.browserAdapter,
+      browserPlan: options.browserPlan,
+      startupTimeoutMs: Math.max(1, deadline.remainingMs()),
+    }),
+  );
+  const browser = launch.browser;
+  try {
+    const context = await deadline.run(() =>
+      browser.newContext({
+        ...buildContextOptionsWithStoredSession({ targetOrigin }),
+        serviceWorkers: "block",
+      }),
+    );
+    return { context, close: () => closeBrowserAtMost(browser) };
+  } catch (error) {
+    await closeBrowserAtMost(browser);
+    throw error;
+  }
+}
+
 /**
  * Core capture loop:
  * - optionally drives guided SSO interactions
@@ -3170,29 +3347,13 @@ async function captureSsoCredentialsInternal(
 ): Promise<LoginCredentials> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
   const deadline = new SsoCaptureDeadline(timeoutMs);
-
-  // Browser launch plan supports env override, system browser, then bundled Chromium.
-  const launch = await deadline.run(() =>
-    launchBrowserForCapture({
-      headless: options.headless ?? false,
-      browserAdapter: options.browserAdapter,
-      browserPlan: options.browserPlan,
-      startupTimeoutMs: Math.max(1, deadline.remainingMs()),
-    }),
-  );
-  const browser = launch.browser;
+  const targetOrigin = new URL(options.apiBaseUrl).origin;
+  const captureBrowser =
+    (await openPersistentSsoCapture(options, deadline)) ??
+    (await openThrowawaySsoCapture(options, targetOrigin, deadline));
+  const context = captureBrowser.context;
 
   try {
-    const targetOrigin = new URL(options.apiBaseUrl).origin;
-    // Isolated context loads only sanitized, OnTrack-only persisted state when
-    // available. Service workers are blocked because routes never see the
-    // requests one handles, and doubtfire-web registers one.
-    const context = await deadline.run(() =>
-      browser.newContext({
-        ...buildContextOptionsWithStoredSession({ targetOrigin }),
-        serviceWorkers: "block",
-      }),
-    );
     // The CLI exchanges the landing token itself (finalizeCapturedLogin), so
     // the page's own exchange never reaches the server: whichever side spends
     // the token first leaves the other with a 419. Test doubles without
@@ -3217,7 +3378,9 @@ async function captureSsoCredentialsInternal(
         },
       );
     }
-    const page = await deadline.run(() => context.newPage());
+    // A persistent profile opens with a blank tab already; reuse it.
+    const page =
+      context.pages()[0] ?? (await deadline.run(() => context.newPage()));
     const seenPages = new Set<Page>();
     let captured: LoginCredentials | null = null;
 
@@ -3462,7 +3625,7 @@ async function captureSsoCredentialsInternal(
     }
     return captured;
   } finally {
-    await closeBrowserAtMost(browser);
+    await captureBrowser.close();
   }
 }
 

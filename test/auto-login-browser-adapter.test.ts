@@ -1,9 +1,14 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { BrowserContext } from 'playwright-core';
 import {
   captureSsoCredentials,
   captureSsoCredentialsWithGuidedLogin,
   type BrowserLaunchAdapter,
+  setSsoBrowserProfileDirForTests,
   SsoFallbackError,
 } from '../src/lib/auto-login.js';
 
@@ -21,6 +26,11 @@ interface FakeBrowserOptions {
   refreshCookie?: boolean;
   /** Records the options of every throwaway context the capture creates. */
   contextOptions?: unknown[];
+  /** Offers a persistent-profile launch, recording each one; `failure` makes it throw. */
+  persistent?: {
+    launches: Array<{ userDataDir: string; options: Record<string, unknown> }>;
+    failure?: Error;
+  };
   storageCredentials?: boolean;
   captcha?: boolean;
   unsupportedMfa?: boolean;
@@ -137,6 +147,12 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
         ]
       : [],
   };
+  const close = async () => {
+    if (options.lifecycle) {
+      options.lifecycle.closeCalls += 1;
+      options.lifecycle.closed = true;
+    }
+  };
   const context = {
     newPage: async () => page,
     on: () => undefined,
@@ -157,6 +173,7 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
     ],
     storageState: async () => ({ cookies: [], origins: [] }),
   };
+  const persistent = options.persistent;
   return {
     launch: async () => ({
       newContext: async (contextOptions?: unknown) => {
@@ -164,14 +181,35 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
         if (options.newContextError) throw options.newContextError;
         return context;
       },
-      close: async () => {
-        if (options.lifecycle) {
-          options.lifecycle.closeCalls += 1;
-          options.lifecycle.closed = true;
-        }
-      },
+      close,
     }),
+    ...(persistent
+      ? {
+          launchPersistentContext: async (
+            userDataDir: string,
+            launchOptions: Record<string, unknown>,
+          ) => {
+            persistent.launches.push({ userDataDir, options: launchOptions });
+            if (persistent.failure) throw persistent.failure;
+            return { ...context, close } as unknown as BrowserContext;
+          },
+        }
+      : {}),
   };
+}
+
+/** Point the SSO profile at a private temporary directory for one test. */
+async function withSsoProfileDir(run: (profileDir: string) => Promise<void>): Promise<void> {
+  // Inside the operator home, like the managed path this seam replaces.
+  const root = await mkdtemp(join(homedir(), '.ontrack-sso-profile-'));
+  const profileDir = join(root, 'sso-browser-profile');
+  setSsoBrowserProfileDirForTests(profileDir);
+  try {
+    await run(profileDir);
+  } finally {
+    setSsoBrowserProfileDirForTests(undefined);
+    await rm(root, { recursive: true, force: true });
+  }
 }
 
 async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -432,4 +470,88 @@ test('a throwaway capture context blocks service workers', async () => {
   });
   assert.equal(contextOptions.length, 1);
   assert.equal((contextOptions[0] as { serviceWorkers?: string }).serviceWorkers, 'block');
+});
+
+test('capture signs in through a private, persistent SSO profile', async () => {
+  await withSsoProfileDir(async (profileDir) => {
+    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const contextOptions: unknown[] = [];
+    const lifecycle = { closeCalls: 0 };
+    const credentials = await captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      headless: true,
+      browserAdapter: createBrowserAdapter({
+        urlAfterGoto: LANDING_URL,
+        persistent: { launches },
+        contextOptions,
+        lifecycle,
+      }),
+    });
+
+    assert.equal(credentials.authToken, 'url-token');
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0].userDataDir, profileDir);
+    assert.equal(launches[0].options.headless, true);
+    assert.equal(launches[0].options.serviceWorkers, 'block');
+    assert.equal(contextOptions.length, 0, 'no throwaway context once the profile opened');
+    // The profile holds the identity provider's session, so it is owner-only.
+    if (process.platform !== 'win32') {
+      assert.equal((await stat(profileDir)).mode & 0o077, 0);
+    }
+    // Closing releases the profile lock and flushes its cookies for next time.
+    assert.equal(lifecycle.closeCalls, 1);
+  });
+});
+
+test('a profile held by another login falls back to a throwaway browser', async () => {
+  await withSsoProfileDir(async () => {
+    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const contextOptions: unknown[] = [];
+    const credentials = await captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      browserAdapter: createBrowserAdapter({
+        urlAfterGoto: LANDING_URL,
+        persistent: {
+          launches,
+          failure: new Error('Failed to create a ProcessSingleton for your profile directory.'),
+        },
+        contextOptions,
+      }),
+    });
+
+    assert.equal(credentials.authToken, 'url-token');
+    assert.equal(launches.length, 1);
+    assert.equal(contextOptions.length, 1);
+  });
+});
+
+test('ONTRACK_SSO_PROFILE=ephemeral keeps every capture in a throwaway browser', async () => {
+  const previous = process.env.ONTRACK_SSO_PROFILE;
+  process.env.ONTRACK_SSO_PROFILE = 'ephemeral';
+  try {
+    await withSsoProfileDir(async () => {
+      const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+      const contextOptions: unknown[] = [];
+      await captureSsoCredentials({
+        ssoUrl: 'https://sso.example/login',
+        apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+        browserAdapter: createBrowserAdapter({
+          urlAfterGoto: LANDING_URL,
+          persistent: { launches },
+          contextOptions,
+        }),
+      });
+
+      assert.equal(launches.length, 0);
+      assert.equal(contextOptions.length, 1);
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ONTRACK_SSO_PROFILE;
+    } else {
+      process.env.ONTRACK_SSO_PROFILE = previous;
+    }
+  }
 });

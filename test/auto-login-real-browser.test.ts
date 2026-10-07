@@ -12,6 +12,7 @@ import {
   readStoredRefreshCookie,
   resolveBrowserLaunchPlan,
   setBrowserSessionStatePathForTests,
+  setSsoBrowserProfileDirForTests,
 } from '../src/lib/auto-login.js';
 import { finalizeCapturedLogin } from '../src/lib/login-finalize.js';
 
@@ -46,6 +47,8 @@ interface FakeOnTrack {
   ssoUrl: string;
   apiBaseUrl: string;
   exchanges: Exchange[];
+  /** Whether each identity-provider visit carried the device cookie it set earlier. */
+  idpVisits: boolean[];
   /** Refresh tokens issued by successful exchanges, in order. */
   issuedRefreshTokens: string[];
   close(): Promise<void>;
@@ -71,6 +74,14 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
+function cookieValue(request: IncomingMessage, name: string): string | undefined {
+  for (const part of (request.headers.cookie ?? '').split(';')) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === name) return value.join('=');
+  }
+  return undefined;
+}
+
 /**
  * Worst case for the CLI: the page spends the landing token the moment it
  * loads, before the CLI can close the window. The real app first waits for
@@ -88,6 +99,7 @@ fetch('/api/auth', {
 async function startFakeOnTrack(): Promise<FakeOnTrack> {
   const loginTokens = new Map<string, number>();
   const exchanges: Exchange[] = [];
+  const idpVisits: boolean[] = [];
   const issuedRefreshTokens: string[] = [];
   let port = 0;
 
@@ -95,13 +107,20 @@ async function startFakeOnTrack(): Promise<FakeOnTrack> {
     const url = new URL(request.url ?? '/', 'http://placeholder');
     const host = request.headers.host ?? '';
 
-    // Identity provider on its own host, like Okta.
+    // Identity provider on its own host, so its cookies never reach OnTrack.
     if (host.startsWith('localhost:') && url.pathname === '/sso') {
+      const recognized = cookieValue(request, 'DT') === 'device-1';
+      idpVisits.push(recognized);
       const token = `login-${randomUUID()}`;
       loginTokens.set(token, Date.now());
-      response.writeHead(302, {
+      const headers: Record<string, string | string[]> = {
         Location: `http://127.0.0.1:${port}/sign_in?authToken=${token}&username=${USERNAME}`,
-      });
+      };
+      if (!recognized) {
+        const expires = new Date(Date.now() + 365 * 86_400_000).toUTCString();
+        headers['Set-Cookie'] = `DT=device-1; Path=/; Expires=${expires}; HttpOnly; SameSite=Lax`;
+      }
+      response.writeHead(302, headers);
       response.end();
       return;
     }
@@ -160,6 +179,7 @@ async function startFakeOnTrack(): Promise<FakeOnTrack> {
     ssoUrl: `http://localhost:${port}/sso`,
     apiBaseUrl: `http://127.0.0.1:${port}/api`,
     exchanges,
+    idpVisits,
     issuedRefreshTokens,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
@@ -197,10 +217,12 @@ beforeEach(async () => {
   root = await mkdtemp(join(homedir(), '.ontrack-real-browser-'));
   process.env.XDG_CONFIG_HOME = join(root, 'config');
   setBrowserSessionStatePathForTests(join(root, 'state', 'browser-state.json'));
+  setSsoBrowserProfileDirForTests(join(root, 'state', 'sso-browser-profile'));
 });
 
 afterEach(async () => {
   setBrowserSessionStatePathForTests(undefined);
+  setSsoBrowserProfileDirForTests(undefined);
   if (originalConfigHome === undefined) {
     delete process.env.XDG_CONFIG_HOME;
   } else {
@@ -222,6 +244,23 @@ browserTest(
         readStoredRefreshCookie({ targetOrigin: new URL(onTrack.apiBaseUrl).origin })?.refreshToken,
         onTrack.issuedRefreshTokens[0],
       );
+    } finally {
+      await onTrack.close();
+    }
+  },
+  60_000,
+);
+
+browserTest(
+  'the identity provider recognizes the device on the next login',
+  async () => {
+    const onTrack = await startFakeOnTrack();
+    try {
+      await browserLogin(onTrack);
+      await browserLogin(onTrack);
+      // Okta's "keep me signed in" / "do not challenge me" ride on its device
+      // cookie; a throwaway browser never brings it back, so MFA runs every time.
+      assert.deepEqual(onTrack.idpVisits, [false, true]);
     } finally {
       await onTrack.close();
     }
