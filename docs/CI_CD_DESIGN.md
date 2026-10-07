@@ -17,7 +17,7 @@ OnTrack CLI 是一个 Bun 1.3.14 驱动的 TypeScript 命令行工具，而不�
 - 只有经验证、可安装的唯一 `.tgz` 可以成为 Release asset 或 registry 包。
 - tag、`package.json` version、GitHub Release 与 npm registry version 严格一致。
 - 不把真实 OnTrack 账号、session、cookie、token 或会产生写入的 smoke test 放进 GitHub Actions。
-- 对 Bun 可合并计数的 TypeScript library/script 实施 LCOV lines/functions 双 80% 硬门禁且配置无排除；process-entry CLI Adapter 由 spawned stub E2E 覆盖（Bun 不把子进程 counter 合并到父 LCOV）。真实浏览器/SSO 状态机通过注入式 Browser Adapter 在无网络环境测试，人工 Ego smoke 继续验证真实 DOM/SSO 漂移。
+- 对 Bun 可合并计数的 TypeScript library/script 实施 LCOV lines/functions 双 80% 硬门禁且配置无排除；process-entry CLI Adapter 由 spawned stub E2E 覆盖（Bun 不把子进程 counter 合并到父 LCOV）。真实浏览器/SSO 状态机通过注入式 Browser Adapter 在无网络环境测试；`test/auto-login-real-browser.test.ts` 另用系统 Chromium 对 loopback 上的 Okta/OnTrack 替身跑生产捕获路径（不访问外网，没有系统 Chromium 时跳过；ubuntu-latest 自带 Chrome，所以 CI 会运行它）。人工 Ego smoke 继续验证真实 DOM/SSO 漂移。
 
 ## 2. 已核对的事实与约束
 
@@ -332,7 +332,7 @@ publish job 安装 Node 24（满足 Node >=22.14）与 npm >=11.5.1；它不使�
 }
 ```
 
-覆盖门禁不排除任何源码文件。`src/lib/auto-login.ts` 通过窄 `BrowserLaunchAdapter` Seam 在无网络、无真实浏览器进程的情况下执行凭据捕获状态机；origin、cookie、storage、CAPTCHA、MFA 与引导式字段流都由确定性测试覆盖。parser 仍只接受精确的仓库相对 `.ts` 路径（如未来确有临时排除），拒绝 glob、绝对路径与 `..`，避免扩大排除面。
+覆盖门禁不排除任何源码文件。`src/lib/auto-login.ts` 通过窄 `BrowserLaunchAdapter` Seam 在无网络、无真实浏览器进程的情况下执行凭据捕获状态机；origin、cookie、storage、CAPTCHA、MFA 与引导式字段流都由确定性测试覆盖。一次性 login token 的交换守卫与 SSO profile 的设备记忆另由 `test/auto-login-real-browser.test.ts` 用真实 Chromium 在 loopback 替身上回归验证。parser 仍只接受精确的仓库相对 `.ts` 路径（如未来确有临时排除），拒绝 glob、绝对路径与 `..`，避免扩大排除面。
 
 2026-07-31 LCOV 门禁实测：
 
