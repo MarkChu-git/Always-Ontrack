@@ -3627,10 +3627,13 @@ async function captureSsoCredentialsInternal(
     if (!captured) {
       if (guidedLogin) {
         const pageSnapshot = summarizePageLocations(context.pages());
+        // A profile Okta remembers can go straight to the push prompt, so an
+        // unanswered push is an MFA timeout rather than missing fields.
         if (
           guidedState &&
           !guidedState.sawUsernameField &&
-          !guidedState.sawPasswordField
+          !guidedState.sawPasswordField &&
+          !sawOktaVerifyChallenge
         ) {
           throw new SsoFallbackError(
             "selector_missing",

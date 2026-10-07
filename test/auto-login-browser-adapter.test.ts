@@ -41,6 +41,8 @@ interface FakeBrowserOptions {
   storageCredentials?: boolean;
   captcha?: boolean;
   unsupportedMfa?: boolean;
+  /** Shows an Okta Verify push prompt and nothing else, as a remembered profile can. */
+  oktaVerify?: boolean;
   guidedFields?: boolean;
   visibilityNeverSettles?: boolean;
   newContextError?: Error;
@@ -123,7 +125,8 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
           ? await new Promise<boolean>(() => undefined)
           :
         (options.captcha && pattern.test('captcha')) ||
-        (options.unsupportedMfa && pattern.test('security key')),
+        (options.unsupportedMfa && pattern.test('security key')) ||
+        (options.oktaVerify && pattern.test('okta verify')),
       ),
       };
       return textLocator;
@@ -672,4 +675,26 @@ test('a profile path that resolves outside the operator home stays unused', asyn
     setSsoBrowserProfileDirForTests(undefined);
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test('a guided login left waiting on Okta Verify reports the MFA timeout', async () => {
+  // Okta can skip straight to the push prompt for a profile it remembers. An
+  // unanswered push is not a missing username/password field.
+  await assert.rejects(
+    () => captureSsoCredentialsWithGuidedLogin({
+      ssoUrl: 'https://monashuni.okta.com/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      username: 'student',
+      password: 'secret',
+      timeoutMs: 200,
+      browserAdapter: createBrowserAdapter({
+        urlAfterGoto: 'https://monashuni.okta.com/signin/verify',
+        oktaVerify: true,
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof SsoFallbackError &&
+      error.reason === 'timeout' &&
+      /Okta Verify/.test(error.message),
+  );
 });
