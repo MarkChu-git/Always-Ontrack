@@ -76,18 +76,27 @@ export function parseSsoRedirectUrl(redirectUrl: string): { authToken: string; u
   return { authToken, username };
 }
 
-/** Prompt for a visible (non-sensitive) input value. */
+/**
+ * Prompt for a visible (non-sensitive) input value.
+ * - rejects when input has ended or ends before an answer (a script or CI job
+ *   with no stdin), so the command fails instead of exiting 0 mid-way
+ * - an unterminated last piped line still counts as the answer
+ * - a terminal Ctrl+C/Ctrl+D rejects with readline's own AbortError
+ */
 export async function prompt(
   question: string,
-  streams: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream } = { input, output },
+  streams: { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream } = {
+    stdin: input,
+    stdout: output,
+  },
 ): Promise<string> {
   const inputClosed = (): Error =>
     new Error(`Input closed before "${question.trim().replace(/:$/, '')}" was answered.`);
   // Spent input never emits again, so an interface on it would wait forever.
-  if (!streams.input.readable) {
+  if (!streams.stdin.readable) {
     throw inputClosed();
   }
-  const rl = createInterface({ input: streams.input, output: streams.output });
+  const rl = createInterface({ input: streams.stdin, output: streams.stdout });
   // At EOF readline hands an unterminated last line to 'line' listeners, not
   // to the pending question.
   const lastLine = new Promise<string>((resolveLine) => {

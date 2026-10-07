@@ -155,20 +155,20 @@ function promptStreams(terminal = false) {
   const input = Object.assign(new PassThrough(), terminal ? { isTTY: true, setRawMode: () => {} } : {});
   const output = Object.assign(new PassThrough(), terminal ? { isTTY: true } : {});
   output.resume();
-  return { input, output };
+  return { stdin: input, stdout: output };
 }
 
 test('prompt rejects, naming the question, when input ends before an answer', async () => {
   const streams = promptStreams();
   const answer = prompt('Paste the sign_in URL from your browser history: ', streams);
-  streams.input.end();
+  streams.stdin.end();
   await assert.rejects(answer, /closed\b.*Paste the sign_in URL from your browser history/i);
 });
 
 test('prompt rejects at once when its input already ended', async () => {
   const streams = promptStreams();
   const first = prompt('Monash username: ', streams);
-  streams.input.end();
+  streams.stdin.end();
   await assert.rejects(first);
   // A later prompt on the spent input must not wait for events that never come.
   await assert.rejects(prompt('Password: ', streams), /closed\b.*Password/i);
@@ -177,14 +177,14 @@ test('prompt rejects at once when its input already ended', async () => {
 test('prompt takes an unterminated last line as the answer', async () => {
   const streams = promptStreams();
   const answer = prompt('Paste the sign_in URL from your browser history: ', streams);
-  streams.input.end('https://ontrack.example.test/sign_in?authToken=t&username=u');
+  streams.stdin.end('https://ontrack.example.test/sign_in?authToken=t&username=u');
   assert.equal(await answer, 'https://ontrack.example.test/sign_in?authToken=t&username=u');
 });
 
 test('prompt leaves a terminal Ctrl+C abort to readline', async () => {
   const streams = promptStreams(true);
   const answer = prompt('Choose method [1]: ', streams);
-  streams.input.write('\x03');
+  streams.stdin.write('\x03');
   await assert.rejects(answer, { name: 'AbortError' });
 });
 
