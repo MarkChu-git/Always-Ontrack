@@ -925,13 +925,23 @@ function isSsoBrowserProfileEnabled(
 
 /**
  * Create the profile directory owner-only. Returns null when the managed path
- * is not a private directory this user owns, so the capture falls back to a
- * throwaway browser instead of trusting it.
+ * resolves outside the operator home or is not a private directory this user
+ * owns, so the capture falls back to a throwaway browser instead of trusting it.
  */
 function preparePrivateSsoBrowserProfileDir(): string | null {
   const profileDir = resolveManagedSsoBrowserProfileDir();
   try {
     // The profile path is fixed under the operator home (or a test seam).
+    // codeql[js/path-injection]
+    mkdirSync(dirname(profileDir), { recursive: true, mode: 0o700 });
+    // Like the browser-state file, the profile holds credentials, so a
+    // relocated parent (a symlinked ~/.config) must not carry them elsewhere.
+    const trustedRoot = realpathSync(homedir());
+    // codeql[js/path-injection]
+    const parent = realpathSync(dirname(profileDir));
+    if (parent !== trustedRoot && !parent.startsWith(`${trustedRoot}${sep}`)) {
+      return null;
+    }
     // codeql[js/path-injection]
     mkdirSync(profileDir, { recursive: true, mode: 0o700 });
     // codeql[js/path-injection]

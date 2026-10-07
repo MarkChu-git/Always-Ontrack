@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { access, mkdtemp, rm, stat } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserContext } from 'playwright-core';
 import {
@@ -642,4 +642,34 @@ test('the profile launch cannot outlive the login deadline', async () => {
     assert.equal(typeof timeout, 'number');
     assert.ok((timeout as number) > 0 && (timeout as number) <= 30_000, String(timeout));
   });
+});
+
+test('a profile path that resolves outside the operator home stays unused', async () => {
+  // Like the browser-state file, the profile holds credentials, so a
+  // relocated config directory (for example a symlinked ~/.config) must not
+  // carry the identity provider's session somewhere else.
+  const outside = await mkdtemp(join(tmpdir(), 'ontrack-sso-profile-outside-'));
+  const profileDir = join(outside, 'sso-browser-profile');
+  setSsoBrowserProfileDirForTests(profileDir);
+  try {
+    const launches: Array<{ userDataDir: string; options: Record<string, unknown> }> = [];
+    const contextOptions: unknown[] = [];
+    const credentials = await captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      browserAdapter: createBrowserAdapter({
+        urlAfterGoto: LANDING_URL,
+        persistent: { launches },
+        contextOptions,
+      }),
+    });
+
+    assert.equal(credentials.authToken, 'url-token');
+    assert.equal(launches.length, 0);
+    assert.equal(contextOptions.length, 1);
+    await assert.rejects(access(profileDir), 'the profile directory is never created');
+  } finally {
+    setSsoBrowserProfileDirForTests(undefined);
+    await rm(outside, { recursive: true, force: true });
+  }
 });
