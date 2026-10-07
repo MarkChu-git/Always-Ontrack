@@ -1733,6 +1733,14 @@ export function buildContextOptionsWithStoredSession(
   }
 }
 
+/** Whether a URL is OnTrack's token-exchange endpoint, `/api/auth` (or `.json`). */
+function isTokenExchangeUrl(url: URL, targetOrigin: string): boolean {
+  return (
+    url.origin === targetOrigin &&
+    url.pathname.replace(/\/+$/, "").replace(/\.json$/, "") === "/api/auth"
+  );
+}
+
 /**
  * Whether a request is the page spending the one-time login token through
  * `POST /api/auth`. The CLI exchanges that token itself, and doubtfire-api
@@ -1754,11 +1762,7 @@ export function isLoginTokenExchange(
   } catch {
     return false;
   }
-  if (parsed.origin !== targetOrigin) {
-    return false;
-  }
-  const pathname = parsed.pathname.replace(/\/+$/, "").replace(/\.json$/, "");
-  if (pathname !== "/api/auth") {
+  if (!isTokenExchangeUrl(parsed, targetOrigin)) {
     return false;
   }
   const body = tryParseJson(postData);
@@ -3407,7 +3411,7 @@ async function captureSsoCredentialsInternal(
     // 419. Test doubles without routing support simply skip the guard.
     if (typeof context.route === "function") {
       await context.route(
-        (url) => url.origin === targetOrigin && url.pathname.startsWith("/api/auth"),
+        (url) => isTokenExchangeUrl(url, targetOrigin),
         async (route) => {
           const request = route.request();
           if (
