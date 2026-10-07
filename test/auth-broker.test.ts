@@ -194,6 +194,32 @@ test('broker status calls a session renewable when its refresh cookie names no e
   assert.equal('renewableUntil' in status, false);
 });
 
+test('broker says the next sign-in is due when the refresh cookie runs out', async () => {
+  // The access token lasts ten minutes; the session lasts as long as the
+  // refresh cookie renews it.
+  const dueWith = (cookie: RefreshCookieMaterial | null) =>
+    createOnTrackAuthBroker(
+      { baseUrl: expiredSession.baseUrl },
+      dependencies({ readStoredRefreshCookie: () => cookie }),
+    ).signInDueAt();
+  assert.equal(
+    await dueWith({ username: 'student1', refreshToken: 'r', expiresAt: '2026-08-07T00:30:00.000Z' }),
+    '2026-08-07T00:30:00.000Z',
+  );
+  // A cookie that names no expiry renews without a known end.
+  assert.equal(await dueWith({ username: 'student1', refreshToken: 'r' }), null);
+  // Nothing renews the session, so its access token is the whole story.
+  assert.equal(await dueWith(null), '2026-07-31T00:30:00.000Z');
+});
+
+test('broker has no sign-in due without a session', async () => {
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({ loadSession: async () => null }),
+  );
+  assert.equal(await broker.signInDueAt(), null);
+});
+
 test('broker status keeps an expired access token expired without a usable refresh cookie', async () => {
   const cookies: RefreshCookieMaterial[] = [
     { username: 'student1', refreshToken: 'stale', expiresAt: '2026-07-31T00:59:00.000Z' },

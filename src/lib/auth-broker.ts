@@ -77,6 +77,12 @@ export interface OnTrackAuthBroker {
   ensure(options?: AuthEnsureOptions): Promise<AuthRuntimeResult>;
   status(): Promise<AuthStatusView>;
   currentSession(): Promise<SessionData | null>;
+  /**
+   * When the next sign-in is due: when the stored refresh cookie stops
+   * renewing the session, or the access token's expiry when nothing renews
+   * it. Null when that is unknown, such as a cookie that names no expiry.
+   */
+  signInDueAt(): Promise<string | null>;
 }
 
 function defaultDependencies(): OnTrackAuthBrokerDependencies {
@@ -297,6 +303,14 @@ async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView>
   };
 }
 
+async function brokerSignInDueAt(context: AuthBrokerContext): Promise<string | null> {
+  const session = await loadScopedSession(context);
+  if (!session) return null;
+  const renewal = storedRenewal(context, session);
+  if (renewal) return renewal.until ?? null;
+  return session.expiresAt ?? null;
+}
+
 /**
  * Create one credential coordinator shared by CLI and Auth MCP callers. Secret
  * material stays in injected adapters and SessionData, never in public results.
@@ -322,5 +336,6 @@ export function createOnTrackAuthBroker(
     ensure: (ensureOptions) => runtime.ensure(ensureOptions),
     currentSession: () => loadScopedSession(context),
     status: () => brokerStatus(context),
+    signInDueAt: () => brokerSignInDueAt(context),
   };
 }
