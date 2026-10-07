@@ -60,7 +60,11 @@ export interface OnTrackAuthBrokerDependencies {
 }
 
 export interface AuthStatusView {
-  readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
+  /**
+   * `renewable`: the access token has expired, but the stored refresh cookie
+   * renews it on the next call, so no sign-in is needed before `renewableUntil`.
+   */
+  readonly status: 'signed_out' | 'usable' | 'renewable' | 'expired' | 'unknown';
   readonly source?: SessionData['source'];
   /** When the access token expires; OnTrack issues short-lived ones. */
   readonly expiresAt?: string;
@@ -269,7 +273,7 @@ async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView>
   const usability = sessionUsability(session, context.dependencies.now());
   const renewable = renewableUntil(context, session);
   return {
-    status: usability.state,
+    status: usability.state === 'expired' && renewable ? 'renewable' : usability.state,
     source: session.source,
     ...(usability.state === 'usable' || usability.state === 'expired'
       ? usability.expiresAt

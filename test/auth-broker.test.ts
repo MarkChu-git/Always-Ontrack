@@ -116,9 +116,9 @@ test('broker status is lifecycle-only and never includes credential values', asy
   assert.equal(JSON.stringify(status).includes(expiredSession.username), false);
 });
 
-test('broker status reports how long a stored refresh cookie can renew the session', async () => {
+test('broker status calls an expired access token renewable while the refresh cookie lasts', async () => {
   // OnTrack issues ten-minute access tokens, but the refresh cookie renews
-  // them silently for about a week, so "expired" alone overstates the problem.
+  // them silently for about a week, so "expired" overstates the problem.
   const broker = createOnTrackAuthBroker(
     { baseUrl: expiredSession.baseUrl },
     dependencies({
@@ -131,7 +131,7 @@ test('broker status reports how long a stored refresh cookie can renew the sessi
   );
   const status = await broker.status();
   assert.deepEqual(status, {
-    status: 'expired',
+    status: 'renewable',
     source: 'access-token',
     expiresAt: '2026-07-31T00:30:00.000Z',
     renewableUntil: '2026-08-07T00:30:00.000Z',
@@ -157,7 +157,7 @@ test('broker status reports renewableUntil as a canonical UTC instant', async ()
   assert.equal(status.renewableUntil, '2026-08-07T00:30:00.000Z');
 });
 
-test('broker status claims no renewal from an expired, undated, or foreign refresh cookie', async () => {
+test('broker status keeps an expired access token expired without a usable refresh cookie', async () => {
   const cookies: RefreshCookieMaterial[] = [
     { username: 'student1', refreshToken: 'stale', expiresAt: '2026-07-31T00:59:00.000Z' },
     { username: 'student1', refreshToken: 'undated' },
@@ -169,6 +169,7 @@ test('broker status claims no renewal from an expired, undated, or foreign refre
       dependencies({ readStoredRefreshCookie: () => cookie }),
     );
     const status = await broker.status();
+    assert.equal(status.status, 'expired', cookie.refreshToken);
     assert.equal('renewableUntil' in status, false, cookie.refreshToken);
   }
 });

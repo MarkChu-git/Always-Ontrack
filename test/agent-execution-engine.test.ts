@@ -343,13 +343,13 @@ test('policy gates receive the same Zod-normalized input as execution', async ()
   ]);
 });
 
-test('auth.status carries how long the session can renew itself', async () => {
+test('auth.status reports a renewable session and how long it can renew itself', async () => {
   // An expired ten-minute access token is routine while the refresh cookie can
-  // still renew it, so agents need the renewal deadline, not just "expired".
+  // still renew it, so agents need "renewable" and the renewal deadline.
   const engine = createAgentExecutionEngine(
     createNativeAgentCommands({
       authStatus: async () => ({
-        status: 'expired',
+        status: 'renewable',
         source: 'browser-sso',
         expiresAt: '2026-10-07T15:30:13.454Z',
         renewableUntil: '2026-10-14T15:06:16.000Z',
@@ -359,10 +359,9 @@ test('auth.status carries how long the session can renew itself', async () => {
   );
   const result = await engine.call({ command: 'auth.status', input: {} });
   assert.equal(result.status, 'success', JSON.stringify(result));
-  assert.equal(
-    (result as { data?: { renewableUntil?: string } }).data?.renewableUntil,
-    '2026-10-14T15:06:16.000Z',
-  );
+  const data = (result as { data?: { status?: string; renewableUntil?: string } }).data;
+  assert.equal(data?.status, 'renewable');
+  assert.equal(data?.renewableUntil, '2026-10-14T15:06:16.000Z');
 });
 
 test('auth.status refuses a renewableUntil that is not an RFC 3339 instant', async () => {

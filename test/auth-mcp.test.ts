@@ -226,7 +226,7 @@ test('Auth MCP status says how long an expired access token keeps renewing', asy
     {
       createBroker: () => ({
         status: async () => ({
-          status: 'expired',
+          status: 'renewable',
           source: 'browser-sso',
           expiresAt: '2026-10-07T15:30:13.454Z',
           renewableUntil: '2026-10-14T15:06:16.000Z',
@@ -249,8 +249,9 @@ test('Auth MCP status says how long an expired access token keeps renewing', asy
         data: { renewableUntil?: string };
         next_actions: Array<{ action: string; arguments: { interaction?: string } }>;
       };
-      // "expired" alone reads as "sign in again"; the summary has to say the
-      // session still renews silently, and when that stops.
+      // "expired" reads as "sign in again"; the summary has to say the session
+      // still renews silently, and when that stops.
+      assert.match(content.summary, /^OnTrack authentication is renewable:/);
       assert.match(content.summary, /renews silently until 2026-10-14T15:06:16\.000Z/);
       assert.equal(content.data.renewableUntil, '2026-10-14T15:06:16.000Z');
       assert.deepEqual(content.next_actions, [
