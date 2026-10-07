@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'bun:test';
 import { buildStudentTaskViews } from '../src/lib/student-task-view.js';
 import type { ProjectSummary } from '../src/lib/types.js';
-import { bucketStatus, isCurrentUnit, viewToTuiTask } from '../src/tui/data';
+import { bucketStatus, isCurrentUnit, sessionLifetimeEnd, viewToTuiTask } from '../src/tui/data';
 
 function fixtureProject(): ProjectSummary {
   const fixture = JSON.parse(
@@ -79,4 +79,17 @@ test('isCurrentUnit hides completed or inactive units from the default view', ()
   assert.equal(isCurrentUnit({ id: 1 }, today), true);
   assert.equal(isCurrentUnit({ id: 1, end_date: 'Semester 2' }, today), true);
   assert.equal(isCurrentUnit(undefined, today), true);
+});
+
+test('sessionLifetimeEnd shows the refresh window while the session can renew itself', () => {
+  // The access token lasts ten minutes; the header must count down to the next
+  // sign-in, which is when the refresh cookie runs out.
+  const session = { expiresAt: '2026-10-07T15:30:13.454Z' };
+  assert.equal(
+    sessionLifetimeEnd(session, { renewableUntil: '2026-10-14T15:06:16.000Z' }),
+    '2026-10-14T15:06:16.000Z',
+  );
+  // Nothing renews a paired session, so its access token is the whole story.
+  assert.equal(sessionLifetimeEnd(session, {}), '2026-10-07T15:30:13.454Z');
+  assert.equal(sessionLifetimeEnd({}, {}), null);
 });

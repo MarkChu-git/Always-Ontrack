@@ -95,12 +95,12 @@ function dueBadge(task: TuiTask, theme: Theme): { text: string; fg: string } {
   return { text: `in ${days}d`, fg: theme.muted };
 }
 
-/** Colour-coded session-token lifetime pill for the header. */
-function tokenBadge(expiresAt: string | null, theme: Theme): { text: string; fg: string } | null {
+/** Colour-coded pill for the time left until the next sign-in is due. */
+function sessionBadge(expiresAt: string | null, theme: Theme): { text: string; fg: string } | null {
   if (!expiresAt) return null;
   const ms = Date.parse(expiresAt) - Date.now();
   if (!Number.isFinite(ms)) return null;
-  if (ms <= 0) return { text: 'token expired', fg: theme.urgent };
+  if (ms <= 0) return { text: 'session expired', fg: theme.urgent };
   const minutes = Math.floor(ms / 60_000);
   if (minutes < 60) return { text: `${Math.max(1, minutes)}m left`, fg: theme.soon };
   const hours = Math.floor(minutes / 60);
@@ -146,7 +146,7 @@ function Header({
   unitLabel: string;
   onCycleUnit: () => void;
 }) {
-  const token = tokenBadge(expiresAt, theme);
+  const lifetime = sessionBadge(expiresAt, theme);
   return (
     <box
       style={{
@@ -164,10 +164,10 @@ function Header({
           <text>
             <span fg={username ? theme.status.complete : theme.muted}>● </span>
             <span fg={theme.fg}>{username ?? 'not signed in'}</span>
-            {token ? (
+            {lifetime ? (
               <>
                 <span fg={theme.muted}> · </span>
-                <span fg={token.fg}>{token.text}</span>
+                <span fg={lifetime.fg}>{lifetime.text}</span>
               </>
             ) : null}
             <span fg={theme.muted}> · </span>
@@ -488,7 +488,7 @@ export function App({
     [],
   );
 
-  // Re-render once a minute so the header's token-lifetime pill decays while
+  // Re-render once a minute so the header's session-lifetime pill decays while
   // the app idles (the pill is computed from the load-time expiresAt snapshot).
   const [, setClockTick] = useState(0);
   useEffect(() => {

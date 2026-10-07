@@ -7,7 +7,7 @@
  * visibility stay in src/lib/student-task-view.ts.
  */
 import { OnTrackHttpError } from '../lib/auth';
-import { createOnTrackAuthBroker } from '../lib/auth-broker';
+import { createOnTrackAuthBroker, type AuthStatusView } from '../lib/auth-broker';
 import type { AuthDiagnosticSink } from '../lib/auth-diagnostic';
 import { DEFAULT_AUTH_MIN_TTL_SECONDS } from '../lib/auth-runtime';
 import {
@@ -15,16 +15,35 @@ import {
   loadProjectsWithTaskMetadata,
 } from '../lib/project-catalogue';
 import { buildStudentTaskViews, type StudentTaskView } from '../lib/student-task-view';
-import type { UnitSummary } from '../lib/types';
+import type { SessionData, UnitSummary } from '../lib/types';
 import { redactSensitiveText, normalizeBaseUrl } from '../lib/utils';
 import { toWhoAmIView, type WhoAmIView } from '../lib/whoami';
 import type { TaskStatus, TuiTask, UploadSlot } from './tasks';
 
 export type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; identity: WhoAmIView; expiresAt: string | null; tasks: TuiTask[] }
+  | {
+      kind: 'ready';
+      identity: WhoAmIView;
+      /** When the next sign-in is due; see sessionLifetimeEnd. */
+      expiresAt: string | null;
+      tasks: TuiTask[];
+    }
   | { kind: 'auth_required' }
   | { kind: 'error'; message: string };
+
+/**
+ * When the session ends from the user's point of view. While a stored refresh
+ * cookie can renew it, that is the cookie's expiry: the access token lasts
+ * only minutes and every action renews it silently. Otherwise it is the
+ * access token's own expiry.
+ */
+export function sessionLifetimeEnd(
+  session: Pick<SessionData, 'expiresAt'>,
+  status: Pick<AuthStatusView, 'renewableUntil'>,
+): string | null {
+  return status.renewableUntil ?? session.expiresAt ?? null;
+}
 
 export type TaskLoader = () => Promise<LoadState>;
 
@@ -156,6 +175,7 @@ export function createOnTrackTaskLoader(
       }
       const session = await broker.currentSession();
       if (!session) return { kind: 'auth_required' };
+      const status = await broker.status();
 
       // Same catalogue pipeline the CLI task commands use: per-project/unit
       // read failures degrade to overview data instead of blanking the TUI.
@@ -166,7 +186,7 @@ export function createOnTrackTaskLoader(
       return {
         kind: 'ready',
         identity: toWhoAmIView(session),
-        expiresAt: session.expiresAt ?? null,
+        expiresAt: sessionLifetimeEnd(session, status),
         tasks,
       };
     } catch (err) {
