@@ -635,6 +635,7 @@ export type AgentAuthStatus = {
   readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
   readonly source?: string;
   readonly expiresAt?: string;
+  readonly renewableUntil?: string;
   readonly baseUrl: string;
 };
 
@@ -670,6 +671,7 @@ const authStatusOutputSchema = z
     status: z.enum(['signed_out', 'usable', 'expired', 'unknown']),
     source: z.string().min(1).optional(),
     expiresAt: z.string().min(1).optional(),
+    renewableUntil: z.string().min(1).optional(),
     baseUrl: z.string().url(),
   })
   .strict();

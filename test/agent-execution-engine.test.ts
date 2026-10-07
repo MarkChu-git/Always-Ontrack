@@ -13,6 +13,7 @@ import {
   agentUnitShowInputSchema,
   agentUnitShowOutputSchema,
   createNativeAgentCommands,
+  type NativeAgentCommandHandlers,
 } from '../src/lib/agent-commands.js';
 import { getCommandSpec } from '../src/lib/command-spec.js';
 
@@ -340,6 +341,28 @@ test('policy gates receive the same Zod-normalized input as execution', async ()
     { value: 'normalized', mode: 'safe' },
     { value: 'normalized', mode: 'safe' },
   ]);
+});
+
+test('auth.status carries how long the session can renew itself', async () => {
+  // An expired ten-minute access token is routine while the refresh cookie can
+  // still renew it, so agents need the renewal deadline, not just "expired".
+  const engine = createAgentExecutionEngine(
+    createNativeAgentCommands({
+      authStatus: async () => ({
+        status: 'expired',
+        source: 'browser-sso',
+        expiresAt: '2026-10-07T15:30:13.454Z',
+        renewableUntil: '2026-10-14T15:06:16.000Z',
+        baseUrl: 'https://ontrack.example/api',
+      }),
+    } as Partial<NativeAgentCommandHandlers> as NativeAgentCommandHandlers),
+  );
+  const result = await engine.call({ command: 'auth.status', input: {} });
+  assert.equal(result.status, 'success', JSON.stringify(result));
+  assert.equal(
+    (result as { data?: { renewableUntil?: string } }).data?.renewableUntil,
+    '2026-10-14T15:06:16.000Z',
+  );
 });
 
 test('native definitions keep safety metadata aligned with the compatibility projection', () => {

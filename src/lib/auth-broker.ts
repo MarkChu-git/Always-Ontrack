@@ -62,7 +62,10 @@ export interface OnTrackAuthBrokerDependencies {
 export interface AuthStatusView {
   readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
   readonly source?: SessionData['source'];
+  /** When the access token expires; OnTrack issues short-lived ones. */
   readonly expiresAt?: string;
+  /** Until when the stored refresh cookie renews this session without a sign-in. */
+  readonly renewableUntil?: string;
   readonly baseUrl: string;
 }
 
@@ -240,10 +243,31 @@ async function refreshSession(
   return captureSession(context, interactive);
 }
 
+/**
+ * When the stored refresh cookie stops renewing this session, or undefined
+ * when there is none, it has run out, it names no expiry, or it belongs to
+ * another user (renewing with it would sign that user in instead).
+ */
+function renewableUntil(
+  context: AuthBrokerContext,
+  session: SessionData,
+): string | undefined {
+  const cookie = context.dependencies.readStoredRefreshCookie(context.targetBaseUrl);
+  if (!cookie?.expiresAt) return undefined;
+  if (cookie.username.trim().toLowerCase() !== session.username.trim().toLowerCase()) {
+    return undefined;
+  }
+  const until = Date.parse(cookie.expiresAt);
+  return Number.isFinite(until) && until > context.dependencies.now().getTime()
+    ? cookie.expiresAt
+    : undefined;
+}
+
 async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView> {
   const session = await loadScopedSession(context);
   if (!session) return { status: 'signed_out', baseUrl: context.targetBaseUrl };
   const usability = sessionUsability(session, context.dependencies.now());
+  const renewable = renewableUntil(context, session);
   return {
     status: usability.state,
     source: session.source,
@@ -252,6 +276,7 @@ async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView>
         ? { expiresAt: usability.expiresAt }
         : {}
       : {}),
+    ...(renewable ? { renewableUntil: renewable } : {}),
     baseUrl: context.targetBaseUrl,
   };
 }
