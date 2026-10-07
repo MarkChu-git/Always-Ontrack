@@ -17,7 +17,6 @@ import {
   resolveBrowserLaunchPlan,
   resolveSystemBrowserUserDataDirs,
   saveBrowserSessionState,
-  waitForRefreshCookieInContext,
 } from "../src/lib/auto-login.js";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -727,34 +726,4 @@ test("extractRefreshCookieMaterial omits expiresAt for session cookies", () => {
   const material = extractRefreshCookieMaterial(pair, "https://ontrack.infotech.monash.edu");
   assert.equal(material?.refreshToken, "rt-1");
   assert.equal(material && "expiresAt" in material, false);
-});
-
-test("waitForRefreshCookieInContext returns late-arriving cookies within budget", async () => {
-  const target = "https://ontrack.infotech.monash.edu";
-  const pair = [
-    { name: "refresh_token", value: "rt-late", domain: "ontrack.infotech.monash.edu", expires: 1999999999 },
-    { name: "username", value: "student1", domain: "ontrack.infotech.monash.edu", expires: 1999999999 },
-  ];
-  let calls = 0;
-  const context = {
-    cookies: async () => {
-      calls += 1;
-      return calls < 3 ? [] : pair;
-    },
-  };
-  const material = await waitForRefreshCookieInContext(context, target, 5_000);
-  assert.equal(material?.refreshToken, "rt-late");
-  assert.ok(calls >= 3);
-});
-
-test("waitForRefreshCookieInContext returns null when the budget expires", async () => {
-  const started = Date.now();
-  const context = { cookies: async () => [] as Array<{ name: string; value: string }> };
-  const material = await waitForRefreshCookieInContext(
-    context,
-    "https://ontrack.infotech.monash.edu",
-    300,
-  );
-  assert.equal(material, null);
-  assert.ok(Date.now() - started >= 300);
 });

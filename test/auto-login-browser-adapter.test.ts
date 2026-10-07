@@ -9,11 +9,18 @@ import {
 
 type Handler = (...args: unknown[]) => void;
 
+const LANDING_URL =
+  'https://ontrack.infotech.monash.edu/sign_in?authToken=url-token&username=url-user';
+
 interface FakeBrowserOptions {
   urlAfterGoto?: string;
   request?: { url: string; method: string; postData: string };
   response?: { url: string; status: number; body: unknown };
   cookieCredentials?: boolean;
+  /** A refresh-cookie pair already in the jar, as restored browser state leaves it. */
+  refreshCookie?: boolean;
+  /** Records the options of every throwaway context the capture creates. */
+  contextOptions?: unknown[];
   storageCredentials?: boolean;
   captcha?: boolean;
   unsupportedMfa?: boolean;
@@ -134,17 +141,26 @@ function createBrowserAdapter(options: FakeBrowserOptions): BrowserLaunchAdapter
     newPage: async () => page,
     on: () => undefined,
     pages: () => [page],
-    cookies: async () => options.cookieCredentials
-      ? [
-          { name: 'auth_token', value: 'cookie-token', domain: 'ontrack.infotech.monash.edu' },
-          { name: 'username', value: 'cookie-user', domain: 'ontrack.infotech.monash.edu' },
-        ]
-      : [],
+    cookies: async () => [
+      ...(options.cookieCredentials
+        ? [
+            { name: 'auth_token', value: 'cookie-token', domain: 'ontrack.infotech.monash.edu' },
+            { name: 'username', value: 'cookie-user', domain: 'ontrack.infotech.monash.edu' },
+          ]
+        : []),
+      ...(options.refreshCookie
+        ? [
+            { name: 'refresh_token', value: 'restored-refresh', domain: 'ontrack.infotech.monash.edu' },
+            { name: 'username', value: 'url-user', domain: 'ontrack.infotech.monash.edu' },
+          ]
+        : []),
+    ],
     storageState: async () => ({ cookies: [], origins: [] }),
   };
   return {
     launch: async () => ({
-      newContext: async () => {
+      newContext: async (contextOptions?: unknown) => {
+        options.contextOptions?.push(contextOptions);
         if (options.newContextError) throw options.newContextError;
         return context;
       },
@@ -174,7 +190,6 @@ test('injected browser Adapter captures credentials from an exact OnTrack redire
     browserAdapter: createBrowserAdapter({
       urlAfterGoto: 'https://ontrack.infotech.monash.edu/sign_in?authToken=url-token&username=url-user',
     }),
-    refreshCookieWaitMs: 0,
   });
   assert.deepEqual(credentials, { authToken: 'url-token', username: 'url-user', source: 'url' });
 });
@@ -190,7 +205,6 @@ test('browser Adapter accepts only OnTrack auth request credentials and preserve
         postData: '{"auth_token":"request-token","username":"request-user"}',
       },
     }),
-    refreshCookieWaitMs: 0,
   });
   assert.deepEqual(credentials, { authToken: 'request-token', username: 'request-user', source: 'auth_request' });
 });
@@ -264,7 +278,6 @@ test('guided capture records terminal steps while using only fake visible select
       urlAfterGoto: 'https://monashuni.okta.com/login',
       guidedRedirectAfterPassword: 'https://ontrack.infotech.monash.edu/sign_in?authToken=guided-token&username=guided-user',
     }),
-    refreshCookieWaitMs: 0,
   }, (step) => steps.push(step));
   assert.equal(credentials.authToken, 'guided-token');
   assert.deepEqual(steps, ['username', 'password', 'completed']);
@@ -393,4 +406,30 @@ test('credential capture fails closed before launching unauthenticated Lightpand
   );
 
   assert.equal(launchCalls, 0);
+});
+
+test('a landing-token capture leaves the refresh cookie to the CLI exchange', async () => {
+  // The CLI spends a landing token itself and that exchange issues a fresh
+  // refresh cookie. One already in the jar is restored state, and reporting it
+  // would overwrite the fresh cookie once the session is persisted.
+  const credentials = await captureSsoCredentials({
+    ssoUrl: 'https://sso.example/login',
+    apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+    browserAdapter: createBrowserAdapter({ urlAfterGoto: LANDING_URL, refreshCookie: true }),
+  });
+  assert.deepEqual(credentials, { authToken: 'url-token', username: 'url-user', source: 'url' });
+});
+
+test('a throwaway capture context blocks service workers', async () => {
+  // doubtfire-web ships an Angular service worker, and Playwright routes never
+  // see requests a service worker handles, so the page could spend the landing
+  // token behind the route that stops it.
+  const contextOptions: unknown[] = [];
+  await captureSsoCredentials({
+    ssoUrl: 'https://sso.example/login',
+    apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+    browserAdapter: createBrowserAdapter({ urlAfterGoto: LANDING_URL, contextOptions }),
+  });
+  assert.equal(contextOptions.length, 1);
+  assert.equal((contextOptions[0] as { serviceWorkers?: string }).serviceWorkers, 'block');
 });

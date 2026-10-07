@@ -54,8 +54,6 @@ export interface SsoLoginOptions {
   password: string;
   timeoutMs?: number;
   headless?: boolean;
-  /** How long to poll for the refresh-cookie pair after a URL/request capture. */
-  refreshCookieWaitMs?: number;
   chooseMfaMethod?: (
     options: MfaMethodOption[],
   ) => Promise<number | null | undefined>;
@@ -808,8 +806,6 @@ export interface AutoLoginOptions {
   timeoutMs?: number;
   headless?: boolean;
   browserAdapter?: BrowserLaunchAdapter;
-  /** How long to poll for the refresh-cookie pair after a URL/request capture. */
-  refreshCookieWaitMs?: number;
   /** Trusted test/diagnostic seam; production resolves the operator environment. */
   browserPlan?: BrowserLaunchPlan;
   /** Trusted adapter seam for isolating live-profile policy in tests. */
@@ -1629,38 +1625,35 @@ export function buildContextOptionsWithStoredSession(
 }
 
 /**
- * Rewrite the frontend's POST /api/auth exchange body to request a persistent
- * ("remember me") session, so the server also issues the one-week refresh
- * cookie into the captured browser state. Returns null when the request is
- * not the token-exchange call or needs no change.
+ * Whether a request is the page spending the one-time landing token through
+ * `POST /api/auth`. The CLI exchanges that token itself, and doubtfire-api
+ * destroys it on the first exchange and answers any later one with 419, so the
+ * capture browser must never send this request.
  */
-export function injectRememberIntoAuthExchange(
+export function isLandingTokenExchange(
   method: string,
   url: string,
   postData: string | null,
   targetOrigin: string,
-): string | null {
+): boolean {
   if (method.toUpperCase() !== "POST" || !postData) {
-    return null;
+    return false;
   }
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return null;
+    return false;
   }
   if (parsed.origin !== targetOrigin) {
-    return null;
+    return false;
   }
   const pathname = parsed.pathname.replace(/\/+$/, "").replace(/\.json$/, "");
   if (pathname !== "/api/auth") {
-    return null;
+    return false;
   }
   const body = tryParseJson(postData);
-  if (!isRecord(body) || body.remember === true) {
-    return null;
-  }
-  return JSON.stringify({ ...body, remember: true });
+  return isRecord(body) && (hasValue(body.auth_token) || hasValue(body.authToken));
 }
 
 /** Read and structurally validate the managed browser-state file, or null. */
@@ -1720,35 +1713,6 @@ export function extractRefreshCookieMaterial(
       ? { expiresAt: new Date(refresh.expires * 1000).toISOString() }
       : {}),
   };
-}
-
-/**
- * The refresh-cookie Set-Cookie can land slightly after the first captured
- * credential signal (the frontend exchanges asynchronously after landing).
- * Poll briefly so the pair is present before the browser state snapshot.
- */
-export async function waitForRefreshCookieInContext(
-  context: Pick<BrowserContext, "cookies">,
-  targetOrigin: string,
-  budgetMs = 8_000,
-): Promise<RefreshCookieMaterial | null> {
-  const deadlineAt = Date.now() + Math.max(0, budgetMs);
-  for (;;) {
-    let cookies: Array<{ name: string; value: string; domain?: string; expires?: number }>;
-    try {
-      cookies = await context.cookies();
-    } catch {
-      return null;
-    }
-    const material = extractRefreshCookieMaterial(cookies, targetOrigin);
-    if (material) {
-      return material;
-    }
-    if (Date.now() >= deadlineAt) {
-      return null;
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
-  }
 }
 
 /**
@@ -3220,29 +3184,36 @@ async function captureSsoCredentialsInternal(
 
   try {
     const targetOrigin = new URL(options.apiBaseUrl).origin;
-    // Isolated context loads only sanitized, OnTrack-only persisted state when available.
+    // Isolated context loads only sanitized, OnTrack-only persisted state when
+    // available. Service workers are blocked because routes never see the
+    // requests one handles, and doubtfire-web registers one.
     const context = await deadline.run(() =>
-      browser.newContext(buildContextOptionsWithStoredSession({ targetOrigin })),
+      browser.newContext({
+        ...buildContextOptionsWithStoredSession({ targetOrigin }),
+        serviceWorkers: "block",
+      }),
     );
-    // Ask the frontend's token exchange for a persistent session so the
-    // one-week refresh cookie lands in the captured browser state. Test
-    // doubles without routing support simply skip the rewrite.
+    // The CLI exchanges the landing token itself (finalizeCapturedLogin), so
+    // the page's own exchange never reaches the server: whichever side spends
+    // the token first leaves the other with a 419. Test doubles without
+    // routing support simply skip the guard.
     if (typeof context.route === "function") {
       await context.route(
-        (url) =>
-          url.origin === targetOrigin &&
-          url.pathname.replace(/\.json$/, "") === "/api/auth",
+        (url) => url.origin === targetOrigin && url.pathname.startsWith("/api/auth"),
         async (route) => {
           const request = route.request();
-          const rewritten = injectRememberIntoAuthExchange(
-            request.method(),
-            request.url(),
-            request.postData(),
-            targetOrigin,
-          );
-          await route.continue(
-            rewritten === null ? undefined : { postData: rewritten },
-          );
+          if (
+            isLandingTokenExchange(
+              request.method(),
+              request.url(),
+              request.postData(),
+              targetOrigin,
+            )
+          ) {
+            await route.abort();
+            return;
+          }
+          await route.continue();
         },
       );
     }
@@ -3469,22 +3440,19 @@ async function captureSsoCredentialsInternal(
         "Timed out waiting for SSO credentials. You can retry with --auto or use manual redirect URL paste.",
       );
     }
-    // The refresh-cookie Set-Cookie can land slightly after a URL/request
-    // capture (the frontend exchanges asynchronously after landing), so wait
-    // briefly for it before snapshotting. Response/storage/cookie captures
-    // already imply the exchange completed and get one immediate check.
+    // A landing token (URL/request capture) is exchanged by the CLI, and that
+    // exchange issues its own refresh cookie. Any cookie already in this jar is
+    // restored state, which would overwrite the fresh one once the session is
+    // persisted, so only a credential the page itself holds takes the jar's.
     const capturedFinal = captured as LoginCredentials;
-    const waitBudgetMs =
-      capturedFinal.source === "url" || capturedFinal.source === "auth_request"
-        ? Math.min(options.refreshCookieWaitMs ?? 8_000, Math.max(0, deadline.remainingMs()))
-        : 0;
-    const capturedRefreshCookie = await waitForRefreshCookieInContext(
-      context,
-      targetOrigin,
-      waitBudgetMs,
-    );
-    if (capturedRefreshCookie) {
-      capturedFinal.refreshCookie = capturedRefreshCookie;
+    if (capturedFinal.source !== "url" && capturedFinal.source !== "auth_request") {
+      const capturedRefreshCookie = extractRefreshCookieMaterial(
+        await deadline.run(() => context.cookies()),
+        targetOrigin,
+      );
+      if (capturedRefreshCookie) {
+        capturedFinal.refreshCookie = capturedRefreshCookie;
+      }
     }
     // Best-effort persistence: retain only OnTrack cookies/localStorage for next login reuse.
     try {
@@ -3961,7 +3929,6 @@ export async function captureSsoCredentialsWithGuidedLogin(
       apiBaseUrl: options.apiBaseUrl,
       timeoutMs: options.timeoutMs,
       headless: options.headless,
-      refreshCookieWaitMs: options.refreshCookieWaitMs,
       browserAdapter: options.browserAdapter,
     },
     {

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import {
   buildContextOptionsWithStoredSession,
   captureCredentialsFromStoredBrowserSession,
-  injectRememberIntoAuthExchange,
+  isLandingTokenExchange,
   persistRefreshCookie,
   readStoredRefreshCookie,
   setBrowserSessionStatePathForTests,
@@ -761,52 +761,29 @@ test("failed exclusive publication removes its partial file before restoring sta
   );
 });
 
-test("injectRememberIntoAuthExchange only rewrites the token-exchange POST", () => {
+test("isLandingTokenExchange matches only the page's one-time token exchange", () => {
   const origin = "https://ontrack.infotech.monash.edu";
-  assert.equal(
-    injectRememberIntoAuthExchange(
-      "POST",
-      `${origin}/api/auth`,
-      '{"username":"u1","auth_token":"t"}',
-      origin,
-    ),
-    '{"username":"u1","auth_token":"t","remember":true}',
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange(
-      "POST",
-      `${origin}/api/auth.json`,
-      '{"username":"u1"}',
-      origin,
-    ),
-    '{"username":"u1","remember":true}',
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange(
-      "POST",
-      `${origin}/api/auth/access-token`,
-      '{"x":1}',
-      origin,
-    ),
-    null,
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange("GET", `${origin}/api/auth`, '{"x":1}', origin),
-    null,
-  );
-  assert.equal(injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, null, origin), null);
-  assert.equal(
-    injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, "not json", origin),
-    null,
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange("POST", `${origin}/api/auth`, '{"remember":true}', origin),
-    null,
-  );
-  assert.equal(
-    injectRememberIntoAuthExchange("POST", "https://evil.example/api/auth", '{"x":1}', origin),
-    null,
-  );
+  const exchange = '{"auth_token":"t","username":"u1","remember":true}';
+  const cases: Array<[string, string, string | null, boolean]> = [
+    ["POST", `${origin}/api/auth`, exchange, true],
+    ["POST", `${origin}/api/auth.json`, exchange, true],
+    ["POST", `${origin}/api/auth/`, exchange, true],
+    ["POST", `${origin}/api/auth`, '{"authToken":"t","username":"u1"}', true],
+    // Renewal and password sign-in carry no landing token and must go through.
+    ["POST", `${origin}/api/auth/access-token`, "{}", false],
+    ["POST", `${origin}/api/auth`, '{"username":"u1","password":"p"}', false],
+    ["GET", `${origin}/api/auth`, exchange, false],
+    ["POST", `${origin}/api/auth`, null, false],
+    ["POST", `${origin}/api/auth`, "not json", false],
+    ["POST", "https://evil.example/api/auth", exchange, false],
+  ];
+  for (const [method, url, body, expected] of cases) {
+    assert.equal(
+      isLandingTokenExchange(method, url, body, origin),
+      expected,
+      `${method} ${url} ${body}`,
+    );
+  }
 });
 
 test("persisted refresh cookies roundtrip through the trusted state store", async () => {
