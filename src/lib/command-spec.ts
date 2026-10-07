@@ -264,7 +264,7 @@ export const AGENT_COMMAND_SPECS: readonly AgentCommandSpec[] = [
       },
     },
   }),
-  spec({ path: 'auth.logout', description: 'Clear local session and browser refresh state with best-effort remote sign-out.', risk: 'auth', auth: false, confirmation: 'required', fields: { confirm: booleanField('--confirm') } }),
+  spec({ path: 'auth.logout', description: 'Clear local session, browser refresh state, and SSO browser profile with best-effort remote sign-out.', risk: 'auth', auth: false, confirmation: 'required', fields: { confirm: booleanField('--confirm') } }),
   spec({ path: 'identity.get', description: 'Return the safe current-user identity projection.' }),
   spec({
     path: 'projects.list',
