@@ -19,11 +19,6 @@
       },
     },
   },
-  "overrides": {
-    "adm-zip": "0.6.0",
-    "js-yaml": "4.3.1",
-    "sharp": "0.35.3",
-  },
   "packages": {
     "@hono/node-server": ["@hono/node-server@2.0.12", "", { "peerDependencies": { "hono": "^4" } }, "sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg=="],
 
