@@ -100,12 +100,13 @@ The repository currently includes:
   - allowlisted identity projection
   - JSON and human-output secret regression checks
 
-Minimum recommended validation before release:
+Validation tiers. CI and the release workflow run these same scripts:
 
 ```bash
-bun test
-bun run test:coverage
-bun run build
+bun run verify:fast   # after each change: both typechecks and the test suite
+bun run verify        # before a release: every gate CI runs except GitNexus and the audit
+bun run verify:graph  # GitNexus graph checks; needs the global GitNexus 1.6.9
+bun run audit:check   # full dependency audit; --base <commit> fails only on new advisories
 ```
 
 If you have a valid real session, add:

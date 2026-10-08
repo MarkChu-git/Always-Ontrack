@@ -58,3 +58,30 @@ test('CI and release gate the published TUI', async () => {
     assert.match(workflow, /test -f dist\/tui\/index\.js/);
   }
 });
+
+test('verify runs every release gate in order', async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { scripts: Record<string, string> };
+  const chain = (scripts: readonly string[]): string =>
+    scripts.map((script) => `bun run ${script}`).join(' && ');
+
+  assert.equal(manifest.scripts['verify:fast'], 'bun run typecheck && bun run typecheck:tui && bun test');
+  assert.equal(
+    manifest.scripts.verify,
+    chain([
+      'skills:check',
+      'typecheck',
+      'typecheck:tui',
+      'test:coverage',
+      'test:tui',
+      'build',
+      'smoke:dist',
+      'package:verify',
+    ]),
+  );
+  assert.equal(
+    manifest.scripts['verify:graph'],
+    chain(['gitnexus:analyze', 'gitnexus:status', 'gitnexus:check', 'gitnexus:mcp:check']),
+  );
+});
