@@ -2,12 +2,14 @@ import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import {
   createOnTrackAuthBroker,
+  renewSessionOverHttp,
   type OnTrackAuthBrokerDependencies,
 } from '../src/lib/auth-broker.js';
 import type { AuthDiagnostic } from '../src/lib/auth-diagnostic.js';
 import type { LoginCredentials } from '../src/lib/auto-login.js';
 import type { CapturedSignIn } from '../src/lib/api.js';
 import type { RefreshCookieMaterial, SessionData } from '../src/lib/types.js';
+import { AUTH_REFRESH_LOCK_TIMEOUT } from '../src/lib/session.js';
 
 const expiredSession: SessionData = {
   baseUrl: 'https://ontrack.example/api',
@@ -309,6 +311,135 @@ test('broker refreshes over plain HTTP when a stored refresh cookie exists', asy
   assert.equal(JSON.stringify(result).includes('refresh-secret'), false);
 });
 
+/** Counts every broker step that is not the HTTP renewal itself. */
+function countSideSteps() {
+  const counts = { authMethodLookups: 0, browserCaptures: 0, exchanges: 0 };
+  return {
+    counts,
+    overrides: {
+      getAuthMethod: async () => {
+        counts.authMethodLookups += 1;
+        return { method: 'saml', redirect_to: 'https://identity.example/sso' };
+      },
+      captureStoredSession: async () => {
+        counts.browserCaptures += 1;
+        return null;
+      },
+      captureInteractiveSession: async () => {
+        counts.browserCaptures += 1;
+        return null;
+      },
+      exchangeLegacyCredential: async (): Promise<CapturedSignIn> => {
+        counts.exchanges += 1;
+        throw new Error('419 Authentication Timeout');
+      },
+    } as Partial<OnTrackAuthBrokerDependencies>,
+  };
+}
+
+test('renewSessionOverHttp renews and saves under the refresh lock, with no browser', async () => {
+  const steps: string[] = [];
+  const side = countSideSteps();
+  let saved: SessionData | undefined;
+  const renewed = await renewSessionOverHttp(
+    'https://ontrack.example/api/',
+    dependencies({
+      ...side.overrides,
+      withRefreshLock: async (operation) => {
+        steps.push('lock');
+        try {
+          return await operation();
+        } finally {
+          steps.push('unlock');
+        }
+      },
+      readStoredRefreshCookie: (baseUrl) => {
+        assert.equal(baseUrl, 'https://ontrack.example/api');
+        return { username: 'student1', refreshToken: 'refresh-secret' };
+      },
+      httpRefreshAccessToken: async (baseUrl, cookie) => {
+        steps.push(`renew ${baseUrl} ${cookie.refreshToken}`);
+        return {
+          response: {
+            auth_token: 'fresh-secret',
+            auth_token_expiry: '2026-07-31T03:00:00.000Z',
+            user: { username: 'student1' },
+          },
+          refreshCookie: null,
+        };
+      },
+      saveSession: async (session) => {
+        steps.push('save');
+        saved = session;
+      },
+    }),
+  );
+
+  assert.deepEqual(steps, [
+    'lock',
+    'renew https://ontrack.example/api refresh-secret',
+    'save',
+    'unlock',
+  ]);
+  assert.equal(saved?.authToken, 'fresh-secret');
+  assert.equal(renewed?.authToken, 'fresh-secret');
+  assert.equal(renewed?.expiresAt, '2026-07-31T03:00:00.000Z');
+  assert.equal(renewed?.source, 'access-token');
+  assert.equal(renewed?.baseUrl, 'https://ontrack.example/api');
+  assert.deepEqual(side.counts, { authMethodLookups: 0, browserCaptures: 0, exchanges: 0 });
+});
+
+test('renewSessionOverHttp does nothing without a stored refresh cookie', async () => {
+  const side = countSideSteps();
+  let locks = 0;
+  let requests = 0;
+  let saves = 0;
+  const renewed = await renewSessionOverHttp(
+    expiredSession.baseUrl,
+    dependencies({
+      ...side.overrides,
+      readStoredRefreshCookie: () => null,
+      withRefreshLock: async (operation) => {
+        locks += 1;
+        return operation();
+      },
+      httpRefreshAccessToken: async () => {
+        requests += 1;
+        return null;
+      },
+      saveSession: async () => {
+        saves += 1;
+      },
+    }),
+  );
+
+  assert.equal(renewed, null);
+  assert.deepEqual({ locks, requests, saves }, { locks: 0, requests: 0, saves: 0 });
+  assert.deepEqual(side.counts, { authMethodLookups: 0, browserCaptures: 0, exchanges: 0 });
+});
+
+test('renewSessionOverHttp leaves sign-in to the caller while another process holds the lock', async () => {
+  let requests = 0;
+  const renewed = await renewSessionOverHttp(
+    expiredSession.baseUrl,
+    dependencies({
+      readStoredRefreshCookie: () => ({ username: 'student1', refreshToken: 'refresh-secret' }),
+      withRefreshLock: async () => {
+        throw Object.assign(new Error('Timed out acquiring session refresh lock.'), {
+          code: AUTH_REFRESH_LOCK_TIMEOUT,
+        });
+      },
+      httpRefreshAccessToken: async () => {
+        requests += 1;
+        return null;
+      },
+    }),
+  );
+
+  assert.equal(renewed, null);
+  assert.equal(requests, 0);
+});
+
 test('broker persists a refresh cookie the renewal rotated', async () => {
   // Without this the stored cookie keeps its original expiry, so the session
   // dies one cookie lifetime after login however often it was renewed.
@@ -405,6 +536,32 @@ test('broker falls back to browser capture when the HTTP refresh is declined', a
   const result = await broker.ensure({ interaction: 'never' });
   assert.equal(result.status, 'auth_required');
   assert.equal(browserCaptures, 1);
+});
+
+test('broker never replays a stored-browser page token through the /auth exchange', async () => {
+  // The probe marks a token read from page storage, cookies or request headers
+  // live. POST /auth answers 419 for one, and without an expiry it cannot
+  // become a lifecycle-aware session either, so the broker asks for sign-in.
+  let exchanges = 0;
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({
+      captureStoredSession: async () => ({
+        username: 'student1',
+        authToken: 'page-token',
+        source: 'local_storage',
+        contract: 'access-token',
+      }),
+      exchangeLegacyCredential: async () => {
+        exchanges += 1;
+        throw new Error('419 Authentication Timeout');
+      },
+    }),
+  );
+
+  const result = await broker.ensure({ interaction: 'never' });
+  assert.equal(result.status, 'auth_required');
+  assert.equal(exchanges, 0);
 });
 
 test('broker persists a refresh cookie captured during the legacy exchange', async () => {
