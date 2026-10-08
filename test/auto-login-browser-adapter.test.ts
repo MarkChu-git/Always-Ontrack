@@ -304,6 +304,44 @@ test('browser Adapter marks the observed access-token response contract', async 
   });
 });
 
+test('browser Adapter treats an auth response token as live only when it states an expiry', async () => {
+  const cases = [
+    {
+      url: 'https://ontrack.infotech.monash.edu/api/auth',
+      body: {
+        auth_token: 'exchanged-token',
+        auth_token_expiry: '2030-01-01T00:00:00.000Z',
+        user: { username: 'exchange-user' },
+      },
+      expected: {
+        authToken: 'exchanged-token',
+        username: 'exchange-user',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        source: 'auth_response',
+        contract: 'access-token',
+      },
+    },
+    {
+      url: 'https://ontrack.infotech.monash.edu/api/auth/lti',
+      body: { username: 'lti-user', auth_token: 'one-time-token' },
+      expected: {
+        authToken: 'one-time-token',
+        username: 'lti-user',
+        source: 'auth_response',
+        contract: 'legacy-auth',
+      },
+    },
+  ];
+  for (const { url, body, expected } of cases) {
+    const credentials = await captureSsoCredentials({
+      ssoUrl: 'https://sso.example/login',
+      apiBaseUrl: 'https://ontrack.infotech.monash.edu/api',
+      browserAdapter: createBrowserAdapter({ response: { url, status: 201, body } }),
+    });
+    assert.deepEqual(credentials, expected, url);
+  }
+});
+
 test('browser Adapter falls back to target-local storage and target cookies only', async () => {
   const fromStorage = await captureSsoCredentials({
     ssoUrl: 'https://sso.example/login',

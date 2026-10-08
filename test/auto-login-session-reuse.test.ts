@@ -44,6 +44,26 @@ function sessionCookie(
   };
 }
 
+/**
+ * A state saved before doubtfire-web 11, whose page kept its API token in
+ * storage. Only a state like this holds anything the probe can read back from
+ * a page, so it is what the claim/restore tests below launch a browser for.
+ */
+function legacyPageState(token: string) {
+  return {
+    cookies: [],
+    origins: [
+      {
+        origin: TARGET_ORIGIN,
+        localStorage: [
+          { name: "doubtfire_credentials_token", value: token },
+          { name: "doubtfire_user", value: JSON.stringify({ username: "student1" }) },
+        ],
+      },
+    ],
+  };
+}
+
 async function withBrowserState(
   prefix: string,
   run: (storagePath: string) => Promise<void>,
@@ -254,28 +274,190 @@ test("stored browser capture skips launch for empty state and restores a stale s
       assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
       assert.equal(browserLaunches, 0);
 
-      await writeFile(
-        storagePath,
-        JSON.stringify({
-          cookies: [sessionCookie("stale")],
-          origins: [],
-        }),
-        "utf8",
-      );
+      await writeFile(storagePath, JSON.stringify(legacyPageState("stale")), "utf8");
       assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
       assert.equal(browserLaunches, 1);
       // A failed probe restores the claimed state instead of retiring it, so
       // the stored credential survives transient capture failures.
-      assert.deepEqual(JSON.parse(await readFile(storagePath, "utf8")), {
-        cookies: [sessionCookie("stale")],
-        origins: [],
-      });
+      assert.deepEqual(
+        JSON.parse(await readFile(storagePath, "utf8")),
+        legacyPageState("stale"),
+      );
 
       // The next attempt re-probes the restored state instead of skipping.
       assert.equal(await captureCredentialsFromStoredBrowserSession(options), null);
       assert.equal(browserLaunches, 2);
     },
   );
+});
+
+test("stored browser capture launches a browser only for a state holding a page credential", async () => {
+  const cases = [
+    {
+      // The doubtfire-web 11 shape: the page keeps its API token in memory and
+      // renews it with the HttpOnly refresh cookie, which login renews over
+      // plain HTTP. No page restored from this could hand the probe anything.
+      label: "refresh cookie only",
+      state: {
+        cookies: [
+          { ...sessionCookie("refresh-secret", "refresh_token"), path: "/api/auth" },
+          { ...sessionCookie("student1", "username"), path: "/api/auth" },
+        ],
+        origins: [
+          {
+            origin: TARGET_ORIGIN,
+            localStorage: [
+              { name: "remember_doubtfire_credentials_token", value: "true" },
+            ],
+          },
+        ],
+      },
+      launches: 0,
+    },
+    { label: "token in page storage", state: legacyPageState("stored-token"), launches: 1 },
+    {
+      label: "token cookie",
+      state: {
+        cookies: [
+          sessionCookie("cookie-token", "auth_token"),
+          sessionCookie("student1", "username"),
+        ],
+        origins: [],
+      },
+      launches: 1,
+    },
+  ];
+  for (const { label, state, launches } of cases) {
+    await withBrowserState(
+      "ontrack-browser-state-page-credential-",
+      async (storagePath) => {
+        let browserLaunches = 0;
+        const page = {
+          on: () => page,
+          url: () => "about:blank",
+          goto: async () => null,
+          evaluate: async () => null,
+        };
+        const context = {
+          newPage: async () => page,
+          cookies: async () => [],
+          storageState: async () => ({ cookies: [], origins: [] }),
+        };
+        await writeFile(storagePath, JSON.stringify(state), "utf8");
+
+        assert.equal(
+          await captureCredentialsFromStoredBrowserSession(
+            captureOptions({
+              launch: async () => {
+                browserLaunches += 1;
+                return {
+                  newContext: async () => context,
+                  close: async () => undefined,
+                };
+              },
+            }),
+          ),
+          null,
+          label,
+        );
+        assert.equal(browserLaunches, launches, label);
+        assert.deepEqual(JSON.parse(await readFile(storagePath, "utf8")), state, label);
+      },
+    );
+  }
+});
+
+test("stored browser probe marks a page's own token live and only a landing URL pending", async () => {
+  // Storage, cookies and the headers a page's requests carry hold its live
+  // API token, which POST /auth answers with 419; only the sign_in landing
+  // URL carries a one-time login token that still needs that exchange.
+  const cases: Array<{
+    label: string;
+    landingUrl?: string;
+    storage?: Array<{ scope: "local"; key: string; value: string }>;
+    headers?: Record<string, string>;
+    expected: Record<string, string>;
+  }> = [
+    {
+      label: "landing URL",
+      landingUrl: `${TARGET_ORIGIN}/sign_in?authToken=landing-token&username=student1`,
+      expected: {
+        authToken: "landing-token",
+        username: "student1",
+        source: "url",
+        contract: "legacy-auth",
+      },
+    },
+    {
+      label: "page storage",
+      storage: [
+        { scope: "local", key: "doubtfire_credentials_token", value: "storage-token" },
+        { scope: "local", key: "doubtfire_user", value: '{"username":"student1"}' },
+      ],
+      expected: {
+        authToken: "storage-token",
+        username: "student1",
+        source: "local_storage",
+        contract: "access-token",
+      },
+    },
+    {
+      label: "request headers",
+      headers: { "Auth-Token": "header-token", Username: "student1" },
+      expected: {
+        authToken: "header-token",
+        username: "student1",
+        source: "auth_request",
+        contract: "access-token",
+      },
+    },
+  ];
+  for (const { label, landingUrl, storage, headers, expected } of cases) {
+    await withBrowserState(
+      "ontrack-browser-state-capture-contract-",
+      async (storagePath) => {
+        const handlers = new Map<string, (request: unknown) => void>();
+        let currentUrl = "about:blank";
+        const page = {
+          on: (event: string, handler: (request: unknown) => void) => {
+            handlers.set(event, handler);
+            return page;
+          },
+          url: () => currentUrl,
+          goto: async (url: string) => {
+            currentUrl = landingUrl ?? url;
+            if (headers) {
+              handlers.get("request")?.({
+                url: () => `${TARGET_ORIGIN}/api/auth/signout_url`,
+                headers: () => headers,
+              });
+            }
+            return null;
+          },
+          evaluate: async () => storage ?? null,
+        };
+        const context = {
+          newPage: async () => page,
+          cookies: async () => [],
+          storageState: async () => ({ cookies: [], origins: [] }),
+        };
+        await writeFile(storagePath, JSON.stringify(legacyPageState("stored-token")), "utf8");
+
+        assert.deepEqual(
+          await captureCredentialsFromStoredBrowserSession(
+            captureOptions({
+              launch: async () => ({
+                newContext: async () => context,
+                close: async () => undefined,
+              }),
+            }),
+          ),
+          expected,
+          label,
+        );
+      },
+    );
+  }
 });
 
 test("failed stored browser probe never deletes a concurrently refreshed state generation", async () => {
@@ -309,10 +491,7 @@ test("failed stored browser probe never deletes a concurrently refreshed state g
 
       await writeFile(
         storagePath,
-        JSON.stringify({
-          cookies: [sessionCookie("old-generation")],
-          origins: [],
-        }),
+        JSON.stringify(legacyPageState("old-generation")),
         "utf8",
       );
       assert.equal(
@@ -338,10 +517,7 @@ test("stored browser capture restores its claimed state when context creation fa
   await withBrowserState(
     "ontrack-browser-state-restore-",
     async (storagePath) => {
-      const original = {
-        cookies: [sessionCookie("recoverable")],
-        origins: [],
-      };
+      const original = legacyPageState("recoverable");
       await writeFile(storagePath, JSON.stringify(original), "utf8");
 
       await assert.rejects(
@@ -370,10 +546,7 @@ test("stored browser capture applies one hard deadline and closes a hung probe",
   await withBrowserState(
     "ontrack-browser-state-deadline-",
     async (storagePath) => {
-      const original = {
-        cookies: [sessionCookie("recoverable")],
-        origins: [],
-      };
+      const original = legacyPageState("recoverable");
       let closeCalls = 0;
       await writeFile(storagePath, JSON.stringify(original), "utf8");
 
@@ -531,10 +704,7 @@ test("stored browser capture does not expose its claimed state while the browser
   await withBrowserState(
     "ontrack-browser-state-private-claim-",
     async (storagePath) => {
-      const original = {
-        cookies: [sessionCookie("recoverable")],
-        origins: [],
-      };
+      const original = legacyPageState("recoverable");
       await writeFile(storagePath, JSON.stringify(original), "utf8");
 
       await assert.rejects(
@@ -592,10 +762,7 @@ test("stored browser capture recovers an orphaned claim after a process crash", 
       };
       await writeFile(
         orphanedPath,
-        JSON.stringify({
-          cookies: [sessionCookie("recoverable")],
-          origins: [],
-        }),
+        JSON.stringify(legacyPageState("recoverable")),
         "utf8",
       );
       const staleTimestamp = new Date(Date.now() - 10_000);
@@ -698,10 +865,7 @@ test("successful stored browser probe never overwrites a concurrent state genera
 
       await writeFile(
         storagePath,
-        JSON.stringify({
-          cookies: [sessionCookie("old-generation")],
-          origins: [],
-        }),
+        JSON.stringify(legacyPageState("old-generation")),
         "utf8",
       );
       assert.deepEqual(
@@ -717,6 +881,7 @@ test("successful stored browser probe never overwrites a concurrent state genera
           authToken: "captured-token",
           username: "captured-user",
           source: "cookie",
+          contract: "access-token",
         },
       );
       assert.deepEqual(
@@ -731,10 +896,7 @@ test("successful stored browser capture restores its claimed state when no fresh
   await withBrowserState(
     "ontrack-browser-state-publish-restore-",
     async (storagePath) => {
-      const original = {
-        cookies: [sessionCookie("recoverable")],
-        origins: [],
-      };
+      const original = legacyPageState("recoverable");
       const capturedCookies = [
         sessionCookie("captured-token", "auth_token"),
         sessionCookie("captured-user", "username"),
@@ -769,6 +931,7 @@ test("successful stored browser capture restores its claimed state when no fresh
           authToken: "captured-token",
           username: "captured-user",
           source: "cookie",
+          contract: "access-token",
         },
       );
       assert.deepEqual(
@@ -783,10 +946,7 @@ test("failed exclusive publication removes its partial file before restoring sta
   await withBrowserState(
     "ontrack-browser-state-partial-write-",
     async (storagePath) => {
-      const original = {
-        cookies: [sessionCookie("recoverable")],
-        origins: [],
-      };
+      const original = legacyPageState("recoverable");
       const capturedCookies = [
         sessionCookie("captured-token", "auth_token"),
         sessionCookie("captured-user", "username"),
@@ -829,6 +989,7 @@ test("failed exclusive publication removes its partial file before restoring sta
           authToken: "captured-token",
           username: "captured-user",
           source: "cookie",
+          contract: "access-token",
         },
       );
       assert.deepEqual(

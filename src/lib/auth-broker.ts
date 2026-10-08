@@ -16,6 +16,7 @@ import {
 import { OnTrackApiClient } from './api.js';
 import type { CapturedSignIn } from './api.js';
 import {
+  AUTH_REFRESH_LOCK_TIMEOUT,
   loadSession,
   saveSession,
   withSessionRefreshLock,
@@ -196,6 +197,17 @@ interface AuthBrokerContext {
   readonly targetBaseUrl: string;
 }
 
+function createBrokerContext(
+  options: OnTrackAuthBrokerOptions,
+  overrides: Partial<OnTrackAuthBrokerDependencies>,
+): AuthBrokerContext {
+  return {
+    dependencies: { ...defaultDependencies(), ...overrides },
+    options: { ...options },
+    targetBaseUrl: normalizeBaseUrl(options.baseUrl),
+  };
+}
+
 async function loadScopedSession(context: AuthBrokerContext): Promise<SessionData | null> {
   const session = await context.dependencies.loadSession();
   if (!session) return null;
@@ -238,19 +250,54 @@ async function captureSession(
   }
 }
 
+/**
+ * Renew from the stored refresh cookie over plain HTTP. Null when no cookie is
+ * stored, OnTrack declines it, or the request fails.
+ */
+async function renewFromStoredCookie(
+  baseUrl: string,
+  dependencies: OnTrackAuthBrokerDependencies,
+): Promise<SessionData | null> {
+  const cookie = dependencies.readStoredRefreshCookie(baseUrl);
+  return cookie ? sessionFromHttpRefresh(baseUrl, cookie, dependencies) : null;
+}
+
 async function refreshSession(
   context: AuthBrokerContext,
   interactive: boolean,
 ): Promise<SessionData | null> {
-  const { dependencies, targetBaseUrl } = context;
   if (!interactive) {
-    const cookie = dependencies.readStoredRefreshCookie(targetBaseUrl);
-    if (cookie) {
-      const renewed = await sessionFromHttpRefresh(targetBaseUrl, cookie, dependencies);
-      if (renewed) return renewed;
-    }
+    const renewed = await renewFromStoredCookie(context.targetBaseUrl, context.dependencies);
+    if (renewed) return renewed;
   }
   return captureSession(context, interactive);
+}
+
+/**
+ * The broker's silent-renewal step on its own, for `ontrack login` to run
+ * before it asks how to sign in: renew the stored refresh cookie over plain
+ * HTTP and save the session, under the same refresh lock, with no browser
+ * fallback. Null when there is nothing to renew from, OnTrack declines the
+ * cookie, or another process holds the lock past its timeout.
+ */
+export async function renewSessionOverHttp(
+  baseUrl: string,
+  overrides: Partial<OnTrackAuthBrokerDependencies> = {},
+): Promise<SessionData | null> {
+  const { dependencies, targetBaseUrl } = createBrokerContext({ baseUrl }, overrides);
+  if (!dependencies.readStoredRefreshCookie(targetBaseUrl)) return null;
+  try {
+    return await dependencies.withRefreshLock(async () => {
+      const renewed = await renewFromStoredCookie(targetBaseUrl, dependencies);
+      if (renewed) await dependencies.saveSession(renewed);
+      return renewed;
+    });
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === AUTH_REFRESH_LOCK_TIMEOUT) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /** A cookie value as OnTrack set it: Rails URL-encodes cookie values. */
@@ -319,11 +366,7 @@ export function createOnTrackAuthBroker(
   options: OnTrackAuthBrokerOptions,
   overrides: Partial<OnTrackAuthBrokerDependencies> = {},
 ): OnTrackAuthBroker {
-  const context: AuthBrokerContext = {
-    dependencies: { ...defaultDependencies(), ...overrides },
-    options: { ...options },
-    targetBaseUrl: normalizeBaseUrl(options.baseUrl),
-  };
+  const context = createBrokerContext(options, overrides);
   const runtime: AuthRuntime = createAuthRuntime({
     loadSession: () => loadScopedSession(context),
     saveSession: context.dependencies.saveSession,

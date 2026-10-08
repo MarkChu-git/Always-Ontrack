@@ -3526,15 +3526,20 @@ async function captureSsoCredentialsInternal(
           const body = await response.json();
           const parsed = extractCredentialsFromAuthPayload(body);
           if (parsed) {
-            const contract = new URL(response.url()).pathname.endsWith(
-              "/api/auth/access-token",
-            )
-              ? "access-token"
-              : "legacy-auth";
+            // doubtfire-api states an expiry with every live token it issues,
+            // from the page's own POST /auth exchange as much as from
+            // /auth/access-token, and POST /auth answers 419 if one of those
+            // is offered back. A token without one is either still pending
+            // (the one-time token from POST /auth/lti) or a pre-11 server's
+            // live token, and the exchange, which those servers accept it
+            // through, is the only way either becomes a session.
+            const isLiveToken =
+              Boolean(parsed.expiresAt) ||
+              new URL(response.url()).pathname.endsWith("/api/auth/access-token");
             setCaptured({
               ...parsed,
               source: "auth_response",
-              contract,
+              contract: isLiveToken ? "access-token" : "legacy-auth",
             });
           }
         } catch {
@@ -3779,6 +3784,19 @@ async function probeCredentialsInOpenContext(
   });
 
   const checkCaptured = async (): Promise<LoginCredentials | null> => {
+    const found = await findCaptured();
+    // Only the sign_in landing URL carries a pending one-time login token.
+    // Storage, cookies and request headers hold the page's live API token,
+    // which POST /auth answers with 419.
+    return (
+      found && {
+        ...found,
+        contract: found.source === "url" ? "legacy-auth" : "access-token",
+      }
+    );
+  };
+
+  const findCaptured = async (): Promise<LoginCredentials | null> => {
     if (capturedFromRequestHeaders) {
       return capturedFromRequestHeaders;
     }
@@ -3984,7 +4002,36 @@ async function publishCapturedBrowserSessionState(
   return true;
 }
 
-/** Probe saved state file created by previous automated logins. */
+/**
+ * Whether a page restored from this state could hand the probe a credential.
+ * The probe reads storage, cookies, and the headers a page's auth requests
+ * carry, and a page fills those only from a token the state already holds. A
+ * doubtfire-web 11 state never holds one: the page keeps its API token in
+ * memory and renews it with the HttpOnly refresh cookie, which a caller can
+ * renew over plain HTTP instead.
+ */
+function stateHoldsPageCredential(
+  state: BrowserStorageState,
+  targetOrigin: string,
+): boolean {
+  const storage = state.origins.flatMap((origin) =>
+    origin.localStorage.map((entry) => ({
+      scope: "local" as const,
+      key: entry.name,
+      value: entry.value,
+    })),
+  );
+  return (
+    extractCredentialsFromStorageEntries(storage) !== null ||
+    extractCredentialsFromCookieJar(state.cookies, targetOrigin) !== null
+  );
+}
+
+/**
+ * Probe saved state file created by previous automated logins. A browser is
+ * launched only for a state that holds a page credential (one saved before
+ * doubtfire-web 11); any other claim goes straight back.
+ */
 async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
@@ -3993,6 +4040,10 @@ async function captureCredentialsFromPersistedStateFile(
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   const claim = claimBrowserSessionState(targetOrigin);
   if (!claim) {
+    return null;
+  }
+  if (!stateHoldsPageCredential(claim.contextOptions.storageState, targetOrigin)) {
+    restoreClaimedBrowserSessionState(claim);
     return null;
   }
 
