@@ -81,7 +81,9 @@ export function parseSsoRedirectUrl(redirectUrl: string): { authToken: string; u
  * - rejects when input has ended or ends before an answer (a script or CI job
  *   with no stdin), so the command fails instead of exiting 0 mid-way
  * - an unterminated last piped line still counts as the answer
- * - a terminal Ctrl+C/Ctrl+D rejects with readline's own AbortError
+ * - a terminal Ctrl+C/Ctrl+D keeps readline's own AbortError where the
+ *   runtime raises one (Bun 1.4); Bun 1.3 readline only closes, which reads
+ *   as input closed
  */
 export async function prompt(
   question: string,
@@ -104,8 +106,8 @@ export async function prompt(
   });
   // `rl.question` never settles when input ends without an answer (EOF, a
   // closed pipe), so the drained event loop would exit 0 mid-command; reject
-  // instead. Wait one turn: a terminal Ctrl+C/Ctrl+D closes the interface
-  // before readline rejects with its own AbortError, which should win.
+  // instead. Wait one turn: on Bun 1.4 a terminal Ctrl+C/Ctrl+D closes the
+  // interface before readline rejects with its own AbortError, which should win.
   const closed = new Promise<never>((_, reject) => {
     rl.once('close', () => {
       setImmediate(() => reject(inputClosed()));
