@@ -4,8 +4,16 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Wait a week before adopting a new release; security updates skip the wait.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
+      # @opentui/react pins its own @opentui/core; upgrading them apart leaves
+      # two copies that fail typechecking.
+      opentui:
+        patterns:
+          - '@opentui/*'
       development-dependencies:
         dependency-type: development
 
@@ -13,3 +21,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7

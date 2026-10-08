@@ -115,6 +115,19 @@ If you have a valid real session, add:
 bun run smoke:real -- --project-id <id> --abbr <abbr>
 ```
 
+## Dependency updates
+
+New dependency versions wait seven days before the project adopts them, so a
+compromised release has time to be caught. `bunfig.toml` sets
+`install.minimumReleaseAge` to 604800 seconds, so `bun add` and `bun update`
+resolve only versions published at least that long ago, and Dependabot waits
+the same seven days (`cooldown` in `.github/dependabot.yml`; security updates
+skip the wait). Versions already in `bun.lock` install as usual.
+
+A security fix younger than a week goes into `minimumReleaseAgeExcludes` in
+`bunfig.toml` until it is a week old. Verify a changed lockfile with Bun
+1.3.14, the version CI pins.
+
 ## Coverage thresholds
 
 `bun run test:coverage` runs the test suite with coverage and checks the summary

@@ -1,0 +1,7 @@
+[install]
+# Resolve only versions published at least seven days ago (604800 seconds), so
+# a compromised release has time to be caught. Versions already in bun.lock
+# install as usual. A security fix younger than that goes into the excludes
+# until it is a week old.
+minimumReleaseAge = 604800
+minimumReleaseAgeExcludes = []
