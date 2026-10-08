@@ -1,20 +1,71 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'bun:test';
 
 const workflowRoot = new URL('../.github/workflows/', import.meta.url);
 
+/** The `run: |` block of the named step, dedented. */
+function stepScript(workflow: string, stepName: string): string {
+  const step = workflow.indexOf(`- name: ${stepName}\n`);
+  assert.notEqual(step, -1, `missing step: ${stepName}`);
+  const marker = 'run: |\n';
+  const runAt = workflow.indexOf(marker, step);
+  assert.notEqual(runAt, -1, `step has no run block: ${stepName}`);
+  const lines = workflow.slice(runAt + marker.length).split('\n');
+  const indent = /^ */.exec(lines[0] ?? '')?.[0] ?? '';
+  const body: string[] = [];
+  for (const line of lines) {
+    if (line.trim() !== '' && !line.startsWith(indent)) break;
+    body.push(line.slice(indent.length));
+  }
+  return body.join('\n');
+}
+
+/** Run a step script the way GitHub's bash shell does. */
+async function runStep(
+  script: string,
+  env: Record<string, string>,
+): Promise<{ exitCode: number; stdout: string }> {
+  const child = Bun.spawn(['bash', '--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+    env: { PATH: process.env.PATH ?? '', ...env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+  return { exitCode, stdout };
+}
+
+/** The lines of one job, from its key to the next job key. */
+function jobBlock(workflow: string, job: string): string {
+  const lines = workflow.split('\n');
+  const start = lines.indexOf(`  ${job}:`);
+  assert.notEqual(start, -1, `missing job: ${job}`);
+  const end = lines.findIndex((line, index) => index > start && /^  [a-z][a-z0-9-]*:$/.test(line));
+  return lines.slice(start, end === -1 ? undefined : end).join('\n');
+}
+
+/** The ids of every job in a workflow. */
+function jobIds(workflow: string): string[] {
+  const lines = workflow.split('\n');
+  return lines
+    .slice(lines.indexOf('jobs:') + 1)
+    .flatMap((line) => /^  ([a-z][a-z0-9-]*):$/.exec(line)?.[1] ?? []);
+}
+
 test('CI never uploads an unverified package from a failed job', async () => {
   const workflow = await readFile(new URL('ci.yml', workflowRoot), 'utf8');
-  const uploadBlocks = workflow.split(
-    'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
-  );
+  const upload = 'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a';
+  assert.equal(workflow.split(upload).length, 3);
 
-  assert.equal(uploadBlocks.length, 3);
-  assert.match(uploadBlocks[1], /if: always\(\)[\s\S]*coverage\/lcov\.info/);
-  assert.doesNotMatch(uploadBlocks[1], /artifacts\/\*\.tgz/);
-  assert.match(uploadBlocks[2], /artifacts\/\*\.tgz[\s\S]*if-no-files-found: error/);
-  assert.doesNotMatch(uploadBlocks[2], /if: always\(\)/);
+  const testJob = jobBlock(workflow, 'test');
+  assert.match(testJob, /upload-artifact[\s\S]*if: always\(\)[\s\S]*coverage\/lcov\.info/);
+  assert.doesNotMatch(testJob, /artifacts\/\*\.tgz/);
+
+  const packageJob = jobBlock(workflow, 'package');
+  assert.match(packageJob, /artifacts\/\*\.tgz[\s\S]*if-no-files-found: error/);
+  assert.doesNotMatch(packageJob, /if: always\(\)/);
 });
 
 test('release validates the exact single draft asset before reuse and publication', async () => {
@@ -30,33 +81,19 @@ test('release validates the exact single draft asset before reuse and publicatio
   );
 });
 
-test('CI and release reject modified or unpinned project skills', async () => {
-  const [ciWorkflow, releaseWorkflow] = await Promise.all([
-    readFile(new URL('ci.yml', workflowRoot), 'utf8'),
-    readFile(new URL('release.yml', workflowRoot), 'utf8'),
-  ]);
-
-  assert.match(
-    ciWorkflow,
-    /Verify pinned project skills[\s\S]*bun run skills:check[\s\S]*bun run typecheck/,
-  );
+test('release rejects modified or unpinned project skills', async () => {
+  const releaseWorkflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
   assert.match(
     releaseWorkflow,
     /Typecheck, test, audit, and build[\s\S]*bun run skills:check[\s\S]*bun run typecheck/,
   );
 });
 
-test('CI and release gate the published TUI', async () => {
-  const [ciWorkflow, releaseWorkflow] = await Promise.all([
-    readFile(new URL('ci.yml', workflowRoot), 'utf8'),
-    readFile(new URL('release.yml', workflowRoot), 'utf8'),
-  ]);
-
-  for (const workflow of [ciWorkflow, releaseWorkflow]) {
-    assert.match(workflow, /bun run typecheck:tui/);
-    assert.match(workflow, /bun run test:tui/);
-    assert.match(workflow, /test -f dist\/tui\/index\.js/);
-  }
+test('release gates the published TUI', async () => {
+  const releaseWorkflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  assert.match(releaseWorkflow, /bun run typecheck:tui/);
+  assert.match(releaseWorkflow, /bun run test:tui/);
+  assert.match(releaseWorkflow, /test -f dist\/tui\/index\.js/);
 });
 
 test('verify runs every release gate in order', async () => {
@@ -84,4 +121,70 @@ test('verify runs every release gate in order', async () => {
     manifest.scripts['verify:graph'],
     chain(['gitnexus:analyze', 'gitnexus:status', 'gitnexus:check', 'gitnexus:mcp:check']),
   );
+});
+
+test('the Verify Bun CLI gate always runs and needs every other CI job', async () => {
+  const workflow = await readFile(new URL('ci.yml', workflowRoot), 'utf8');
+  const gate = jobBlock(workflow, 'gate');
+  assert.match(gate, /\n    name: Verify Bun CLI\n/);
+  assert.match(gate, /\n    if: always\(\)\n/);
+  const needs = /needs: \[([^\]]*)\]/.exec(gate)?.[1]?.split(',').map((job) => job.trim()) ?? [];
+  assert.deepEqual(
+    [...needs].sort(),
+    jobIds(workflow)
+      .filter((job) => job !== 'gate')
+      .sort(),
+  );
+});
+
+test('the gate fails unless every needed job succeeded', async () => {
+  const workflow = await readFile(new URL('ci.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Require every CI job to succeed');
+  const succeeded = Array.from({ length: 6 }, () => 'success').join(' ');
+  assert.equal((await runStep(script, { RESULTS: succeeded })).exitCode, 0);
+  for (const results of [
+    'success failure success success success success',
+    'success skipped success success success success',
+    'cancelled success success success success success',
+    '',
+  ]) {
+    assert.equal((await runStep(script, { RESULTS: results })).exitCode, 1, `results: "${results}"`);
+  }
+});
+
+test('CI audits a pull request against its base and every other event in full', async () => {
+  const workflow = await readFile(new URL('ci.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Audit dependencies');
+  const fakeBin = await mkdtemp(join(tmpdir(), 'ontrack-ci-audit-'));
+  try {
+    await writeFile(join(fakeBin, 'bun'), '#!/bin/sh\necho "bun $*"\n');
+    await chmod(join(fakeBin, 'bun'), 0o755);
+    const PATH = `${fakeBin}:${process.env.PATH ?? ''}`;
+    assert.equal(
+      (await runStep(script, { PATH, BASE_SHA: 'abc123' })).stdout.trim(),
+      'bun run audit:check --base abc123',
+    );
+    assert.equal((await runStep(script, { PATH, BASE_SHA: '' })).stdout.trim(), 'bun run audit:check');
+  } finally {
+    await rm(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test('CI runs the package scripts instead of inline gates', async () => {
+  const workflow = await readFile(new URL('ci.yml', workflowRoot), 'utf8');
+  for (const script of [
+    'skills:check',
+    'typecheck',
+    'typecheck:tui',
+    'test:coverage',
+    'test:tui',
+    'build',
+    'smoke:dist',
+    'package:verify',
+    'verify:graph',
+  ]) {
+    assert.match(workflow, new RegExp(`bun run ${script}\\n`), script);
+  }
+  assert.doesNotMatch(workflow, /bun dist\/cli\.js/);
+  assert.doesNotMatch(workflow, /tags:/);
 });
