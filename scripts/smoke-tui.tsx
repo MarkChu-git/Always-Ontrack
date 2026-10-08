@@ -49,7 +49,7 @@ function locate(frame: string, text: string): { x: number; y: number } {
 const readyLoad = async (): Promise<LoadState> => ({
   kind: 'ready',
   identity: { username: 'alice.zhang', savedAt: '2026-08-12T00:00:00.000Z' },
-  expiresAt: new Date(Date.now() + 5.5 * 86_400_000).toISOString(),
+  signInDueAt: new Date(Date.now() + 5.5 * 86_400_000).toISOString(),
   tasks: FAKE_TASKS,
 });
 
@@ -208,6 +208,28 @@ await act(async () => {
 check('auth screen', authSetup.captureCharFrame(), ['Not signed in', 'l sign in', 'r retry']);
 await act(async () => {
   authSetup.renderer.destroy();
+});
+
+// Nothing renews this session any more, so the header pill says it is over.
+const lapsedSessionSetup = await testRender(
+  <App
+    load={async (): Promise<LoadState> => ({
+      kind: 'ready',
+      identity: { username: 'alice.zhang', savedAt: '2026-08-12T00:00:00.000Z' },
+      signInDueAt: new Date(Date.now() - 60_000).toISOString(),
+      tasks: FAKE_TASKS,
+    })}
+    extras={stubExtras}
+  />,
+  { width: 100, height: 32 },
+);
+await act(async () => {
+  await lapsedSessionSetup.mockInput.pressKey('ARROW_DOWN');
+  await settle();
+});
+check('expired session pill', lapsedSessionSetup.captureCharFrame(), ['session expired']);
+await act(async () => {
+  lapsedSessionSetup.renderer.destroy();
 });
 
 // First load fails, pressing r retries and the second load succeeds.

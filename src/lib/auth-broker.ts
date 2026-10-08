@@ -60,9 +60,16 @@ export interface OnTrackAuthBrokerDependencies {
 }
 
 export interface AuthStatusView {
-  readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
+  /**
+   * `renewable`: the access token has expired, but the stored refresh cookie
+   * renews it on the next call, so no sign-in is needed before `renewableUntil`.
+   */
+  readonly status: 'signed_out' | 'usable' | 'renewable' | 'expired' | 'unknown';
   readonly source?: SessionData['source'];
+  /** When the access token expires; OnTrack issues short-lived ones. */
   readonly expiresAt?: string;
+  /** Until when the stored refresh cookie renews this session without a sign-in. */
+  readonly renewableUntil?: string;
   readonly baseUrl: string;
 }
 
@@ -70,6 +77,12 @@ export interface OnTrackAuthBroker {
   ensure(options?: AuthEnsureOptions): Promise<AuthRuntimeResult>;
   status(): Promise<AuthStatusView>;
   currentSession(): Promise<SessionData | null>;
+  /**
+   * When the next sign-in is due: when the stored refresh cookie stops
+   * renewing the session, or the access token's expiry when nothing renews
+   * it. Null when that is unknown, such as a cookie that names no expiry.
+   */
+  signInDueAt(): Promise<string | null>;
 }
 
 function defaultDependencies(): OnTrackAuthBrokerDependencies {
@@ -240,20 +253,62 @@ async function refreshSession(
   return captureSession(context, interactive);
 }
 
+/** A cookie value as OnTrack set it: Rails URL-encodes cookie values. */
+function decodeCookieValue(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Whether the stored refresh cookie renews this session, and until when if it
+ * names an expiry. Null when there is none, it has run out, or it belongs to
+ * another user (renewing with it would sign that user in instead).
+ */
+function storedRenewal(
+  context: AuthBrokerContext,
+  session: SessionData,
+): { readonly until?: string } | null {
+  const cookie = context.dependencies.readStoredRefreshCookie(context.targetBaseUrl);
+  if (!cookie) return null;
+  const cookieUser = decodeCookieValue(cookie.username).trim().toLowerCase();
+  if (cookieUser !== session.username.trim().toLowerCase()) {
+    return null;
+  }
+  // The broker renews with a cookie that names no expiry all the same.
+  const until = cookie.expiresAt ? Date.parse(cookie.expiresAt) : Number.NaN;
+  if (!Number.isFinite(until)) return {};
+  return until > context.dependencies.now().getTime()
+    ? { until: new Date(until).toISOString() }
+    : null;
+}
+
 async function brokerStatus(context: AuthBrokerContext): Promise<AuthStatusView> {
   const session = await loadScopedSession(context);
   if (!session) return { status: 'signed_out', baseUrl: context.targetBaseUrl };
   const usability = sessionUsability(session, context.dependencies.now());
+  const renewal = storedRenewal(context, session);
   return {
-    status: usability.state,
+    status: usability.state === 'expired' && renewal ? 'renewable' : usability.state,
     source: session.source,
     ...(usability.state === 'usable' || usability.state === 'expired'
       ? usability.expiresAt
         ? { expiresAt: usability.expiresAt }
         : {}
       : {}),
+    ...(renewal?.until ? { renewableUntil: renewal.until } : {}),
     baseUrl: context.targetBaseUrl,
   };
+}
+
+async function brokerSignInDueAt(context: AuthBrokerContext): Promise<string | null> {
+  const session = await loadScopedSession(context);
+  if (!session) return null;
+  const renewal = storedRenewal(context, session);
+  if (renewal) return renewal.until ?? null;
+  return session.expiresAt ?? null;
 }
 
 /**
@@ -281,5 +336,6 @@ export function createOnTrackAuthBroker(
     ensure: (ensureOptions) => runtime.ensure(ensureOptions),
     currentSession: () => loadScopedSession(context),
     status: () => brokerStatus(context),
+    signInDueAt: () => brokerSignInDueAt(context),
   };
 }

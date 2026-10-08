@@ -632,9 +632,10 @@ export const agentPlanShowOutputSchema = z
 export type AgentPlanShowInput = z.output<typeof agentPlanShowInputSchema>;
 export type AgentPlanShowOutput = z.output<typeof agentPlanShowOutputSchema>;
 export type AgentAuthStatus = {
-  readonly status: 'signed_out' | 'usable' | 'expired' | 'unknown';
+  readonly status: 'signed_out' | 'usable' | 'renewable' | 'expired' | 'unknown';
   readonly source?: string;
   readonly expiresAt?: string;
+  readonly renewableUntil?: string;
   readonly baseUrl: string;
 };
 
@@ -667,9 +668,10 @@ export interface NativeAgentCommandHandlers {
 const authStatusInputSchema = z.object({}).strict();
 const authStatusOutputSchema = z
   .object({
-    status: z.enum(['signed_out', 'usable', 'expired', 'unknown']),
+    status: z.enum(['signed_out', 'usable', 'renewable', 'expired', 'unknown']),
     source: z.string().min(1).optional(),
     expiresAt: z.string().min(1).optional(),
+    renewableUntil: agentRfc3339TimestampSchema.optional(),
     baseUrl: z.string().url(),
   })
   .strict();

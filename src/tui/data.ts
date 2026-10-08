@@ -22,7 +22,13 @@ import type { TaskStatus, TuiTask, UploadSlot } from './tasks';
 
 export type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; identity: WhoAmIView; expiresAt: string | null; tasks: TuiTask[] }
+  | {
+      kind: 'ready';
+      identity: WhoAmIView;
+      /** When the next sign-in is due; see OnTrackAuthBroker.signInDueAt. */
+      signInDueAt: string | null;
+      tasks: TuiTask[];
+    }
   | { kind: 'auth_required' }
   | { kind: 'error'; message: string };
 
@@ -156,6 +162,7 @@ export function createOnTrackTaskLoader(
       }
       const session = await broker.currentSession();
       if (!session) return { kind: 'auth_required' };
+      const signInDueAt = await broker.signInDueAt();
 
       // Same catalogue pipeline the CLI task commands use: per-project/unit
       // read failures degrade to overview data instead of blanking the TUI.
@@ -166,7 +173,7 @@ export function createOnTrackTaskLoader(
       return {
         kind: 'ready',
         identity: toWhoAmIView(session),
-        expiresAt: session.expiresAt ?? null,
+        signInDueAt,
         tasks,
       };
     } catch (err) {
