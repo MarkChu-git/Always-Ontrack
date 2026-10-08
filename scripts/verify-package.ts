@@ -2,8 +2,6 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } fro
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const packagePrefix = 'package/';
 const requiredEntries = [
@@ -11,7 +9,6 @@ const requiredEntries = [
   'package/LICENSE',
   'package/README.md',
   'package/README.zh-CN.md',
-  'package/dist/auth-mcp.js',
   'package/dist/cli.js',
   'package/dist/tui/index.js',
 ] as const;
@@ -19,12 +16,10 @@ const requiredEntries = [
 export interface PackageVerification {
   entries: string[];
   cliOutput: string;
-  authMcpVersion: string;
   tuiEntrypoint: 'runTui';
   tuiOutput: string;
 }
 
-const authMcpSmokeTimeoutMs = 10_000;
 const tuiSmokeTimeoutMs = 10_000;
 const tuiSmokeOutputLimit = 1_000_000;
 const subprocessTerminationGraceMs = 1_000;
@@ -127,22 +122,6 @@ async function assertRegularTree(root: string): Promise<void> {
   await Promise.all(children.map((child) => assertRegularTree(join(root, child))));
 }
 
-async function withinDeadline<T>(operation: Promise<T>, message: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error(message)), authMcpSmokeTimeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
-}
-
 async function exitsWithin(exited: Promise<number>, timeoutMs: number): Promise<boolean> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -170,37 +149,6 @@ export async function terminateSubprocess(
   child.kill(9);
   if (!(await exitsWithin(child.exited, graceMs))) {
     throw new Error('packed TUI subprocess did not terminate after SIGKILL');
-  }
-}
-
-async function verifyInstalledAuthMcp(
-  authMcpPath: string,
-  packageRoot: string,
-  expectedVersion: string,
-): Promise<string> {
-  const client = new Client({ name: 'ontrack-package-verifier', version: '1.0.0' });
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [authMcpPath],
-    cwd: packageRoot,
-    stderr: 'pipe',
-  });
-
-  try {
-    await withinDeadline(
-      client.connect(transport),
-      'packed Auth MCP did not initialize before the verification deadline',
-    );
-    const serverVersion = client.getServerVersion()?.version;
-    if (serverVersion !== expectedVersion) {
-      throw new Error('packed Auth MCP version does not match package.json');
-    }
-    return serverVersion;
-  } finally {
-    await withinDeadline(
-      client.close().catch(() => undefined),
-      'packed Auth MCP did not close before the verification deadline',
-    );
   }
 }
 
@@ -354,7 +302,6 @@ export async function verifyInstalledTui(
 }
 
 interface PackedPackagePaths {
-  readonly authMcpPath: string;
   readonly cliPath: string;
   readonly packageRoot: string;
 }
@@ -372,7 +319,7 @@ async function inspectTarball(tarballPath: string): Promise<string[]> {
   return archiveEntries.filter((entry) => !entry.endsWith('/'));
 }
 
-async function readPackedVersion(packageRoot: string): Promise<string> {
+async function verifyPackedManifest(packageRoot: string): Promise<void> {
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as {
     name?: unknown;
     version?: unknown;
@@ -384,34 +331,30 @@ async function readPackedVersion(packageRoot: string): Promise<string> {
     typeof manifest.version !== 'string' ||
     !bin ||
     bin.ontrack !== './dist/cli.js' ||
-    bin['ontrack-auth-mcp'] !== './dist/auth-mcp.js'
+    Object.keys(bin).length !== 1
   ) {
-    throw new Error('packed manifest does not expose both expected executables');
+    throw new Error('packed manifest does not expose exactly the ontrack executable');
   }
-  return manifest.version;
 }
 
 async function resolvePackedPackage(extractionRoot: string): Promise<PackedPackagePaths> {
   await assertRegularTree(extractionRoot);
   const packageRoot = await realpath(join(extractionRoot, 'package'));
   const cliPath = await realpath(join(packageRoot, 'dist', 'cli.js'));
-  const authMcpPath = await realpath(join(packageRoot, 'dist', 'auth-mcp.js'));
   assertChildPath(packageRoot, cliPath);
-  assertChildPath(packageRoot, authMcpPath);
-  return { authMcpPath, cliPath, packageRoot };
+  return { cliPath, packageRoot };
 }
 
-async function verifyPackedExecutables(paths: PackedPackagePaths): Promise<void> {
-  const [cliMetadata, authMcpMetadata, authMcpSource] = await Promise.all([
+async function verifyPackedExecutable(paths: PackedPackagePaths): Promise<void> {
+  const [cliMetadata, cliSource] = await Promise.all([
     lstat(paths.cliPath),
-    lstat(paths.authMcpPath),
-    readFile(paths.authMcpPath, 'utf8'),
+    readFile(paths.cliPath, 'utf8'),
   ]);
-  if ((cliMetadata.mode & 0o111) === 0 || (authMcpMetadata.mode & 0o111) === 0) {
-    throw new Error('packed executables are missing executable permission bits');
+  if ((cliMetadata.mode & 0o111) === 0) {
+    throw new Error('packed CLI is missing executable permission bits');
   }
-  if (!authMcpSource.startsWith('#!/usr/bin/env bun')) {
-    throw new Error('packed Auth MCP is missing its Bun executable entrypoint');
+  if (!cliSource.startsWith('#!/usr/bin/env bun')) {
+    throw new Error('packed CLI is missing its Bun executable entrypoint');
   }
 }
 
@@ -430,30 +373,22 @@ async function installPackedPackage(
   );
   const packageRoot = await realpath(join(installationRoot, 'node_modules', 'ontrack-cli'));
   const cliPath = await realpath(join(packageRoot, 'dist', 'cli.js'));
-  const authMcpPath = await realpath(join(packageRoot, 'dist', 'auth-mcp.js'));
   const tuiPath = await realpath(join(packageRoot, 'dist', 'tui', 'index.js'));
-  for (const path of [cliPath, authMcpPath, tuiPath]) assertChildPath(packageRoot, path);
-  return { authMcpPath, cliPath, packageRoot, tuiPath };
+  for (const path of [cliPath, tuiPath]) assertChildPath(packageRoot, path);
+  return { cliPath, packageRoot, tuiPath };
 }
 
 async function verifyInstalledPackage(
   paths: InstalledPackagePaths,
-  expectedVersion: string,
   configRoot: string,
 ): Promise<Omit<PackageVerification, 'entries'>> {
   const cli = await run([process.execPath, paths.cliPath, '--help'], paths.packageRoot);
-  const authMcpVersion = await verifyInstalledAuthMcp(
-    paths.authMcpPath,
-    paths.packageRoot,
-    expectedVersion,
-  );
   const tuiModule = (await import(pathToFileURL(paths.tuiPath).href)) as { runTui?: unknown };
   if (typeof tuiModule.runTui !== 'function') {
     throw new Error('packed TUI does not export runTui');
   }
   const tuiOutput = await verifyInstalledTui(paths.cliPath, paths.packageRoot, configRoot);
   return {
-    authMcpVersion,
     cliOutput: `${cli.stdout}${cli.stderr}`,
     tuiEntrypoint: 'runTui',
     tuiOutput,
@@ -471,16 +406,12 @@ export async function verifyPackageTarball(tarballPath: string): Promise<Package
   try {
     await run(['tar', '-xzf', resolvedTarball, '-C', extractionRoot]);
     const packedPaths = await resolvePackedPackage(extractionRoot);
-    const version = await readPackedVersion(packedPaths.packageRoot);
-    await verifyPackedExecutables(packedPaths);
+    await verifyPackedManifest(packedPaths.packageRoot);
+    await verifyPackedExecutable(packedPaths);
     const installedPaths = await installPackedPackage(resolvedTarball, extractionRoot);
     const isolatedConfigRoot = join(extractionRoot, 'config');
     await mkdir(isolatedConfigRoot);
-    const installedResult = await verifyInstalledPackage(
-      installedPaths,
-      version,
-      isolatedConfigRoot,
-    );
+    const installedResult = await verifyInstalledPackage(installedPaths, isolatedConfigRoot);
     return { entries, ...installedResult };
   } finally {
     await rm(extractionRoot, { recursive: true, force: true });
@@ -493,7 +424,7 @@ async function main(args: string[]): Promise<void> {
   }
   const result = await verifyPackageTarball(args[0]);
   console.log(
-    `Verified ${result.entries.length} package files, packed CLI help, no-argument TUI startup, TUI ${result.tuiEntrypoint}, and Auth MCP ${result.authMcpVersion}.`,
+    `Verified ${result.entries.length} package files, packed CLI help, no-argument TUI startup, and TUI ${result.tuiEntrypoint}.`,
   );
 }
 

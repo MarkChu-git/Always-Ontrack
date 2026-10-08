@@ -98,7 +98,6 @@ jobs:
           test -f dist/tui/index.js
           # auth-method --help would call the production API: release gates must stay hermetic.
           bun dist/cli.js schema auth.method --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.data?.path !== "auth.method") process.exit(1)'
-          test -x dist/auth-mcp.js
           bun dist/cli.js capabilities --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.schema_version !== "ontrack.agent/v1") process.exit(1)'
 
       - name: Pack and verify the only release artifact

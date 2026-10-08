@@ -12,7 +12,7 @@ export const REFRESH_COOKIE_PERSISTENCE_DIAGNOSTIC: AuthDiagnostic = Object.free
     'Refresh cookie could not be persisted; the current session remains usable, but silent renewal may be unavailable.',
 });
 
-/** CLI/MCP adapter; TUI callers inject their toast sink instead. */
+/** CLI adapter; TUI callers inject their toast sink instead. */
 export const reportAuthDiagnosticToStderr: AuthDiagnosticSink = (diagnostic) => {
   process.stderr.write(`[warn] ${diagnostic.message}\n`);
 };

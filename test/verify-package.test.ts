@@ -87,7 +87,6 @@ const validEntries = [
   'package/LICENSE',
   'package/README.md',
   'package/README.zh-CN.md',
-  'package/dist/auth-mcp.js',
   'package/dist/cli.js',
   'package/dist/lib/api.js',
   'package/dist/tui/index.js',
@@ -97,10 +96,10 @@ test('validateTarEntries accepts the supported package surface', () => {
   assert.doesNotThrow(() => validateTarEntries(validEntries));
 });
 
-test('validateTarEntries requires both public Agent executables', () => {
+test('validateTarEntries requires the public CLI executable', () => {
   assert.throws(
-    () => validateTarEntries(validEntries.filter((entry) => entry !== 'package/dist/auth-mcp.js')),
-    /missing required entry: package\/dist\/auth-mcp\.js/,
+    () => validateTarEntries(validEntries.filter((entry) => entry !== 'package/dist/cli.js')),
+    /missing required entry: package\/dist\/cli\.js/,
   );
 });
 
@@ -143,8 +142,18 @@ test('validateTarEntryTypes allows only regular files and directories', () => {
   }
 });
 
-test('verifyPackageTarball verifies the archive and runs the packed CLI from an isolated directory', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'ontrack-package-test-'));
+const packedCliSource = `#!/usr/bin/env bun
+if (process.argv.includes('--help')) {
+  console.log('ontrack help works');
+} else {
+  process.stdout.write('Not signed in\\n');
+  process.on('SIGINT', () => process.exit(0));
+}`;
+
+async function writePackageArchive(
+  root: string,
+  options: { readonly bin?: Record<string, string>; readonly cliSource?: string } = {},
+): Promise<string> {
   const packageRoot = join(root, 'package');
   const archivePath = join(root, 'ontrack-cli-0.3.0.tgz');
 
@@ -155,10 +164,7 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
     JSON.stringify({
       name: 'ontrack-cli',
       version: '0.3.0',
-      bin: {
-        ontrack: './dist/cli.js',
-        'ontrack-auth-mcp': './dist/auth-mcp.js',
-      },
+      bin: options.bin ?? { ontrack: './dist/cli.js' },
     }),
   );
   await writeFile(join(packageRoot, 'LICENSE'), 'Apache-2.0');
@@ -169,51 +175,58 @@ test('verifyPackageTarball verifies the archive and runs the packed CLI from an 
     join(packageRoot, 'dist', 'tui', 'index.js'),
     'export async function runTui() {}',
   );
-  await writeFile(
-    join(packageRoot, 'dist', 'auth-mcp.js'),
-    `#!/usr/bin/env bun
-import { createInterface } from 'node:readline';
-const input = createInterface({ input: process.stdin });
-input.on('line', (line) => {
-  const message = JSON.parse(line);
-  if (message.method !== 'initialize') return;
-  process.stdout.write(JSON.stringify({
-    jsonrpc: '2.0',
-    id: message.id,
-    result: {
-      protocolVersion: message.params.protocolVersion,
-      capabilities: {},
-      serverInfo: { name: 'fake-auth-mcp', version: '0.3.0' },
-    },
-  }) + '\\n');
-});`,
-  );
-  await writeFile(
-    join(packageRoot, 'dist', 'cli.js'),
-    `#!/usr/bin/env bun
-if (process.argv.includes('--help')) {
-  console.log('ontrack help works');
-} else {
-  process.stdout.write('Not signed in\\n');
-  process.on('SIGINT', () => process.exit(0));
-}`,
-  );
-  await Promise.all([
-    chmod(join(packageRoot, 'dist', 'auth-mcp.js'), 0o755),
-    chmod(join(packageRoot, 'dist', 'cli.js'), 0o755),
-  ]);
+  await writeFile(join(packageRoot, 'dist', 'cli.js'), options.cliSource ?? packedCliSource);
+  await chmod(join(packageRoot, 'dist', 'cli.js'), 0o755);
 
   const tar = Bun.spawn(['tar', '-czf', archivePath, '-C', root, 'package'], { stdout: 'pipe', stderr: 'pipe' });
   assert.equal(await tar.exited, 0, await new Response(tar.stderr).text());
+  return archivePath;
+}
 
-  const result = await verifyPackageTarball(archivePath);
+test('verifyPackageTarball verifies the archive and runs the packed CLI from an isolated directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-package-test-'));
+  try {
+    const result = await verifyPackageTarball(await writePackageArchive(root));
 
-  assert.match(result.cliOutput, /ontrack help works/);
-  assert.match(result.tuiOutput, /Not signed in/);
-  assert.equal(result.authMcpVersion, '0.3.0');
-  assert.equal(result.tuiEntrypoint, 'runTui');
-  assert.deepEqual([...result.entries].sort(), [...validEntries].sort());
-  await rm(root, { recursive: true, force: true });
+    assert.match(result.cliOutput, /ontrack help works/);
+    assert.match(result.tuiOutput, /Not signed in/);
+    assert.equal(result.tuiEntrypoint, 'runTui');
+    assert.deepEqual([...result.entries].sort(), [...validEntries].sort());
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('verifyPackageTarball rejects a manifest that exposes another executable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-package-bin-test-'));
+  try {
+    const archivePath = await writePackageArchive(root, {
+      bin: { ontrack: './dist/cli.js', 'ontrack-auth-mcp': './dist/auth-mcp.js' },
+    });
+
+    await assert.rejects(
+      () => verifyPackageTarball(archivePath),
+      /does not expose exactly the ontrack executable/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('verifyPackageTarball rejects a CLI without its Bun entrypoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-package-shebang-test-'));
+  try {
+    const archivePath = await writePackageArchive(root, {
+      cliSource: "console.log('ontrack help works');",
+    });
+
+    await assert.rejects(
+      () => verifyPackageTarball(archivePath),
+      /missing its Bun executable entrypoint/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('verifyPackageTarball rejects symlink entries before extraction', async () => {
@@ -230,7 +243,6 @@ test('verifyPackageTarball rejects symlink entries before extraction', async () 
     await writeFile(join(packageRoot, 'LICENSE'), 'Apache-2.0');
     await writeFile(join(packageRoot, 'README.md'), '# OnTrack');
     await writeFile(join(packageRoot, 'README.zh-CN.md'), '# OnTrack');
-    await writeFile(join(packageRoot, 'dist', 'auth-mcp.js'), 'export {};');
     await writeFile(join(packageRoot, 'dist', 'cli.js'), "console.log('ontrack help works');");
     await symlink('../../README.md', join(packageRoot, 'dist', 'lib', 'api.js'));
 

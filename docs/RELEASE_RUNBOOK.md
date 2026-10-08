@@ -35,7 +35,6 @@ Do not enable automatic merge for Bun, TypeScript, Playwright, or GitHub Action 
    bun dist/cli.js --help
    test -f dist/tui/index.js
    bun dist/cli.js schema auth.method --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.data?.path !== "auth.method") process.exit(1)'
-   test -x dist/auth-mcp.js
    bun dist/cli.js capabilities --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.schema_version !== "ontrack.agent/v1") process.exit(1)'
    release_artifacts="$(mktemp -d)"
    bun pm pack --ignore-scripts --destination "$release_artifacts" --quiet
