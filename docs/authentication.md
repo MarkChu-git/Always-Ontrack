@@ -18,7 +18,7 @@ ontrack login
 
 This flow:
 
-1. first probes the CLI's previously saved, OnTrack-only browser state and reuses it when valid
+1. first renews the saved refresh cookie over plain HTTP, without a browser, and skips sign-in when OnTrack accepts it; a browser is started only to probe a saved state from before doubtfire-web 11 (whose token sat in page storage) or an opted-in system browser profile
 2. in an interactive terminal, recommends a browser window on this machine and still offers pairing or terminal username/password (`--pair` / `--auto` / `--sso` skip the prompt; non-interactive login still defaults to pairing when a relay is configured)
 3. pairing prints a one-time link — you sign in in your own browser on any device, reusing an existing OnTrack session if you have one, and the credential arrives end-to-end encrypted (see the pairing section below)
 4. this-machine / `--auto` opens a visible browser window on machines with a display, captures the one-time login token from the sign-in redirect, and exchanges it itself, which also stores a refresh cookie
@@ -98,7 +98,9 @@ machine with a display: that flow does the real SSO sign-in in a browser the CLI
 controls, which is what puts a renewable refresh cookie (about one week) on disk.
 
 - `--pair` / `--auto` / `--sso` / `--no-pair`: skip the interactive method prompt
-  (`--no-pair` means the --auto browser-capture/manual flows).
+  (`--no-pair` means the --auto browser-capture/manual flows). A saved session
+  that still renews is reused before any of them applies; run `ontrack logout`
+  first to sign in afresh or as someone else.
 - `--relay-url URL` or `ONTRACK_RELAY_URL`: point at another relay (self-hosters);
   set it empty to disable pairing entirely.
 - `--pair-timeout-sec N`: pairing wait budget (default 300, minimum 60).
@@ -240,8 +242,9 @@ After login, the CLI stores the access token locally and requests a persistent
 session, so the server's refresh cookie (about one week) is kept in a separate
 restricted browser-state file. Authenticated commands renew near-expiry tokens
 silently over plain HTTP when possible, without launching a browser, so users
-do not normally sign in for every run. Monash can still require verification
-when its refresh or SSO policy expires.
+do not normally sign in for every run; `ontrack login` tries the same renewal
+before it asks how to sign in. Monash can still require verification when its
+refresh or SSO policy expires.
 
 OnTrack's access token is short-lived (Monash currently issues ten minutes), so
 an expired access token is routine. `ontrack auth status` reports it as

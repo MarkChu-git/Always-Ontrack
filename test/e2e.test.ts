@@ -59,7 +59,7 @@ function runCli(
     onStdout?: (chunk: string) => void;
     /** Piped to the CLI, then closed; without it stdin is at EOF from the start. */
     stdin?: string;
-    /** Kill the CLI and fail instead of hanging when it outlives this deadline. */
+    /** Kill a CLI that blocks, e.g. on a prompt that never gets an answer. */
     timeoutMs?: number;
   } = {},
 ): Promise<CliResult> {
@@ -78,13 +78,11 @@ function runCli(
     if (options.stdin !== undefined) {
       child.stdin?.end(options.stdin);
     }
-    const deadline =
+    const killTimer =
       options.timeoutMs === undefined
         ? undefined
-        : setTimeout(() => {
-            child.kill('SIGKILL');
-            reject(new Error(`CLI still running after ${options.timeoutMs}ms: ${args.join(' ')}`));
-          }, options.timeoutMs);
+        : setTimeout(() => child.kill('SIGKILL'), options.timeoutMs);
+    child.once('close', () => clearTimeout(killTimer));
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -96,12 +94,8 @@ function runCli(
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    child.once('error', (error) => {
-      clearTimeout(deadline);
-      reject(error);
-    });
+    child.once('error', reject);
     child.once('close', (code) => {
-      clearTimeout(deadline);
       resolveResult({ stdout, stderr, exitCode: code ?? 1 });
     });
   });
@@ -210,6 +204,14 @@ async function seedSession(home: TestHome, baseUrl: string, expiresAt: string): 
     }),
     { mode: 0o600 },
   );
+}
+
+/** The refresh token the CLI keeps in its browser-state file, if any. */
+async function storedRefreshToken(home: TestHome): Promise<string | undefined> {
+  const state = JSON.parse(await readFile(home.browserStatePath, 'utf8')) as {
+    cookies: Array<{ name: string; value: string }>;
+  };
+  return state.cookies.find((cookie) => cookie.name === 'refresh_token')?.value;
 }
 
 async function seedBrowserState(home: TestHome): Promise<void> {
@@ -377,13 +379,68 @@ test(
 
       // The stored refresh credential must survive a failed silent renewal:
       // one transient failure must never force a full re-login.
-      const state = JSON.parse(await readFile(home.browserStatePath, 'utf8')) as {
-        cookies: Array<{ name: string; value: string }>;
+      assert.equal(await storedRefreshToken(home), REFRESH_TOKEN);
+    } finally {
+      server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+/** A browser executable that does not exist: any launch attempt fails at once. */
+function missingBrowserPath(home: TestHome): string {
+  return join(home.home, 'no-browser-installed');
+}
+
+test(
+  'e2e: login renews a stored refresh cookie over plain HTTP, with no browser and no /auth replay',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startMock((request) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      if (request.url === '/api/auth/access-token' && request.method === 'POST') {
+        const cookie = String(request.headers.cookie ?? '');
+        assert.ok(cookie.includes(`refresh_token=${REFRESH_TOKEN}`), cookie);
+        assert.ok(cookie.includes(`username=${USERNAME}`), cookie);
+        return { status: 201, json: signInPayload(RENEWED_TOKEN) };
+      }
+      return null;
+    });
+
+    try {
+      await seedBrowserState(home);
+
+      const login = await runCli(['login', '--base-url', baseUrl, '--no-open'], home, {
+        env: {
+          ONTRACK_HEADLESS: '1',
+          ONTRACK_RELAY_URL: '',
+          ONTRACK_BROWSER_PATH: missingBrowserPath(home),
+        },
+        timeoutMs: 20_000,
+      });
+      assert.equal(login.exitCode, 0, `${login.stdout}\n${login.stderr}`);
+      assert.equal(hits.accessToken, 1, 'exactly one renewal over plain HTTP');
+      // A renewed token is already live: `POST /auth` would answer it with 419.
+      assert.equal(hits.authExchange, 0, 'nothing may be replayed through /auth');
+      assert.doesNotMatch(login.stdout, /probe failed|capture failed/i, 'no browser launch');
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+        source?: string;
+        expiresAt?: string;
       };
-      assert.equal(
-        state.cookies.find((cookie) => cookie.name === 'refresh_token')?.value,
-        REFRESH_TOKEN,
-      );
+      assert.equal(session.authToken, RENEWED_TOKEN);
+      assert.equal(session.source, 'access-token');
+      assert.ok(session.expiresAt && Date.parse(session.expiresAt) > Date.now());
+
+      // The refresh credential stays in place for the next renewal.
+      assert.equal(await storedRefreshToken(home), REFRESH_TOKEN);
     } finally {
       server.close();
       await cleanupHome(home);
@@ -447,6 +504,7 @@ async function runPairingLogin(options: {
   extraEnv?: Record<string, string>;
   /** Defaults to the shape a bookmarklet without the contract field delivers. */
   payload?: PairCredentialPayload;
+  timeoutMs?: number;
 }): Promise<CliResult> {
   let stdoutSoFar = '';
   let delivered: Promise<void> | undefined;
@@ -455,6 +513,7 @@ async function runPairingLogin(options: {
     options.home,
     {
       env: { ONTRACK_HEADLESS: '1', ...options.extraEnv },
+      timeoutMs: options.timeoutMs,
       onStdout: (chunk) => {
         stdoutSoFar += chunk;
         if (delivered) {
@@ -786,6 +845,63 @@ test(
         source?: string;
       };
       assert.equal(session.source, 'pair-relay');
+    } finally {
+      server.close();
+      relay.server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a declined stored refresh cookie falls through to sign-in without a browser probe',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startMock((request) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      if (request.url === '/api/auth/access-token' && request.method === 'POST') {
+        // Production declines a bad/absent refresh cookie with 201 + null.
+        return { status: 201, json: null };
+      }
+      if (request.url === '/api/projects' && request.method === 'GET') {
+        assert.equal(request.headers['auth-token'], PAIRED_TOKEN);
+        return { status: 200, json: [] };
+      }
+      return null;
+    });
+    const relay = await startMockRelay();
+
+    try {
+      await seedBrowserState(home);
+
+      const login = await runPairingLogin({
+        home,
+        baseUrl,
+        relayUrl: relay.relayUrl,
+        extraEnv: {
+          ONTRACK_RELAY_URL: relay.relayUrl,
+          ONTRACK_BROWSER_PATH: missingBrowserPath(home),
+        },
+        timeoutMs: 20_000,
+      });
+      assert.equal(login.exitCode, 0, `${login.stdout}\n${login.stderr}`);
+      assert.equal(hits.accessToken, 1, 'the stored cookie is offered once over HTTP');
+      // A state that only holds a refresh cookie gives a page nothing to hand
+      // back, so a declined cookie must not cost a browser launch.
+      assert.doesNotMatch(login.stdout, /probe failed/i);
+
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      assert.equal(session.authToken, PAIRED_TOKEN);
+      // One declined renewal is not proof the credential is dead.
+      assert.equal(await storedRefreshToken(home), REFRESH_TOKEN);
     } finally {
       server.close();
       relay.server.close();
