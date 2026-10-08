@@ -27,6 +27,7 @@
     "typecheck:tui": "tsc --noEmit -p tsconfig.tui.json",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov && bun scripts/check-coverage.ts",
+    "smoke:dist": "bun scripts/smoke-dist.ts",
     "typecheck": "tsc --noEmit",
     "smoke:real": "bun run build && bun scripts/smoke-real.mjs",
     "spike:lightpanda": "bun scripts/lightpanda-public-spike.ts",
