@@ -5,8 +5,8 @@
 Deep reference for the Agent protocol surface. The
 [README](../README.md#agent-first-usage) holds the copy-paste example block and
 the native command inventory table; this file explains the envelope,
-per-command behavior, structured input, the authentication MCP, watch streams,
-and safe writes.
+per-command behavior, structured input, authentication, watch streams, and
+safe writes.
 
 ## Native caller-first interface
 
@@ -123,49 +123,38 @@ Only fields declared by the command schema are accepted. Unknown fields,
 ambiguous duplicate flags, unsafe object keys, invalid types, and TTY stdin are
 rejected before a business request is sent.
 
-## Use the authentication MCP
+## Keep authentication usable
 
-The package installs a separate stdio server whose scope is deliberately limited
-to authentication:
+Three commands manage the credential lifecycle: `ontrack auth status`,
+`ontrack auth ensure`, and `ontrack auth logout --confirm` (`auth.status`,
+`auth.ensure`, and `auth.logout` through `agent call`). They return lifecycle
+metadata only and never return passwords, Okta challenge values, cookies,
+refresh tokens, OnTrack access tokens, or SSO form data.
 
-```json
-{
-  "mcpServers": {
-    "ontrack-auth": {
-      "command": "ontrack-auth-mcp"
-    }
-  }
-}
-```
+Use `auth ensure --interaction never` during autonomous work. It first reuses a
+valid token, then attempts a silent renewal over plain HTTP using the restricted
+refresh cookie captured at sign-in, and only then falls back to the restricted
+browser state. If Monash policy requires a number challenge, it returns a
+structured human handoff. `--interaction if_required` may open one visible
+browser flow; the Agent resumes after the user completes the Monash-controlled
+step. The default remaining-validity margin is 60 seconds; pass
+`--min-ttl-seconds` to require a longer margin for a specific operation.
 
-It exposes `auth_status`, `auth_ensure`, and `auth_logout`. It never returns
-passwords, Okta challenge values, cookies, refresh tokens, OnTrack access tokens,
-or SSO form data. MCP callers cannot choose a network origin; a non-production
-deployment must be configured by the trusted host through `ONTRACK_BASE_URL`
-before the server starts.
+Business commands apply the same lifecycle automatically. A rejected read may
+silently refresh and replay once. Mutations are never automatically replayed.
 
-Use `auth_ensure` with `interaction: "never"` during autonomous work. It first
-reuses a valid token, then attempts a silent renewal over plain HTTP using the
-restricted refresh cookie captured at sign-in, and only then falls back to the
-restricted browser state. If Monash policy requires a number challenge, it
-returns a structured human handoff. `interaction: "if_required"` may open one
-visible browser flow; the Agent resumes after the user completes the
-Monash-controlled step. The default remaining-validity margin is 60 seconds;
-pass `min_ttl_seconds` (or CLI `--min-ttl-seconds`) to require a longer margin
-for a specific operation.
-
-The CLI applies the same lifecycle automatically. A rejected read may silently
-refresh and replay once. Mutations are never automatically replayed.
-
-`auth_status` (and `auth.status`) report the access token's `expiresAt`, which
-OnTrack keeps short, plus `renewableUntil`, an RFC 3339 instant, while a stored
-refresh cookie can still renew the session. Once the access token has expired,
-the status is `renewable` while that cookie lasts and `expired` after it. A
-`renewable` session needs only `auth_ensure` with `interaction: "never"`, not a
-human. A cookie that names no expiry is `renewable` without a `renewableUntil`.
+`auth.status` reports the access token's `expiresAt`, which OnTrack keeps
+short, plus `renewableUntil`, an RFC 3339 instant, while a stored refresh
+cookie can still renew the session. Once the access token has expired, the
+status is `renewable` while that cookie lasts and `expired` after it. A
+`renewable` session needs only `auth ensure --interaction never`, not a human.
+A cookie that names no expiry is `renewable` without a `renewableUntil`.
 `renewableUntil` is a local estimate: a refresh token the server has revoked
-still reports one until `auth_ensure` fails and the user signs in again or logs
+still reports one until `auth ensure` fails and the user signs in again or logs
 out.
+
+Version 3.0.0 removed the separate `ontrack-auth-mcp` server. These commands
+replace its `auth_status`, `auth_ensure`, and `auth_logout` tools.
 
 ## Apply writes safely
 

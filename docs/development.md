@@ -133,7 +133,7 @@ before connecting. Compatibility work has a hard end-to-end deadline; an
 unsupported provider, failed validation, or deadline returns a stable error
 rather than silently falling back or retrying forever.
 
-The normal HTTP CLI and Auth MCP do not load Playwright or any browser provider.
+The normal HTTP CLI does not load Playwright or any browser provider.
 Lightpanda `serve` currently exposes unauthenticated loopback CDP, so the CLI
 refuses to use it for saved cookies, username/password, MFA, token capture, or
 any real authentication. Real login must use the reviewed Chromium/system

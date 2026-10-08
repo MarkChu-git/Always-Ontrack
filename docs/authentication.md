@@ -279,8 +279,8 @@ The exact-origin browser state used for silent renewal is stored separately:
 
 The directory is restricted to `0700` and the file to `0600` where supported.
 The path is fixed under the operator home and cannot be redirected by
-environment variables. The Auth MCP consumes this state internally but never
-returns it to its caller.
+environment variables. The CLI reads this state internally for silent renewal
+and never prints it.
 
 ## Login flow output
 

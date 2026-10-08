@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  An agent-first CLI, TUI, and authentication MCP for Monash OnTrack / Doubtfire
+  An agent-first CLI and TUI for Monash OnTrack / Doubtfire
 </p>
 
 `ontrack-cli` turns common Monash OnTrack workflows into a single command
@@ -39,9 +39,8 @@ Detailed guides: [authentication](docs/authentication.md) ·
 
 - Authentication and session handling — interactive choice of pairing-relay,
   this-machine browser capture, or terminal username/password, plus
-  manual redirect import, direct token login,
-  silent token renewal from a restricted browser state, and a local
-  `ontrack-auth-mcp` control plane
+  manual redirect import, direct token login, and
+  silent token renewal from a restricted browser state
 - Read access — `projects`, `units`, `tasks`, `inbox`, `task show`, `task resources`
 - Feedback and live tracking — `feedback list`, `feedback watch`, `watch`
 - File operations — `pdf task`, `pdf submission`, `task resources`,
@@ -65,7 +64,7 @@ Global install (recommended):
 bun add --global ontrack-cli
 ```
 
-This provides the `ontrack` and `ontrack-auth-mcp` executables. To run from a
+This provides the `ontrack` executable. To run from a
 source checkout instead:
 
 ```bash
@@ -214,7 +213,7 @@ ontrack agent describe pdf.submission
 ```
 
 Per-command behavior, the `ontrack.agent/v1` envelope and next actions,
-structured input, the authentication MCP, watch streams, and safe writes with
+structured input, authentication, watch streams, and safe writes with
 idempotency keys: [docs/agent-usage.md](docs/agent-usage.md).
 
 ## Command reference
