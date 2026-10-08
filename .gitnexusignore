@@ -6,7 +6,7 @@ AGENTS.md
 docs/agents/
 skills-lock.json
 
-# Graphify is the authoritative portable architecture artifact.
+# Graphify's graph is generated output, not source.
 graphify-out/
 .gitnexus-home/
 
