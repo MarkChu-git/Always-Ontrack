@@ -48,6 +48,7 @@ The workflows never run `smoke:real` or upload browser state, OnTrack sessions, 
 | Situation | Response |
 | --- | --- |
 | CI or package verification fails | Fix through a PR; do not bypass a required check. |
+| A release run needs to be retried | Dispatch it from the tag itself: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. A run dispatched from a branch stops before it builds, because the build provenance names the run's ref. |
 | Tag/version/ancestry check fails | Do not retag a pushed version. Make a new patch version from `master`. |
 | Draft has an extra/missing asset or its SHA256 differs | Stop. Investigate the source/tag; do not overwrite or publish the draft. |
 | npm OIDC fails | Check the Trusted Publisher owner, repository, `release.yml`, Environment, `repository.url`, and `id-token: write`; do not add a long-lived token as a workaround. |

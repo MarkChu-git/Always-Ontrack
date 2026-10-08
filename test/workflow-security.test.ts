@@ -207,8 +207,19 @@ test('release attests the verified tarball before creating the draft', async () 
 test('release accepts only strict vMAJOR.MINOR.PATCH tags', async () => {
   const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
   const script = stepScript(workflow, 'Validate untrusted tag input format');
-  assert.equal((await runStep(script, { TAG: 'v3.0.0' })).exitCode, 0);
+  assert.equal((await runStep(script, { TAG: 'v3.0.0', GITHUB_REF: 'refs/tags/v3.0.0' })).exitCode, 0);
   for (const tag of ['v3.0.0x', 'v03.0.0', 'v3.0', '3.0.0', 'v3.0.0-rc.1', 'v3.0.0\nv9.9.9', '']) {
-    assert.equal((await runStep(script, { TAG: tag })).exitCode, 1, `tag: ${JSON.stringify(tag)}`);
+    const run = await runStep(script, { TAG: tag, GITHUB_REF: `refs/tags/${tag}` });
+    assert.equal(run.exitCode, 1, `tag: ${JSON.stringify(tag)}`);
+  }
+});
+
+test('release refuses a run dispatched from anywhere but the tag it releases', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Validate untrusted tag input format');
+  // The build provenance names the run's ref and commit, so a retry
+  // dispatched from master would attest master instead of the tag it built.
+  for (const ref of ['refs/heads/master', 'refs/tags/v2.4.0', '']) {
+    assert.equal((await runStep(script, { TAG: 'v3.0.0', GITHUB_REF: ref })).exitCode, 1, `ref: ${ref}`);
   }
 });
