@@ -28,16 +28,10 @@ always-ontrack-logo.png
 .gitnexus/
 .gitnexus-home/
 
-# Graphify's portable core graph is committed; machine-local state is not.
-graphify-out/cache/
-graphify-out/cost.json
-graphify-out/manifest.json
-graphify-out/.graphify_python
-graphify-out/.graphify_root
-graphify-out/.needs_update
-graphify-out/memory/
-graphify-out/reflections/
-graphify-out/20??-??-??/
+# Graphify's graph is generated per checkout (`bun run graphify:build`) and
+# never committed: a committed copy put thousands of generated lines in every
+# pull request and conflicted with every other one that refreshed it.
+graphify-out/
 .DS_Store
 npm-debug.log*
 
@@ -47,9 +41,6 @@ npm-debug.log*
 # No HTML is committed to this repository. Generated HTML reports
 # (e.g. graphify-out/graph.html) stay local and are rebuilt on demand.
 *.html
-
-# Graphify machine-local vocabulary cache (regenerated on update).
-graphify-out/.vocab.txt
 
 # Files fetched by scripts/smoke-real.mjs against a live OnTrack session.
 /downloads-smoke
