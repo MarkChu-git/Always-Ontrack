@@ -11,6 +11,7 @@ Complete these settings in the GitHub and npm UIs before enabling registry publi
 3. In npm package settings for `ontrack-cli`, create a Trusted Publisher with owner `MarkChu-git`, repository `Always-Ontrack`, workflow file `release.yml`, and Environment `release`.
 4. Set the repository variable `PUBLISH_TO_NPM` to `true` only after step 3 is verified. Its absence or any value other than the lowercase string `true` keeps the npm job disabled.
 5. Do not configure `NPM_TOKEN`, `NODE_AUTH_TOKEN`, an automation token, or OnTrack credentials. The publish job uses GitHub OIDC and the rest of CI has no secrets.
+6. Keep GitHub secret scanning, push protection, Dependabot alerts, and Dependabot security updates enabled. They were turned on on 2026-10-09.
 
 Do not enable automatic merge for Bun, TypeScript, Playwright, or GitHub Action major-version updates.
 
@@ -35,10 +36,10 @@ Do not enable automatic merge for Bun, TypeScript, Playwright, or GitHub Action 
    git push origin vX.Y.Z
    ```
 
-4. The Release workflow checks out the tag, proves it is annotated and an ancestor of `origin/master`, repeats the Bun verification gates, and creates exactly one package tarball plus a SHA256 manifest.
-5. It creates a draft GitHub Release with that verified tarball. If a draft already exists, it must contain exactly that one tarball and no other asset; the workflow downloads it and refuses to continue unless its SHA256 matches the newly verified artifact. It never replaces or silently removes a release asset.
+4. The Release workflow checks out the tag and proves it is annotated and an ancestor of `origin/master`. It then runs `bun run verify` (which packs the one tarball into `artifacts/`), `bun run verify:graph`, and `bun run audit:check`, and records a SHA256 manifest of that tarball. It never reads the Actions cache.
+5. It attests the build provenance of that verified tarball, then creates a draft GitHub Release with it. If a draft already exists, it must contain exactly that one tarball and no other asset; the workflow downloads it and refuses to continue unless its SHA256 matches the newly verified artifact. It never replaces or silently removes a release asset.
 6. Approve the `release` Environment. When `PUBLISH_TO_NPM` is disabled, approval publishes the GitHub Release only. When it is enabled, approval first publishes the exact verified tarball to npm through OIDC, validates npm name/version/SHA512 integrity, then publishes the GitHub Release.
-7. Verify the public GitHub Release has a single `ontrack-cli-X.Y.Z.tgz` asset and, when registry publishing is enabled, verify `npm view ontrack-cli@X.Y.Z dist.integrity` is present.
+7. Verify the public GitHub Release has a single `ontrack-cli-X.Y.Z.tgz` asset, that `gh attestation verify ontrack-cli-X.Y.Z.tgz --repo MarkChu-git/Always-Ontrack` succeeds for the downloaded asset, and, when registry publishing is enabled, that `npm view ontrack-cli@X.Y.Z dist.integrity` is present.
 
 The workflows never run `smoke:real` or upload browser state, OnTrack sessions, cookies, tokens, downloaded work, `.env` files, or browser profiles.
 

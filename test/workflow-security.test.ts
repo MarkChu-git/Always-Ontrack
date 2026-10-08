@@ -81,21 +81,6 @@ test('release validates the exact single draft asset before reuse and publicatio
   );
 });
 
-test('release rejects modified or unpinned project skills', async () => {
-  const releaseWorkflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
-  assert.match(
-    releaseWorkflow,
-    /Typecheck, test, audit, and build[\s\S]*bun run skills:check[\s\S]*bun run typecheck/,
-  );
-});
-
-test('release gates the published TUI', async () => {
-  const releaseWorkflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
-  assert.match(releaseWorkflow, /bun run typecheck:tui/);
-  assert.match(releaseWorkflow, /bun run test:tui/);
-  assert.match(releaseWorkflow, /test -f dist\/tui\/index\.js/);
-});
-
 test('verify runs every release gate in order', async () => {
   const manifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
@@ -187,4 +172,43 @@ test('CI runs the package scripts instead of inline gates', async () => {
   }
   assert.doesNotMatch(workflow, /bun dist\/cli\.js/);
   assert.doesNotMatch(workflow, /tags:/);
+});
+
+test('release verifies the tag with the package scripts before recording its checksum', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const job = jobBlock(workflow, 'validate-and-pack');
+  assert.match(
+    job,
+    /PACKAGE_OUTPUT_DIR: artifacts\n\s+run: \|\n\s+bun run verify\n\s+bun run verify:graph\n\s+bun run audit:check\n/,
+  );
+  assert.ok(job.indexOf('bun run audit:check') < job.indexOf('sha256sum "$TARBALL" > "$MANIFEST"'));
+});
+
+test('release never reads the Actions cache', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  assert.doesNotMatch(workflow, /actions\/cache@/);
+  assert.match(jobBlock(workflow, 'validate-and-pack'), /no-cache: true/);
+});
+
+test('release attests the verified tarball before creating the draft', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const job = jobBlock(workflow, 'create-draft-release');
+  assert.match(job, /id-token: write/);
+  assert.match(job, /attestations: write/);
+  const checksum = job.indexOf('sha256sum --check "$MANIFEST"');
+  const attest = job.indexOf(
+    'uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2',
+  );
+  const draft = job.indexOf('gh release create');
+  assert.ok(checksum !== -1 && checksum < attest && attest < draft);
+  assert.doesNotMatch(jobBlock(workflow, 'validate-and-pack'), /id-token|attestations/);
+});
+
+test('release accepts only strict vMAJOR.MINOR.PATCH tags', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Validate untrusted tag input format');
+  assert.equal((await runStep(script, { TAG: 'v3.0.0' })).exitCode, 0);
+  for (const tag of ['v3.0.0x', 'v03.0.0', 'v3.0', '3.0.0', 'v3.0.0-rc.1', 'v3.0.0\nv9.9.9', '']) {
+    assert.equal((await runStep(script, { TAG: tag })).exitCode, 1, `tag: ${JSON.stringify(tag)}`);
+  }
 });
