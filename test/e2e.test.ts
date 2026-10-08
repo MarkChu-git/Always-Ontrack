@@ -962,7 +962,7 @@ function runManualPasteLogin(options: {
     env: {
       ONTRACK_HEADLESS: '1',
       ONTRACK_RELAY_URL: '',
-      ONTRACK_BROWSER_PATH: '/nonexistent',
+      ONTRACK_BROWSER_PATH: missingBrowserPath(options.home),
     },
     stdin: options.stdin,
     timeoutMs: 15_000,
