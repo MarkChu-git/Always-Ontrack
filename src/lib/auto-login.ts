@@ -3526,15 +3526,20 @@ async function captureSsoCredentialsInternal(
           const body = await response.json();
           const parsed = extractCredentialsFromAuthPayload(body);
           if (parsed) {
-            const contract = new URL(response.url()).pathname.endsWith(
-              "/api/auth/access-token",
-            )
-              ? "access-token"
-              : "legacy-auth";
+            // doubtfire-api states an expiry with every live token it issues,
+            // from the page's own POST /auth exchange as much as from
+            // /auth/access-token, and POST /auth answers 419 if one of those
+            // is offered back. A token without one is either still pending
+            // (the one-time token from POST /auth/lti) or a pre-11 server's
+            // live token, and the exchange, which those servers accept it
+            // through, is the only way either becomes a session.
+            const isLiveToken =
+              Boolean(parsed.expiresAt) ||
+              new URL(response.url()).pathname.endsWith("/api/auth/access-token");
             setCaptured({
               ...parsed,
               source: "auth_response",
-              contract,
+              contract: isLiveToken ? "access-token" : "legacy-auth",
             });
           }
         } catch {
