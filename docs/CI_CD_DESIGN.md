@@ -57,8 +57,8 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.
 | `test` | 安装 Node 与依赖 → `typecheck` 与 `typecheck:tui` → `test:coverage` → 上传 coverage | 关键路径；coverage 在失败时也上传（`if: always()`） |
 | `tui` | 安装依赖 → `test:tui` | |
 | `package` | 安装 Node 与依赖 → `build` → `smoke:dist` → `package:verify`（`PACKAGE_OUTPUT_DIR=artifacts`）→ 上传 tgz | tgz 只在成功时上传，并设置 `if-no-files-found: error` |
-| `graph` | 安装 Node 与依赖 → 全局 GitNexus 1.6.9 → `verify:graph` | 唯一需要完整 git 历史与 Bun 缓存的 job |
-| `audit` | `audit:check`：PR 与 merge queue 用 `--base`，其它事件做全量审计 | 不需要安装依赖 |
+| `graph` | 安装 Node 与依赖 → 全局 GitNexus 1.6.9 → `verify:graph` | 唯一使用 Bun 缓存的 job；需要完整 git 历史 |
+| `audit` | `audit:check`：PR 与 merge queue 用 `--base`，其它事件做全量审计 | 需要完整 git 历史，才能取出 base commit 的 lockfile；不需要安装依赖 |
 | `hygiene` | `skills:check` → 安装锁定版本的 actionlint 与 zizmor → `actionlint` → `zizmor` → `shellcheck` | 不需要安装依赖；见 §6 |
 | `gate`（显示名 `Verify Bun CLI`） | `needs` 上面全部 job，`if: always()`，任何一个结果不是 `success` 就失败 | ruleset 要求的唯一 CI check |
 
