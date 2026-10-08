@@ -3989,7 +3989,36 @@ async function publishCapturedBrowserSessionState(
   return true;
 }
 
-/** Probe saved state file created by previous automated logins. */
+/**
+ * Whether a page restored from this state could hand the probe a credential.
+ * The probe reads storage, cookies, and the headers a page's auth requests
+ * carry, and a page fills those only from a token the state already holds. A
+ * doubtfire-web 11 state never holds one: the page keeps its API token in
+ * memory and renews it with the HttpOnly refresh cookie, which a caller can
+ * renew over plain HTTP instead.
+ */
+function stateHoldsPageCredential(
+  state: BrowserStorageState,
+  targetOrigin: string,
+): boolean {
+  const storage = state.origins.flatMap((origin) =>
+    origin.localStorage.map((entry) => ({
+      scope: "local" as const,
+      key: entry.name,
+      value: entry.value,
+    })),
+  );
+  return (
+    extractCredentialsFromStorageEntries(storage) !== null ||
+    extractCredentialsFromCookieJar(state.cookies, targetOrigin) !== null
+  );
+}
+
+/**
+ * Probe saved state file created by previous automated logins. A browser is
+ * launched only for a state that holds a page credential (one saved before
+ * doubtfire-web 11); any other claim goes straight back.
+ */
 async function captureCredentialsFromPersistedStateFile(
   options: AutoLoginOptions,
   timeoutMs: number,
@@ -3998,6 +4027,10 @@ async function captureCredentialsFromPersistedStateFile(
   const targetOrigin = new URL(options.apiBaseUrl).origin;
   const claim = claimBrowserSessionState(targetOrigin);
   if (!claim) {
+    return null;
+  }
+  if (!stateHoldsPageCredential(claim.contextOptions.storageState, targetOrigin)) {
+    restoreClaimedBrowserSessionState(claim);
     return null;
   }
 
