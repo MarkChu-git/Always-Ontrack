@@ -196,6 +196,17 @@ interface AuthBrokerContext {
   readonly targetBaseUrl: string;
 }
 
+function createBrokerContext(
+  options: OnTrackAuthBrokerOptions,
+  overrides: Partial<OnTrackAuthBrokerDependencies>,
+): AuthBrokerContext {
+  return {
+    dependencies: { ...defaultDependencies(), ...overrides },
+    options: { ...options },
+    targetBaseUrl: normalizeBaseUrl(options.baseUrl),
+  };
+}
+
 async function loadScopedSession(context: AuthBrokerContext): Promise<SessionData | null> {
   const session = await context.dependencies.loadSession();
   if (!session) return null;
@@ -238,17 +249,25 @@ async function captureSession(
   }
 }
 
+/**
+ * Renew from the stored refresh cookie over plain HTTP. Null when no cookie is
+ * stored, OnTrack declines it, or the request fails.
+ */
+async function renewFromStoredCookie(
+  baseUrl: string,
+  dependencies: OnTrackAuthBrokerDependencies,
+): Promise<SessionData | null> {
+  const cookie = dependencies.readStoredRefreshCookie(baseUrl);
+  return cookie ? sessionFromHttpRefresh(baseUrl, cookie, dependencies) : null;
+}
+
 async function refreshSession(
   context: AuthBrokerContext,
   interactive: boolean,
 ): Promise<SessionData | null> {
-  const { dependencies, targetBaseUrl } = context;
   if (!interactive) {
-    const cookie = dependencies.readStoredRefreshCookie(targetBaseUrl);
-    if (cookie) {
-      const renewed = await sessionFromHttpRefresh(targetBaseUrl, cookie, dependencies);
-      if (renewed) return renewed;
-    }
+    const renewed = await renewFromStoredCookie(context.targetBaseUrl, context.dependencies);
+    if (renewed) return renewed;
   }
   return captureSession(context, interactive);
 }
@@ -319,11 +338,7 @@ export function createOnTrackAuthBroker(
   options: OnTrackAuthBrokerOptions,
   overrides: Partial<OnTrackAuthBrokerDependencies> = {},
 ): OnTrackAuthBroker {
-  const context: AuthBrokerContext = {
-    dependencies: { ...defaultDependencies(), ...overrides },
-    options: { ...options },
-    targetBaseUrl: normalizeBaseUrl(options.baseUrl),
-  };
+  const context = createBrokerContext(options, overrides);
   const runtime: AuthRuntime = createAuthRuntime({
     loadSession: () => loadScopedSession(context),
     saveSession: context.dependencies.saveSession,
