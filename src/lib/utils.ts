@@ -76,11 +76,45 @@ export function parseSsoRedirectUrl(redirectUrl: string): { authToken: string; u
   return { authToken, username };
 }
 
-/** Prompt for a visible (non-sensitive) input value. */
-export async function prompt(question: string): Promise<string> {
-  const rl = createInterface({ input, output });
+/**
+ * Prompt for a visible (non-sensitive) input value.
+ * - rejects when input has ended or ends before an answer (a script or CI job
+ *   with no stdin), so the command fails instead of exiting 0 mid-way
+ * - an unterminated last piped line still counts as the answer
+ * - a terminal Ctrl+C/Ctrl+D keeps readline's own AbortError where the
+ *   runtime raises one (Bun 1.4); Bun 1.3 readline only closes, which reads
+ *   as input closed
+ */
+export async function prompt(
+  question: string,
+  streams: { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream } = {
+    stdin: input,
+    stdout: output,
+  },
+): Promise<string> {
+  const inputClosed = (): Error =>
+    new Error(`Input closed before "${question.trim().replace(/:$/, '')}" was answered.`);
+  // Spent input never emits again, so an interface on it would wait forever.
+  if (!streams.stdin.readable) {
+    throw inputClosed();
+  }
+  const rl = createInterface({ input: streams.stdin, output: streams.stdout });
+  // At EOF readline hands an unterminated last line to 'line' listeners, not
+  // to the pending question.
+  const lastLine = new Promise<string>((resolveLine) => {
+    rl.once('line', resolveLine);
+  });
+  // `rl.question` never settles when input ends without an answer (EOF, a
+  // closed pipe), so the drained event loop would exit 0 mid-command; reject
+  // instead. Wait one turn: on Bun 1.4 a terminal Ctrl+C/Ctrl+D closes the
+  // interface before readline rejects with its own AbortError, which should win.
+  const closed = new Promise<never>((_, reject) => {
+    rl.once('close', () => {
+      setImmediate(() => reject(inputClosed()));
+    });
+  });
   try {
-    return (await rl.question(question)).trim();
+    return (await Promise.race([rl.question(question), lastLine, closed])).trim();
   } finally {
     rl.close();
   }

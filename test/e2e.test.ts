@@ -57,6 +57,8 @@ function runCli(
   options: {
     env?: Record<string, string>;
     onStdout?: (chunk: string) => void;
+    /** Piped to the CLI, then closed; without it stdin is at EOF from the start. */
+    stdin?: string;
     /** Kill a CLI that blocks, e.g. on a prompt that never gets an answer. */
     timeoutMs?: number;
   } = {},
@@ -71,8 +73,11 @@ function runCli(
         NO_COLOR: '1',
         ...options.env,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
+    if (options.stdin !== undefined) {
+      child.stdin?.end(options.stdin);
+    }
     const killTimer =
       options.timeoutMs === undefined
         ? undefined
@@ -943,3 +948,91 @@ test('e2e: --sso conflicts with --auto/--pair fail fast', async () => {
     await cleanupHome(home);
   }
 });
+
+/**
+ * Run `login` where only the manual sign_in URL paste is left: no relay and no
+ * launchable browser. Without `stdin`, the paste prompt finds stdin at EOF.
+ */
+function runManualPasteLogin(options: {
+  home: TestHome;
+  baseUrl: string;
+  stdin?: string;
+}): Promise<CliResult> {
+  return runCli(['login', '--base-url', options.baseUrl, '--no-open'], options.home, {
+    env: {
+      ONTRACK_HEADLESS: '1',
+      ONTRACK_RELAY_URL: '',
+      ONTRACK_BROWSER_PATH: missingBrowserPath(options.home),
+    },
+    stdin: options.stdin,
+    timeoutMs: 15_000,
+  });
+}
+
+test(
+  'e2e: a non-interactive login that cannot obtain credentials fails instead of exiting 0',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl } = await startMock((request) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      return null;
+    });
+
+    try {
+      const login = await runManualPasteLogin({ home, baseUrl });
+      assert.notEqual(login.exitCode, 0, 'a login that saved nothing must not report success');
+      assert.match(login.stderr, /sign_in URL/);
+      assert.match(login.stderr, /\bclosed\b/i);
+      await assert.rejects(() => stat(home.sessionPath));
+    } finally {
+      server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);
+
+test(
+  'e2e: a sign_in URL piped into the manual fallback still completes login',
+  async () => {
+    const home = await makeHome();
+    const { server, baseUrl, hits } = await startMock((request, body) => {
+      if (request.url === '/api/auth/method') {
+        return {
+          status: 200,
+          json: { method: 'saml', redirect_to: 'https://idp.example.test/sso?SAMLRequest=x' },
+        };
+      }
+      if (request.url === '/api/auth' && request.method === 'POST') {
+        const payload = JSON.parse(body) as Record<string, unknown>;
+        assert.equal(payload.auth_token, LANDING_TOKEN);
+        assert.equal(payload.username, USERNAME);
+        return { status: 201, json: signInPayload(ACCESS_TOKEN) };
+      }
+      return null;
+    });
+
+    try {
+      const login = await runManualPasteLogin({
+        home,
+        baseUrl,
+        stdin: `https://ontrack.example.test/sign_in?authToken=${LANDING_TOKEN}&username=${USERNAME}\n`,
+      });
+      assert.equal(login.exitCode, 0, login.stderr);
+      assert.equal(hits.authExchange, 1);
+      const session = JSON.parse(await readFile(home.sessionPath, 'utf8')) as {
+        authToken: string;
+      };
+      assert.equal(session.authToken, ACCESS_TOKEN);
+    } finally {
+      server.close();
+      await cleanupHome(home);
+    }
+  },
+  30_000,
+);

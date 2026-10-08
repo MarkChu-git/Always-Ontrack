@@ -1,10 +1,13 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
+import { createInterface } from 'node:readline/promises';
+import { PassThrough } from 'node:stream';
 import {
   isHeadlessServerEnvironment,
   normalizeBaseUrl,
   resolveExternalOpenCommand,
   parseSsoRedirectUrl,
+  prompt,
   redactSensitiveText,
   resolveLoginMode,
   safeTextForHumanDisplay,
@@ -146,6 +149,61 @@ test('parseSsoRedirectUrl extracts auth token and username', () => {
     authToken: 'abc123',
     username: 'student1',
   });
+});
+
+/** In-memory prompt streams; `terminal` makes readline treat them as a TTY. */
+function promptStreams(terminal = false) {
+  const input = Object.assign(new PassThrough(), terminal ? { isTTY: true, setRawMode: () => {} } : {});
+  const output = Object.assign(new PassThrough(), terminal ? { isTTY: true } : {});
+  output.resume();
+  return { stdin: input, stdout: output };
+}
+
+test('prompt rejects, naming the question, when input ends before an answer', async () => {
+  const streams = promptStreams();
+  const answer = prompt('Paste the sign_in URL from your browser history: ', streams);
+  streams.stdin.end();
+  await assert.rejects(answer, /closed\b.*Paste the sign_in URL from your browser history/i);
+});
+
+test('prompt rejects at once when its input already ended', async () => {
+  const streams = promptStreams();
+  const first = prompt('Monash username: ', streams);
+  streams.stdin.end();
+  await assert.rejects(first);
+  // A later prompt on the spent input must not wait for events that never come.
+  await assert.rejects(prompt('Password: ', streams), /closed\b.*Password/i);
+});
+
+test('prompt takes an unterminated last line as the answer', async () => {
+  const streams = promptStreams();
+  const answer = prompt('Paste the sign_in URL from your browser history: ', streams);
+  streams.stdin.end('https://ontrack.example.test/sign_in?authToken=t&username=u');
+  assert.equal(await answer, 'https://ontrack.example.test/sign_in?authToken=t&username=u');
+});
+
+/** Whether this runtime's readline itself rejects a pending question on Ctrl+C. */
+async function readlineRejectsOnCtrlC(): Promise<boolean> {
+  const { stdin, stdout } = promptStreams(true);
+  const rl = createInterface({ input: stdin, output: stdout });
+  const rejected = rl.question('probe: ').then(() => false, () => true);
+  stdin.write('\x03');
+  const outcome = await Promise.race([
+    rejected,
+    new Promise<boolean>((resolveTimeout) => setTimeout(() => resolveTimeout(false), 100)),
+  ]);
+  rl.close();
+  return outcome;
+}
+
+test('a terminal Ctrl+C keeps readline\'s own abort, or reads as input closed', async () => {
+  // Bun 1.4 readline rejects with AbortError, which prompt must not mask; Bun
+  // 1.3 only closes the interface, which prompt must report rather than hang.
+  const runtimeAborts = await readlineRejectsOnCtrlC();
+  const streams = promptStreams(true);
+  const answer = prompt('Choose method [1]: ', streams);
+  streams.stdin.write('\x03');
+  await assert.rejects(answer, runtimeAborts ? { name: 'AbortError' } : /closed\b.*Choose method/i);
 });
 
 test('shouldMaskPromptInput only masks on tty streams', () => {

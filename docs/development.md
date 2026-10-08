@@ -95,6 +95,7 @@ The repository currently includes:
   - redacted failure output
 - [utils.test.ts](../test/utils.test.ts)
   - base URL and redirect URL utilities
+  - prompts that fail, instead of exiting 0, when stdin closes unanswered
 - [whoami.test.ts](../test/whoami.test.ts)
   - allowlisted identity projection
   - JSON and human-output secret regression checks

@@ -37,6 +37,15 @@ Or install a reviewed, pinned Playwright Chromium runtime manually:
 bunx playwright@1.58.2 install chromium
 ```
 
+## `Input closed before "..." was answered`
+
+Stdin ended before an interactive prompt got an answer, as in a script or CI
+job with no input attached, so the command fails with a non-zero exit instead
+of continuing without one. Run it in an interactive terminal. From `login`, the
+prompt is most often the manual redirect URL paste that follows a failed browser
+capture or pairing attempt (`--sso` also prompts for the username, password, and
+MFA); see [authentication.md](authentication.md) for the other ways to sign in.
+
 ## `419 Authentication Timeout`
 
 The server rejected the cached access token. First ask the auth runtime to renew
