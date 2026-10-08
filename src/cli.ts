@@ -37,8 +37,7 @@ import {
 import type { LoginCredentials, MfaMethodOption } from './lib/auto-login.js';
 import {
   finalizeCapturedLogin,
-  sessionFromAccessTokenCapture,
-  signInAndPersistRefreshCookie,
+  finalizeStoredBrowserCapture,
 } from './lib/login-finalize.js';
 import {
   applyStudentStatusTrigger,
@@ -1803,34 +1802,7 @@ async function handleLogin(args: string[]): Promise<void> {
 
           if (reused) {
             try {
-              const savedAt = new Date().toISOString();
-              const reusedSession =
-                reused.contract === 'access-token'
-                  ? sessionFromAccessTokenCapture(api.base, reused, savedAt)
-                  : await (async (): Promise<SessionData> => {
-                      // Legacy URL/request captures still require the observed
-                      // `/auth` exchange before they become an API session.
-                      const response = await signInAndPersistRefreshCookie(api, {
-                        auth_token: reused.authToken,
-                        username: reused.username,
-                        remember: true,
-                      });
-                      return {
-                        baseUrl: api.base,
-                        username: reused.username,
-                        authToken: response.auth_token,
-                        user: response.user,
-                        savedAt,
-                        expiresAt:
-                          response.auth_token_expiry ??
-                          (response.auth_token === reused.authToken
-                            ? reused.expiresAt
-                            : undefined),
-                        source: 'browser-sso',
-                        refreshedAt: savedAt,
-                      };
-                    })();
-              await saveSession(reusedSession);
+              const reusedSession = await finalizeStoredBrowserCapture(api, reused);
               renderTerminalEvent(
                 `Reused existing browser session (${reused.source}). Skipping interactive sign-in.`,
                 'success',

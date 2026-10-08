@@ -60,6 +60,14 @@ export class PairedCredentialRejectedError extends Error {
   }
 }
 
+/** Raised when OnTrack refuses the live token a saved browser session held. */
+export class StoredBrowserCredentialRejectedError extends Error {
+  constructor() {
+    super('OnTrack rejected the credential held by the saved browser session.');
+    this.name = 'StoredBrowserCredentialRejectedError';
+  }
+}
+
 function persistCapturedRefreshCookie(
   cookie: RefreshCookieMaterial | undefined,
   baseUrl: string,
@@ -247,6 +255,39 @@ async function sessionFromPairedCredential(
   } catch (error) {
     translatePairedAuthRejection(error);
   }
+}
+
+/**
+ * Persist a credential the stored-browser-session probe read back out of a
+ * page. Only the sign_in landing URL's one-time login token is pending, and
+ * only it goes through the `/auth` exchange. Everything else a page holds — its
+ * storage, its cookies, the headers its requests carry — is its live API token,
+ * which `POST /auth` answers with 419, so it is kept as it is once one
+ * authenticated read leaves no definite rejection.
+ */
+export async function finalizeStoredBrowserCapture(
+  api: OnTrackApiClient,
+  captured: LoginCredentials,
+  reportDiagnostic: AuthDiagnosticSink = reportAuthDiagnosticToStderr,
+): Promise<SessionData> {
+  const savedAt = new Date().toISOString();
+  const material: CapturedLoginMaterial = {
+    authToken: captured.authToken,
+    username: captured.username,
+    expiresAt: captured.expiresAt,
+    source: 'browser-sso',
+  };
+  let session: SessionData;
+  if (captured.contract === 'legacy-auth') {
+    session = await sessionFromExchange(api, material, savedAt, reportDiagnostic);
+  } else {
+    session = sessionFromLiveCredential(api.base, material, savedAt);
+    if ((await verifyLiveCredential(api, session)) === 'rejected') {
+      throw new StoredBrowserCredentialRejectedError();
+    }
+  }
+  await saveSession(session);
+  return session;
 }
 
 /**

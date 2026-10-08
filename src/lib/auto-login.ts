@@ -3784,6 +3784,19 @@ async function probeCredentialsInOpenContext(
   });
 
   const checkCaptured = async (): Promise<LoginCredentials | null> => {
+    const found = await findCaptured();
+    // Only the sign_in landing URL carries a pending one-time login token.
+    // Storage, cookies and request headers hold the page's live API token,
+    // which POST /auth answers with 419.
+    return (
+      found && {
+        ...found,
+        contract: found.source === "url" ? "legacy-auth" : "access-token",
+      }
+    );
+  };
+
+  const findCaptured = async (): Promise<LoginCredentials | null> => {
     if (capturedFromRequestHeaders) {
       return capturedFromRequestHeaders;
     }

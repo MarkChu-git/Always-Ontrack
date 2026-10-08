@@ -407,6 +407,32 @@ test('broker falls back to browser capture when the HTTP refresh is declined', a
   assert.equal(browserCaptures, 1);
 });
 
+test('broker never replays a stored-browser page token through the /auth exchange', async () => {
+  // The probe marks a token read from page storage, cookies or request headers
+  // live. POST /auth answers 419 for one, and without an expiry it cannot
+  // become a lifecycle-aware session either, so the broker asks for sign-in.
+  let exchanges = 0;
+  const broker = createOnTrackAuthBroker(
+    { baseUrl: expiredSession.baseUrl },
+    dependencies({
+      captureStoredSession: async () => ({
+        username: 'student1',
+        authToken: 'page-token',
+        source: 'local_storage',
+        contract: 'access-token',
+      }),
+      exchangeLegacyCredential: async () => {
+        exchanges += 1;
+        throw new Error('419 Authentication Timeout');
+      },
+    }),
+  );
+
+  const result = await broker.ensure({ interaction: 'never' });
+  assert.equal(result.status, 'auth_required');
+  assert.equal(exchanges, 0);
+});
+
 test('broker persists a refresh cookie captured during the legacy exchange', async () => {
   let persisted: { cookie: unknown; baseUrl: string } | undefined;
   const broker = createOnTrackAuthBroker(

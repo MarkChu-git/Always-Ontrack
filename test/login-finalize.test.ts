@@ -7,7 +7,9 @@ import { OnTrackApiClient } from '../src/lib/api.js';
 import { OnTrackHttpError, OnTrackTransportError } from '../src/lib/auth.js';
 import {
   finalizeCapturedLogin,
+  finalizeStoredBrowserCapture,
   PairedCredentialRejectedError,
+  StoredBrowserCredentialRejectedError,
   type CapturedLoginMaterial,
 } from '../src/lib/login-finalize.js';
 
@@ -259,4 +261,65 @@ test('a browser access-token capture still persists with no HTTP at all', async 
   assert.equal(session.authToken, 'browser-access-token');
   assert.equal(session.source, 'access-token');
   assert.equal(calls.length, 0);
+});
+
+test('a live credential from a stored browser page is kept as-is unless OnTrack rejects it', async () => {
+  // The probe marks storage, cookie and request-header tokens live, and
+  // `POST /auth` answers 419 for one of those. A 403 or 5xx says nothing about
+  // the credential itself.
+  for (const status of [200, 403, 500]) {
+    const calls = mockFetch((url, init) => {
+      assert.match(url, /\/api\/projects$/);
+      assert.equal(new Headers(init?.headers).get('Auth-Token'), 'page-token');
+      return jsonResponse([], status);
+    });
+
+    const session = await finalizeStoredBrowserCapture(new OnTrackApiClient(BASE_URL), {
+      authToken: 'page-token',
+      username: 'student1',
+      source: 'local_storage',
+      contract: 'access-token',
+    });
+
+    assert.equal(session.authToken, 'page-token', `status ${status}`);
+    assert.equal(session.source, 'browser-sso');
+    assert.deepEqual(calls.map((call) => call.method), ['GET'], `status ${status}`);
+    assert.match(await readPersistedSession(), /page-token/);
+  }
+});
+
+test('a stored browser credential OnTrack rejects is never offered to the /auth exchange', async () => {
+  const calls = mockFetch(() => jsonResponse({ error: 'Authentication token expired.' }, 419));
+
+  await assert.rejects(
+    () =>
+      finalizeStoredBrowserCapture(new OnTrackApiClient(BASE_URL), {
+        authToken: 'dead-page-token',
+        username: 'student1',
+        source: 'auth_request',
+        contract: 'access-token',
+      }),
+    StoredBrowserCredentialRejectedError,
+  );
+  assert.deepEqual(calls.map((call) => call.method), ['GET']);
+  await assert.rejects(() => stat(join(configRoot, 'ontrack-cli', 'session.json')));
+});
+
+test('a pending landing-URL token from a stored browser session goes through the /auth exchange', async () => {
+  // The probe marks only the sign_in landing URL's one-time login token pending.
+  const calls = mockFetch((url) => {
+    assert.match(url, /\/api\/auth$/);
+    return exchangeResponse();
+  });
+
+  const session = await finalizeStoredBrowserCapture(new OnTrackApiClient(BASE_URL), {
+    authToken: 'landing-token',
+    username: 'student1',
+    source: 'url',
+    contract: 'legacy-auth',
+  });
+
+  assert.equal(session.authToken, EXCHANGED_TOKEN);
+  assert.equal(session.source, 'browser-sso');
+  assert.deepEqual(calls.map((call) => call.method), ['POST']);
 });

@@ -367,6 +367,99 @@ test("stored browser capture launches a browser only for a state holding a page 
   }
 });
 
+test("stored browser probe marks a page's own token live and only a landing URL pending", async () => {
+  // Storage, cookies and the headers a page's requests carry hold its live
+  // API token, which POST /auth answers with 419; only the sign_in landing
+  // URL carries a one-time login token that still needs that exchange.
+  const cases: Array<{
+    label: string;
+    landingUrl?: string;
+    storage?: Array<{ scope: "local"; key: string; value: string }>;
+    headers?: Record<string, string>;
+    expected: Record<string, string>;
+  }> = [
+    {
+      label: "landing URL",
+      landingUrl: `${TARGET_ORIGIN}/sign_in?authToken=landing-token&username=student1`,
+      expected: {
+        authToken: "landing-token",
+        username: "student1",
+        source: "url",
+        contract: "legacy-auth",
+      },
+    },
+    {
+      label: "page storage",
+      storage: [
+        { scope: "local", key: "doubtfire_credentials_token", value: "storage-token" },
+        { scope: "local", key: "doubtfire_user", value: '{"username":"student1"}' },
+      ],
+      expected: {
+        authToken: "storage-token",
+        username: "student1",
+        source: "local_storage",
+        contract: "access-token",
+      },
+    },
+    {
+      label: "request headers",
+      headers: { "Auth-Token": "header-token", Username: "student1" },
+      expected: {
+        authToken: "header-token",
+        username: "student1",
+        source: "auth_request",
+        contract: "access-token",
+      },
+    },
+  ];
+  for (const { label, landingUrl, storage, headers, expected } of cases) {
+    await withBrowserState(
+      "ontrack-browser-state-capture-contract-",
+      async (storagePath) => {
+        const handlers = new Map<string, (request: unknown) => void>();
+        let currentUrl = "about:blank";
+        const page = {
+          on: (event: string, handler: (request: unknown) => void) => {
+            handlers.set(event, handler);
+            return page;
+          },
+          url: () => currentUrl,
+          goto: async (url: string) => {
+            currentUrl = landingUrl ?? url;
+            if (headers) {
+              handlers.get("request")?.({
+                url: () => `${TARGET_ORIGIN}/api/auth/signout_url`,
+                headers: () => headers,
+              });
+            }
+            return null;
+          },
+          evaluate: async () => storage ?? null,
+        };
+        const context = {
+          newPage: async () => page,
+          cookies: async () => [],
+          storageState: async () => ({ cookies: [], origins: [] }),
+        };
+        await writeFile(storagePath, JSON.stringify(legacyPageState("stored-token")), "utf8");
+
+        assert.deepEqual(
+          await captureCredentialsFromStoredBrowserSession(
+            captureOptions({
+              launch: async () => ({
+                newContext: async () => context,
+                close: async () => undefined,
+              }),
+            }),
+          ),
+          expected,
+          label,
+        );
+      },
+    );
+  }
+});
+
 test("failed stored browser probe never deletes a concurrently refreshed state generation", async () => {
   await withBrowserState(
     "ontrack-concurrent-browser-state-",
@@ -788,6 +881,7 @@ test("successful stored browser probe never overwrites a concurrent state genera
           authToken: "captured-token",
           username: "captured-user",
           source: "cookie",
+          contract: "access-token",
         },
       );
       assert.deepEqual(
@@ -837,6 +931,7 @@ test("successful stored browser capture restores its claimed state when no fresh
           authToken: "captured-token",
           username: "captured-user",
           source: "cookie",
+          contract: "access-token",
         },
       );
       assert.deepEqual(
@@ -894,6 +989,7 @@ test("failed exclusive publication removes its partial file before restoring sta
           authToken: "captured-token",
           username: "captured-user",
           source: "cookie",
+          contract: "access-token",
         },
       );
       assert.deepEqual(
