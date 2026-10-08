@@ -3,7 +3,7 @@
 GitNexus is this repository's optional local code-intelligence companion to
 Graphify. It uses a local `.gitnexus/` LadybugDB index for symbol context,
 execution-flow search, and change-impact analysis. The index is deliberately
-ignored by Git; Graphify remains the committed, portable architecture graph.
+ignored by Git, like Graphify's graph in `graphify-out/`.
 The MCP registry is isolated in the ignored `.gitnexus-home/` directory, so an
 OnTrack agent cannot enumerate repositories from the user's global registry.
 
