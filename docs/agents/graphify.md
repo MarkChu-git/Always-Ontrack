@@ -1,8 +1,8 @@
 # Graphify
 
 Graphify is a local, generated navigation aid for product-code and
-product-architecture questions. Its portable core is committed under
-`graphify-out/`; machine-local state is ignored.
+product-architecture questions. Every checkout builds its own graph in
+`graphify-out/`, which is gitignored; nothing in it is committed.
 
 ## Pinned toolchain
 
@@ -28,9 +28,11 @@ bun run graphify:setup
 bun run graphify:build
 ```
 
-The bootstrap graph is code-only and requires no model credentials. An agent
-may later invoke the installed Graphify skill for semantic documentation
-extraction and a richer report.
+`graphify:setup` installs the pinned tool once per machine. `graphify:build`
+is needed once per checkout, including each new worktree, and takes a few
+seconds. The bootstrap graph is code-only and requires no model credentials.
+An agent may later invoke the installed Graphify skill for semantic
+documentation extraction and a richer report.
 
 ## Normal use
 
@@ -42,12 +44,11 @@ bun run graphify:update
 bun run graphify:check
 ```
 
-Only run the incremental update when a graph already exists. The committed
-portable files are `graph.json`, `GRAPH_REPORT.md`,
-`.graphify_labels.json`, and its signature. The generated `graph.html`
-report stays local and is gitignored — no HTML is committed to this
-repository. The stat/mtime-based `manifest.json` stays local because
-checkout timestamps are machine-specific.
+Only run the incremental update when a graph already exists. Everything under
+`graphify-out/` stays local: `graph.json`, `GRAPH_REPORT.md`, the community
+labels, the `graph.html` report and the caches. The graph used to be committed,
+but then every product-code pull request carried thousands of generated lines
+and conflicted with any other pull request that refreshed it first.
 
 ## Updating Graphify
 
