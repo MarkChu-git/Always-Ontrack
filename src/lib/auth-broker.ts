@@ -16,6 +16,7 @@ import {
 import { OnTrackApiClient } from './api.js';
 import type { CapturedSignIn } from './api.js';
 import {
+  AUTH_REFRESH_LOCK_TIMEOUT,
   loadSession,
   saveSession,
   withSessionRefreshLock,
@@ -270,6 +271,33 @@ async function refreshSession(
     if (renewed) return renewed;
   }
   return captureSession(context, interactive);
+}
+
+/**
+ * The broker's silent-renewal step on its own, for `ontrack login` to run
+ * before it asks how to sign in: renew the stored refresh cookie over plain
+ * HTTP and save the session, under the same refresh lock, with no browser
+ * fallback. Null when there is nothing to renew from, OnTrack declines the
+ * cookie, or another process holds the lock past its timeout.
+ */
+export async function renewSessionOverHttp(
+  baseUrl: string,
+  overrides: Partial<OnTrackAuthBrokerDependencies> = {},
+): Promise<SessionData | null> {
+  const { dependencies, targetBaseUrl } = createBrokerContext({ baseUrl }, overrides);
+  if (!dependencies.readStoredRefreshCookie(targetBaseUrl)) return null;
+  try {
+    return await dependencies.withRefreshLock(async () => {
+      const renewed = await renewFromStoredCookie(targetBaseUrl, dependencies);
+      if (renewed) await dependencies.saveSession(renewed);
+      return renewed;
+    });
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === AUTH_REFRESH_LOCK_TIMEOUT) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /** A cookie value as OnTrack set it: Rails URL-encodes cookie values. */

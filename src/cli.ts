@@ -227,7 +227,7 @@ import {
   type AgentTaskShowInput,
   type AgentTaskShowOutput,
 } from './lib/agent-commands.js';
-import { createOnTrackAuthBroker } from './lib/auth-broker.js';
+import { createOnTrackAuthBroker, renewSessionOverHttp } from './lib/auth-broker.js';
 import {
   createAuthenticatedApi,
   getUnitTaskDefinitions,
@@ -1683,7 +1683,7 @@ async function promptLoginMethod(pairingAvailable: boolean): Promise<LoginMethod
  *
  * Priority:
  * - direct token/login flags when provided
- * - stored browser-session reuse
+ * - stored refresh-cookie renewal over plain HTTP, then stored browser-session reuse
  * - interactive method choice (this machine / pairing / terminal)
  * - browser-assisted and manual redirect as fallback paths
  */
@@ -1790,8 +1790,19 @@ async function handleLogin(args: string[]): Promise<void> {
         hasRedirectUrl: Boolean(redirectUrl),
       });
 
-      // Fast-path: if we already have a reusable browser session state, skip re-auth prompts.
+      // Fast-path: reuse the stored sign-in before asking how to sign in. A
+      // stored refresh cookie renews over plain HTTP through the auth broker's
+      // own silent-renewal step, under its refresh lock; no browser is needed.
       if (loginMode !== 'manual') {
+        const renewed = await renewSessionOverHttp(api.base);
+        if (renewed) {
+          renderTerminalEvent(
+            'Renewed the saved session with its refresh cookie. Skipping interactive sign-in.',
+            'success',
+          );
+          renderLoginSuccessPanel(renewed);
+          return;
+        }
         try {
           const reused = await captureCredentialsFromStoredBrowserSession({
             ssoUrl: redirectTo,
