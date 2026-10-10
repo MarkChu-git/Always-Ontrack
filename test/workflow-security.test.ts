@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'bun:test';
@@ -153,6 +153,19 @@ test('CI audits a pull request against its base and every other event in full', 
   } finally {
     await rm(fakeBin, { recursive: true, force: true });
   }
+});
+
+test('every workflow installs from the lockfile without lifecycle scripts', async () => {
+  // The root prepare script runs a full build, and release must build only once.
+  const installs: string[] = [];
+  for (const name of await readdir(workflowRoot)) {
+    const workflow = await readFile(new URL(name, workflowRoot), 'utf8');
+    for (const install of workflow.match(/bun install(?! -g)[^\n]*/g) ?? []) {
+      installs.push(`${name}: ${install}`);
+      assert.match(install, /^bun install --frozen-lockfile --ignore-scripts$/, `${name}: ${install}`);
+    }
+  }
+  assert.ok(installs.length >= 6, installs.join('\n'));
 });
 
 test('CI runs the package scripts instead of inline gates', async () => {

@@ -49,7 +49,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install exactly from the lockfile
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Verify the native TypeScript compiler
         run: >-
