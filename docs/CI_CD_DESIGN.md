@@ -31,7 +31,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.
 
 ## 3. 命令分层
 
-所有验证逻辑都写成 `package.json` script。workflow 只调用这些 script，不写内联的验证逻辑。
+所有验证逻辑都写成 `package.json` script。workflow 只调用这些 script，不写内联的验证逻辑。唯一的例外是 `hygiene` job 的 actionlint、zizmor 与 shellcheck：它们只在 CI 运行，用的是 CI 安装的锁定版本（§6），所以 workflow 直接调用它们，`verify` 也不包含它们。
 
 | 命令 | 内容 | 谁调用 |
 | --- | --- | --- |
@@ -89,7 +89,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.
 
 ## 6. Workflow 与供应链加固
 
-- **扫描 workflow**：`hygiene` job 用 `scripts/ci/install-pinned-tools.sh` 安装 actionlint 1.7.12 与 zizmor 1.30.1 的 linux x86_64 二进制，安装前按 SHA-256 校验。校验值取自上游 GitHub release 的 asset digest，不取自下载下来的文件；2026-10-09 核对过：actionlint 为 `8aca8db9…49a3d8`，zizmor 为 `e65324f4…046e1a`。shellcheck 用 runner 镜像自带的版本（ubuntu-24.04 上是 0.9.0），actionlint 也会用它检查 `run:` 脚本。zizmor 以离线模式扫描 `.github/`，包括 workflow 与 `dependabot.yml`。现有 finding 在同一个分支修掉；确实要接受的写进 `.github/zizmor.yml` 并注明原因。
+- **扫描 workflow**：`hygiene` job 用 `scripts/ci/install-pinned-tools.sh` 安装 actionlint 1.7.12 与 zizmor 1.30.1 的 linux x86_64 二进制，安装前按 SHA-256 校验。校验值取自上游 GitHub release 的 asset digest，不取自下载下来的文件；2026-10-09 核对过：actionlint 为 `8aca8db9…49a3d8`，zizmor 为 `e65324f4…b46e1a`。shellcheck 用 runner 镜像自带的版本（ubuntu-24.04 上是 0.9.0），actionlint 也会用它检查 `run:` 脚本。zizmor 以离线模式扫描 `.github/`，包括 workflow 与 `dependabot.yml`。现有 finding 在同一个分支修掉；确实要接受的写进 `.github/zizmor.yml` 并注明原因。
 - **Actions 固定到 commit SHA**，带版本注释，由 Dependabot 更新。这一条是现状，保持不变。
 - **Dependabot**：bun 与 github-actions 都设置 `cooldown.default-days: 7`。cooldown 只作用于版本更新，安全更新不受影响。新增 `@opentui/*` 分组，core 与 react 必须一起升级。2026-09 这两个包被拆成 #74、#75 分别升级，装出了两份 `@opentui/core`，类型检查因此失败。
 - **本地的 7 天规则**：`bunfig.toml` 设置 `install.minimumReleaseAge = 604800`，本地的 `bun add` 与 `bun update` 只解析发布满 7 天的版本。它只影响新版本的解析，已经写进 `bun.lock` 的版本照常安装；2026-10-09 用 Bun 1.3.14 验证过 `--frozen-lockfile` 不受影响。如果需要一个不满 7 天的安全修复，就把该包写进 `minimumReleaseAgeExcludes`，等修复版本满 7 天后再移除。已知风险：如果 Dependabot 的 bun 更新器也读取这个设置，它可能解析不出不满 7 天的安全修复；遇到时按上面的例外办法手动开 PR。
