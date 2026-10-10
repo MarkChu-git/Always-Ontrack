@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import { verifyPackageTarball, type PackageVerification } from './verify-package.ts';
 
 export interface PackedPackage {
@@ -11,16 +11,30 @@ export interface PackedPackage {
 }
 
 /**
+ * Resolve the output directory against the package root and refuse one outside
+ * it, so PACKAGE_OUTPUT_DIR can only place the tarball inside the checkout.
+ */
+function outputDirectoryInside(packageRoot: string, outputDir: string): string {
+  const root = resolve(packageRoot);
+  const destination = resolve(root, outputDir);
+  if (!destination.startsWith(root + sep)) {
+    throw new Error(`PACKAGE_OUTPUT_DIR must name a directory inside ${root}: ${outputDir}`);
+  }
+  return destination;
+}
+
+/**
  * Pack the already-built package once and verify that exact tarball. With an
- * output directory the tarball stays there for upload; without one it goes
- * to a temporary directory that is removed afterwards.
+ * output directory, which must be inside the package root, the tarball stays
+ * there for upload; without one it goes to a temporary directory that is
+ * removed afterwards.
  */
 export async function packAndVerify(
   packageRoot: string,
   outputDir?: string,
 ): Promise<PackedPackage> {
   const destination = outputDir
-    ? resolve(outputDir)
+    ? outputDirectoryInside(packageRoot, outputDir)
     : await mkdtemp(join(tmpdir(), 'ontrack-pack-'));
   try {
     await mkdir(destination, { recursive: true });

@@ -46,8 +46,8 @@ async function withPackage(run: (root: string, scratch: string) => Promise<void>
 }
 
 test('packAndVerify keeps the verified tarball in the output directory', async () => {
-  await withPackage(async (root, scratch) => {
-    const outputDir = join(scratch, 'artifacts');
+  await withPackage(async (root) => {
+    const outputDir = join(root, 'artifacts');
     const result = await packAndVerify(root, outputDir);
 
     assert.equal(result.kept, true);
@@ -67,14 +67,27 @@ test('packAndVerify removes its temporary directory without an output directory'
 });
 
 test('packAndVerify verifies the fresh tarball when the output directory holds an older one', async () => {
-  await withPackage(async (root, scratch) => {
-    const outputDir = join(scratch, 'artifacts');
+  await withPackage(async (root) => {
+    const outputDir = join(root, 'artifacts');
     await mkdir(outputDir);
     await writeFile(join(outputDir, 'ontrack-cli-0.2.0.tgz'), 'not a tarball');
 
     const result = await packAndVerify(root, outputDir);
 
     assert.equal(result.tarballPath, join(outputDir, 'ontrack-cli-0.3.0.tgz'));
+  });
+});
+
+test('packAndVerify refuses an output directory outside the package root', async () => {
+  await withPackage(async (root, scratch) => {
+    for (const outputDir of [join(scratch, 'artifacts'), '../artifacts', '.', root]) {
+      await assert.rejects(
+        () => packAndVerify(root, outputDir),
+        /PACKAGE_OUTPUT_DIR must name a directory inside /,
+        outputDir,
+      );
+    }
+    await assert.rejects(() => stat(join(scratch, 'artifacts')));
   });
 });
 

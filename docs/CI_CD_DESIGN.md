@@ -38,7 +38,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.
 | `verify:fast` | `typecheck`、`typecheck:tui`、`bun test` | 开发者每次改动后 |
 | `verify` | `skills:check`、`typecheck`、`typecheck:tui`、`test:coverage`、`test:tui`、`build`、`smoke:dist`、`package:verify` | 发布前在本机运行；release job |
 | `smoke:dist` | `scripts/smoke-dist.ts`：检查构建产物的 `--help`、TUI bundle 是否存在、`schema auth.method` 与 `capabilities` 的 agent-json 输出 | CI 的 `package` job；`verify` |
-| `package:verify` | `scripts/pack-and-verify.ts`：运行 `bun pm pack --ignore-scripts` 后用 `verify-package.ts` 校验。设置了 `PACKAGE_OUTPUT_DIR` 就把 tgz 留在该目录，否则用临时目录并在结束后删除 | CI 的 `package` job；`verify`；release |
+| `package:verify` | `scripts/pack-and-verify.ts`：运行 `bun pm pack --ignore-scripts` 后用 `verify-package.ts` 校验。设置了 `PACKAGE_OUTPUT_DIR` 就把 tgz 留在该目录（必须在包根目录之内，CI 与 release 用 `artifacts`），否则用临时目录并在结束后删除 | CI 的 `package` job；`verify`；release |
 | `verify:graph` | `gitnexus:analyze`、`gitnexus:status`、`gitnexus:check`、`gitnexus:mcp:check` | CI 的 `graph` job；release |
 | `audit:check` | `scripts/check-audit.ts`，见 §5 | CI 的 `audit` job；release |
 
