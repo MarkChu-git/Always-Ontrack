@@ -153,7 +153,7 @@ A cookie that names no expiry is `renewable` without a `renewableUntil`.
 still reports one until `auth ensure` fails and the user signs in again or logs
 out.
 
-Version 3.0.0 removed the separate `ontrack-auth-mcp` server. These commands
+Version 2.5.0 removed the separate `ontrack-auth-mcp` server. These commands
 replace its `auth_status`, `auth_ensure`, and `auth_logout` tools.
 
 ## Apply writes safely
