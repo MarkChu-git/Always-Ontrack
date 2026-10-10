@@ -359,7 +359,7 @@ async function brokerSignInDueAt(context: AuthBrokerContext): Promise<string | n
 }
 
 /**
- * Create one credential coordinator shared by CLI and Auth MCP callers. Secret
+ * Create one credential coordinator shared by CLI and TUI callers. Secret
  * material stays in injected adapters and SessionData, never in public results.
  */
 export function createOnTrackAuthBroker(

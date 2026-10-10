@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  面向 Agent 的 Monash OnTrack / Doubtfire CLI、TUI 与鉴权 MCP
+  面向 Agent 的 Monash OnTrack / Doubtfire CLI 与 TUI
 </p>
 
 `ontrack-cli` 把 Monash OnTrack 中常见的登录、查看任务、跟踪反馈、下载 PDF、上传
@@ -37,8 +37,7 @@ submission 等操作统一到一个命令面（`ontrack <command>`），默认�
 
 ## 功能概览
 
-- 登录与会话管理——交互选择配对中继或本机浏览器捕获、手动 redirect URL 导入、直接传入 token、从受限浏览器状态静默续期，以及本地
-  `ontrack-auth-mcp` 鉴权控制面
+- 登录与会话管理——交互选择配对中继或本机浏览器捕获、手动 redirect URL 导入、直接传入 token，以及从受限浏览器状态静默续期
 - 学习数据读取——`projects`、`units`、`tasks`、`inbox`、`task show`、`task resources`
 - 反馈与实时跟踪——`feedback list`、`feedback watch`、`watch`
 - 文件能力——`pdf task`、`pdf submission`、`task resources`、
@@ -49,7 +48,7 @@ submission 等操作统一到一个命令面（`ontrack <command>`），默认�
 
 ## 安装
 
-运行环境:HTTP CLI 与 Auth MCP 需要 Bun `1.3.14+`（实验性 Lightpanda provider 额外
+运行环境:HTTP CLI 需要 Bun `1.3.14+`（实验性 Lightpanda provider 额外
 要求 Bun `1.4.0+`）；macOS / Linux / Windows（Lightpanda spike 目前仅限
 macOS/Linux——在实现可执行文件 ACL 校验前，Windows 一律 fail closed）；需要手动安装
 经过审核的浏览器 runtime 时，请保证网络可用。
@@ -60,7 +59,7 @@ macOS/Linux——在实现可执行文件 ACL 校验前，Windows 一律 fail cl
 bun add --global ontrack-cli
 ```
 
-安装后提供 `ontrack` 与 `ontrack-auth-mcp` 两个命令入口。也可以从源码运行:
+安装后提供 `ontrack` 命令入口。也可以从源码运行:
 
 ```bash
 bun install
@@ -201,8 +200,8 @@ ontrack agent list
 ontrack agent describe pdf.submission
 ```
 
-各命令的具体行为、`ontrack.agent/v1` envelope 与 next actions、结构化输入、鉴权
-MCP、watch 流以及基于幂等键的安全写操作详见
+各命令的具体行为、`ontrack.agent/v1` envelope 与 next actions、结构化输入、鉴权、watch
+流以及基于幂等键的安全写操作详见
 [docs/agent-usage.md](docs/agent-usage.md)（英文）。
 
 ## 命令参考

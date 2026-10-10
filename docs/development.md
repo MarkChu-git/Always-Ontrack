@@ -100,12 +100,13 @@ The repository currently includes:
   - allowlisted identity projection
   - JSON and human-output secret regression checks
 
-Minimum recommended validation before release:
+Validation tiers. CI and the release workflow run these same scripts:
 
 ```bash
-bun test
-bun run test:coverage
-bun run build
+bun run verify:fast   # after each change: both typechecks and the test suite
+bun run verify        # before a release: every gate CI runs except GitNexus and the audit
+bun run verify:graph  # GitNexus graph checks; needs the global GitNexus 1.6.9
+bun run audit:check   # full dependency audit; --base <commit> fails only on new advisories
 ```
 
 If you have a valid real session, add:
@@ -113,6 +114,19 @@ If you have a valid real session, add:
 ```bash
 bun run smoke:real -- --project-id <id> --abbr <abbr>
 ```
+
+## Dependency updates
+
+New dependency versions wait seven days before the project adopts them, so a
+compromised release has time to be caught. `bunfig.toml` sets
+`install.minimumReleaseAge` to 604800 seconds, so `bun add` and `bun update`
+resolve only versions published at least that long ago, and Dependabot waits
+the same seven days (`cooldown` in `.github/dependabot.yml`; security updates
+skip the wait). Versions already in `bun.lock` install as usual.
+
+A security fix younger than a week goes into `minimumReleaseAgeExcludes` in
+`bunfig.toml` until it is a week old. Verify a changed lockfile with Bun
+1.3.14, the version CI pins.
 
 ## Coverage thresholds
 
@@ -133,7 +147,7 @@ before connecting. Compatibility work has a hard end-to-end deadline; an
 unsupported provider, failed validation, or deadline returns a stable error
 rather than silently falling back or retrying forever.
 
-The normal HTTP CLI and Auth MCP do not load Playwright or any browser provider.
+The normal HTTP CLI does not load Playwright or any browser provider.
 Lightpanda `serve` currently exposes unauthenticated loopback CDP, so the CLI
 refuses to use it for saved cookies, username/password, MFA, token capture, or
 any real authentication. Real login must use the reviewed Chromium/system

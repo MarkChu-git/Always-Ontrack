@@ -5,8 +5,10 @@ on:
     branches: [master]
   push:
     branches: [master]
-    tags: ['v*']
   merge_group:
+  schedule:
+    # Daily, so new advisories and dependency rot surface without a push.
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -17,8 +19,108 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verify Bun CLI
+  test:
+    name: Test and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      # TypeScript 7's tsc launcher runs under node; pin it instead of the runner's.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+
+      - name: Verify Bun runtime
+        run: test "$(bun --version)" = "1.3.14"
+
+      - name: Install exactly from the lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        run: |
+          bun run typecheck
+          bun run typecheck:tui
+
+      - name: Test and enforce 80% core coverage
+        run: bun run test:coverage
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ci-coverage-${{ github.sha }}
+          path: coverage/lcov.info
+          if-no-files-found: warn
+          retention-days: 14
+
+  tui:
+    name: TUI smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install exactly from the lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Smoke TUI interactions
+        run: bun run test:tui
+
+  package:
+    name: Build and verify package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      # TypeScript 7's tsc launcher runs under node; pin it instead of the runner's.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+
+      - name: Install exactly from the lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build package
+        run: bun run build
+
+      - name: Smoke the built CLI
+        run: bun run smoke:dist
+
+      - name: Pack and verify one release candidate
+        env:
+          PACKAGE_OUTPUT_DIR: artifacts
+        run: bun run package:verify
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-package-${{ github.sha }}
+          path: artifacts/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  graph:
+    name: GitNexus graph
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,24 +133,20 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # GitNexus's LadybugDB analysis needs Node 22 or later.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.18.0
+          node-version: 24.21.0
           package-manager-cache: false
 
+      # Only this job caches: the global GitNexus dependency tree is large.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-1.3.14-${{ hashFiles('bun.lock') }}
-
-      - name: Verify Bun runtime
-        run: test "$(bun --version)" = "1.3.14"
+          key: gitnexus-${{ runner.os }}-bun-1.3.14-gitnexus-1.6.9-${{ hashFiles('bun.lock') }}
 
       - name: Install exactly from the lockfile
-        run: bun install --frozen-lockfile
-
-      - name: Verify pinned project skills
-        run: bun run skills:check
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Install GitNexus toolchain (global, trusted native builds)
         run: |
@@ -56,55 +154,84 @@ jobs:
           bun pm -g trust @ladybugdb/core tree-sitter gitnexus
 
       - name: Verify isolated GitNexus agent graph
-        run: |
-          bun run gitnexus:analyze
-          bun run gitnexus:status
-          bun run gitnexus:check
-          bun run gitnexus:mcp:check
+        run: bun run verify:graph
 
-      - name: Typecheck
-        run: |
-          bun run typecheck
-          bun run typecheck:tui
-
-      - name: Test and enforce 80% core coverage
-        run: bun run test:coverage
-
-      - name: Smoke TUI interactions
-        run: bun run test:tui
-
-      - name: Audit lockfile dependencies
-        run: bun audit
-
-      - name: Build package
-        run: bun run build
-
-      - name: Smoke built CLI help
-        run: |
-          bun dist/cli.js --help
-          test -f dist/tui/index.js
-          # auth-method --help would call the production API: CI gates must stay hermetic.
-          bun dist/cli.js schema auth.method --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.data?.path !== "auth.method") process.exit(1)'
-          test -x dist/auth-mcp.js
-          bun dist/cli.js capabilities --output agent-json | bun -e 'const value = await Bun.stdin.json(); if (value.schema_version !== "ontrack.agent/v1") process.exit(1)'
-
-      - name: Pack one release candidate
-        run: |
-          mkdir -p artifacts
-          bun pm pack --ignore-scripts --destination artifacts --quiet
-          bun scripts/verify-package.ts artifacts/*.tgz
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: ci-coverage-${{ github.sha }}
-          path: coverage/lcov.info
-          if-no-files-found: warn
-          retention-days: 14
+          # The base commit must be present to audit its lockfile.
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          name: ci-package-${{ github.sha }}
-          path: artifacts/*.tgz
-          if-no-files-found: error
-          retention-days: 14
+          bun-version: 1.3.14
+
+      - name: Audit dependencies
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            bun run audit:check --base "$BASE_SHA"
+          else
+            bun run audit:check
+          fi
+
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Verify pinned project skills
+        run: bun run skills:check
+
+      - name: Install pinned workflow scanners
+        run: bash scripts/ci/install-pinned-tools.sh "$RUNNER_TEMP/ci-tools"
+
+      - name: Lint workflows
+        run: |
+          "$RUNNER_TEMP/ci-tools/actionlint" -color
+
+      - name: Audit workflow security
+        run: |
+          "$RUNNER_TEMP/ci-tools/zizmor" --offline --no-progress .github
+
+      - name: Lint shell scripts
+        run: shellcheck scripts/ci/install-pinned-tools.sh
+
+  gate:
+    # The ruleset requires this check by name. A skipped job reports success,
+    # so this job always runs and fails unless every other CI job succeeded.
+    name: Verify Bun CLI
+    needs: [test, tui, package, graph, audit, hygiene]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "CI job results: $RESULTS"
+          if [ -z "$RESULTS" ]; then
+            echo "No CI job results were reported." >&2
+            exit 1
+          fi
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "A CI job did not succeed; see the failed or skipped job above." >&2
+              exit 1
+            fi
+          done
