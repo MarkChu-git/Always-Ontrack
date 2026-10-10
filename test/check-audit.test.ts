@@ -7,6 +7,7 @@ import {
   introducedAdvisories,
   parseAuditReport,
   runAuditCheck,
+  withoutGitRepositoryEnv,
   type Advisory,
 } from '../scripts/check-audit.ts';
 
@@ -52,10 +53,12 @@ interface AuditFixture {
   readonly runtime: string;
 }
 
+// Under a hook, git's own GIT_DIR would point `git init` at the hook's repository,
+// where it can set core.bare = true for every checkout.
 async function git(cwd: string, args: readonly string[]): Promise<string> {
   const child = Bun.spawn(
     ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args],
-    { cwd, stdout: 'pipe', stderr: 'pipe' },
+    { cwd, env: withoutGitRepositoryEnv(), stdout: 'pipe', stderr: 'pipe' },
   );
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
@@ -195,6 +198,39 @@ test('the diff audit fails on an advisory the change introduces', async () => {
       assert.match(result.output, /hono: moderate - Hono test advisory/);
     },
   );
+});
+
+test('the diff audit reads the checkout at cwd when a git hook exports GIT_DIR', async () => {
+  // A hook run from a linked worktree gets GIT_DIR from git. Bun.spawn ignores
+  // later process.env edits, so only a fresh process starts with it set.
+  await withAuditFixture({ base: sdkReport, head: sdkReport }, async (fixture) => {
+    const script = join(import.meta.dir, '..', 'scripts', 'check-audit.ts');
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        '-e',
+        `import { runAuditCheck } from ${JSON.stringify(script)};
+process.exitCode = await runAuditCheck({
+  args: ['--base', ${JSON.stringify(fixture.base)}],
+  cwd: process.cwd(),
+  runtime: ${JSON.stringify(fixture.runtime)},
+});`,
+      ],
+      {
+        cwd: fixture.root,
+        env: { ...process.env, GIT_DIR: join(fixture.root, 'hook-repository') },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    assert.equal(exitCode, 0, stderr);
+    assert.match(stdout, /this change introduces no advisories/);
+  });
 });
 
 test('the audit fails closed when bun audit cannot run', async () => {

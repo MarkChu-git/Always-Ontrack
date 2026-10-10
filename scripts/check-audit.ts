@@ -26,8 +26,25 @@ interface Captured {
   readonly stderr: string;
 }
 
+/**
+ * `process.env` without the variables `git rev-parse --local-env-vars` lists.
+ * Git exports GIT_DIR and the rest to hooks; a hook run from a linked worktree
+ * gets an absolute GIT_DIR, which makes git ignore `cwd` and read that repository.
+ */
+export function withoutGitRepositoryEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  const names = Bun.spawnSync(['git', 'rev-parse', '--local-env-vars']).stdout.toString();
+  for (const name of names.split('\n')) delete env[name];
+  return env;
+}
+
 async function capture(command: readonly string[], cwd: string): Promise<Captured> {
-  const child = Bun.spawn([...command], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([...command], {
+    cwd,
+    env: withoutGitRepositoryEnv(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
