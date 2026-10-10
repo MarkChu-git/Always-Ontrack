@@ -66,6 +66,8 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.
 
 缓存：项目依赖只有约 50 个包，不用缓存时 `bun install` 也只要几秒，所以只有 `graph` job 缓存 Bun 安装目录（全局 GitNexus 的依赖树很大）。缓存 key 包含 OS、Bun 版本、GitNexus 版本和 `bun.lock` 的 hash。release 不使用任何缓存。
 
+安装：每个 `bun install` 都带 `--frozen-lockfile --ignore-scripts`。根目录的 `prepare` script 会运行完整构建，不加这个参数，安装时就会多构建一次，release 也做不到构建只发生一次（§7）。`test/workflow-security.test.ts` 断言每个 workflow 都这样安装。
+
 预期耗时：关键路径（`test` job）约 75–85 秒，加上汇总 job 的启动时间，PR 反馈约 1 分 30 秒。
 
 ## 5. 依赖漏洞审计（`scripts/check-audit.ts`）

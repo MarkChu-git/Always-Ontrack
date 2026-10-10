@@ -21,7 +21,7 @@ Do not enable automatic merge for Bun, TypeScript, Playwright, or GitHub Action 
 2. Wait for required checks to pass. Locally, run the same gates with Bun 1.3.14, the version CI pins. `bun run verify` packs the tarball into a temporary directory and removes it; set `PACKAGE_OUTPUT_DIR` to a directory inside the checkout, such as `artifacts`, to keep it.
 
    ```bash
-   bun install --frozen-lockfile
+   bun install --frozen-lockfile --ignore-scripts
    bun run verify
    bun run verify:graph
    bun run audit:check
