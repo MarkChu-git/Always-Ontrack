@@ -38,19 +38,23 @@ export function withoutGitRepositoryEnv(): Record<string, string | undefined> {
   return env;
 }
 
-async function capture(command: readonly string[], cwd: string): Promise<Captured> {
-  const child = Bun.spawn([...command], {
-    cwd,
-    env: withoutGitRepositoryEnv(),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+async function capture(
+  command: readonly string[],
+  cwd: string,
+  env?: Record<string, string | undefined>,
+): Promise<Captured> {
+  const child = Bun.spawn([...command], { cwd, env, stdout: 'pipe', stderr: 'pipe' });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
   return { exitCode, stdout, stderr };
+}
+
+/** Run git on the repository at `cwd`, even under a hook that set GIT_DIR. */
+function captureGit(args: readonly string[], cwd: string): Promise<Captured> {
+  return capture(['git', ...args], cwd, withoutGitRepositoryEnv());
 }
 
 /** Parse `bun audit --json`: an object that maps package names to advisory lists. */
@@ -113,8 +117,8 @@ async function auditDirectory(cwd: string, runtime: string): Promise<Advisory[]>
 
 async function dependenciesChanged(base: string, cwd: string): Promise<boolean> {
   // `git diff --quiet` exits 0 when the files match base and 1 when they differ.
-  const { exitCode, stderr } = await capture(
-    ['git', 'diff', '--quiet', base, '--', 'package.json', 'bun.lock'],
+  const { exitCode, stderr } = await captureGit(
+    ['diff', '--quiet', base, '--', 'package.json', 'bun.lock'],
     cwd,
   );
   if (exitCode !== 0 && exitCode !== 1) {
@@ -127,7 +131,7 @@ async function writeBaseManifests(base: string, cwd: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ontrack-audit-base-'));
   try {
     for (const file of ['package.json', 'bun.lock']) {
-      const { exitCode, stdout, stderr } = await capture(['git', 'show', `${base}:${file}`], cwd);
+      const { exitCode, stdout, stderr } = await captureGit(['show', `${base}:${file}`], cwd);
       if (exitCode !== 0) {
         throw new Error(`git show ${base}:${file} failed: ${stderr.trim()}`);
       }
