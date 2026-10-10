@@ -19,7 +19,7 @@ OnTrack agent cannot enumerate repositories from the user's global registry.
   lifecycle scripts that build LadybugDB and tree-sitter, and the CLI refuses
   to run without them.
 - Package manager: Bun
-- Runtime: Node.js `>=22` (`24.18.0` in CI)
+- Runtime: Node.js `>=22` (`24.21.0` in CI)
 - MCP transport: local stdio only, through `.codex/config.toml`
 
 GitNexus is licensed under PolyForm Noncommercial 1.0.0. It is a local
