@@ -4,7 +4,7 @@
 
 ## 1. 范围与目标
 
-OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.0.0 起它只有 `ontrack` 一个可执行入口。它不是部署到服务器的服务，所以这里的 CD 指：可复现地构建唯一一个 npm tarball，作为 GitHub Release asset 保存，并在 `release` Environment 审批后通过 OIDC 发布到 npm。
+OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.5.0 起它只有 `ontrack` 一个可执行入口。它不是部署到服务器的服务，所以这里的 CD 指：可复现地构建唯一一个 npm tarball，作为 GitHub Release asset 保存，并在 `release` Environment 审批后通过 OIDC 发布到 npm。
 
 2026-10-09 与维护者确认了四个目标：
 
@@ -157,7 +157,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 3.
 3. `check-audit.ts` 的单元测试覆盖四种情况：依赖没变时 SKIP、继承来的 advisory 不导致失败、新增的 advisory 导致失败、非 JSON 输出导致失败。
 4. `hygiene` job 中的 actionlint 与 zizmor 没有未处理的 finding。
 5. `bun run verify` 在本机通过；RELEASE_RUNBOOK 的本地验证清单只剩 script 调用。
-6. release 的改动不打 tag 就没法端到端运行。在下一次真实发布（3.0.0）时核对 draft、attestation（`gh attestation verify`）与 npm provenance。
+6. release 的改动不打 tag 就没法端到端运行。在下一次真实发布（2.5.0）时核对 draft、attestation（`gh attestation verify`）与 npm provenance。
 
 ## 13. 来源
 
