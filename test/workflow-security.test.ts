@@ -24,13 +24,13 @@ function stepScript(workflow: string, stepName: string): string {
   return body.join('\n');
 }
 
-/** Run a step script the way GitHub's bash shell does. */
+/** Run a step script as GitHub runs a step that sets no `shell:`: `bash -e`, without pipefail. */
 async function runStep(
   script: string,
   env: Record<string, string>,
   cwd?: string,
 ): Promise<{ exitCode: number; stdout: string }> {
-  const child = Bun.spawn(['bash', '--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+  const child = Bun.spawn(['bash', '-e', '-c', script], {
     cwd,
     env: { PATH: process.env.PATH ?? '', ...env },
     stdout: 'pipe',
