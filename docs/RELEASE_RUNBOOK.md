@@ -48,31 +48,12 @@ The workflows never run `smoke:real` or upload browser state, OnTrack sessions, 
 | Situation | Response |
 | --- | --- |
 | CI or package verification fails | Fix through a PR; do not bypass a required check. |
-| A release run failed before publishing to npm | Dispatch it from the tag itself: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. A run dispatched from a branch stops before it builds, because the build provenance names the run's ref. |
+| A release run needs to be retried | Re-run its failed jobs with `gh run rerun <run-id> --failed`; they reuse the run's verified artifact, which is kept for 30 days. After that, dispatch a new run from the tag itself: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. A run dispatched from a branch stops before it builds, because the build provenance names the run's ref. |
 | Tag/version/ancestry check fails | Do not retag a pushed version. Make a new patch version from `master`. |
 | Draft has an extra/missing asset or its SHA256 differs | Stop. Investigate the source/tag; do not overwrite or publish the draft. |
 | npm OIDC fails | Check the Trusted Publisher owner, repository, `release.yml`, Environment, `repository.url`, and `id-token: write`; do not add a long-lived token as a workaround. |
-| npm publish succeeds but the draft remains | Check the registry integrity, then re-run only the failed job; see [Finishing a release that npm already has](#finishing-a-release-that-npm-already-has). Do not dispatch a new run. |
+| npm publish succeeds but the draft remains | Retry the run as above. The npm job skips publishing when npm already has the verified tarball, and refuses any other bytes under that version. The GitHub Release job checks the registry integrity before it publishes. Both still ask for `release` approval. |
 | Released version is defective | Release a new patch. Deprecate the bad immutable registry version with a reason; never overwrite it. |
-
-### Finishing a release that npm already has
-
-When npm has the version but the GitHub Release is still a draft, compare the registry's integrity with the draft asset. The last two commands must print the same value:
-
-```bash
-DRAFT="$(mktemp -d)"
-gh release download vX.Y.Z --repo MarkChu-git/Always-Ontrack --pattern ontrack-cli-X.Y.Z.tgz --dir "$DRAFT"
-npm view ontrack-cli@X.Y.Z dist.integrity
-echo "sha512-$(openssl dgst -sha512 -binary "$DRAFT/ontrack-cli-X.Y.Z.tgz" | openssl base64 -A)"
-```
-
-Then re-run only the failed job of the original run. It reuses that run's verified artifact, which is kept for 30 days, and asks for `release` approval again:
-
-```bash
-gh run rerun <run-id> --failed
-```
-
-Do not dispatch a new run. Its publish job refuses a version that npm already has, so the job that publishes the GitHub Release is skipped.
 
 ## Coverage ratchet maintenance
 

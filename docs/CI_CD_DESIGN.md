@@ -28,6 +28,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 | CodeQL | GitHub default setup，覆盖 actions 与 javascript-typescript | 不新增 `codeql.yml` |
 | 秘密扫描 | GitGuardian app 扫描 PR；2026-10-09 开启了 GitHub secret scanning 与 push protection | 不加 gitleaks |
 | Dependabot | bun 与 github-actions 每周更新；2026-10-09 开启了 Dependabot alerts 与 security updates | 加 cooldown 与 opentui 分组，见 §6 |
+| 可复现构建 | 2026-10-12 在本机（macOS，Bun 1.3.14，`--frozen-lockfile`）重新构建 v2.5.0，tgz 的 SHA-256 与 CI 在 Linux 上构建的相同（`c4462652…`） | 从 tag 重新 dispatch 时，新构建的 tgz 能通过已有 draft 的 SHA-256 校验 |
 
 ## 3. 命令分层
 
@@ -109,6 +110,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 3. tag 输入使用严格的 semver 正则（§6）。
 4. 生成构建证明（§6）。
 5. 核对 registry 之前先等 npm 处理完这次发布。等待按实际经过的时间计算上限，上限比 job 的超时短，给最后一次查询留出时间；等待期间打印 npm 给出的原因；查到以后用同一次返回值核对 name、version 与 integrity。原因：npm 是异步处理发布的，2.5.0 的核对在 `npm publish` 返回 29 秒后得到 E404，draft 因此没有公开。
+6. `publish-npm` 遇到 npm 上已有的这个版本时，integrity 与校验过的 tgz 相同就不再发布，按成功处理；不同就拒绝。这样在 npm 接受上传之后，无论是重跑失败的 job，还是从 tag 重新 dispatch（§2 可复现构建），都能把发布做完。
 
 保持不变的约束：tag 必须是 annotated tag；tag 等于 `v` 加 package.json 的版本号；tag 指向的 commit 必须是 `origin/master` 的祖先；draft 只能有一个 tgz，且 SHA-256 一致；npm 上已存在的版本不覆盖；registry integrity 校验通过后才公开 GitHub Release；公开 draft 必须经过 `release` Environment 审批。
 
@@ -134,7 +136,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 | tag、版本或祖先校验失败 | 不重用已推送的 tag，发新的 patch 版本 |
 | draft 的 asset 数量或 SHA-256 不符 | 停下来调查，不覆盖也不公开 |
 | npm OIDC 失败 | 检查 Trusted Publisher、`release.yml`、Environment、`repository.url` 与 `id-token: write`；不用长期 token 绕过 |
-| npm 已发布但 draft 没有公开 | 核对 registry 的 integrity 与 draft asset 一致后，只重跑失败的 job（`gh run rerun <run-id> --failed`），步骤见 RELEASE_RUNBOOK。不要重新 dispatch：publish-npm 会拒绝 npm 上已有的版本，公开 GitHub Release 的 job 随之被跳过 |
+| npm 已发布但 draft 没有公开 | 30 天内重跑失败的 job（`gh run rerun <run-id> --failed`），之后从 tag 重新 dispatch。publish-npm 发现 npm 上已是同一个 tgz 时跳过发布，公开 GitHub Release 之前仍会核对 registry 的 integrity；两步都要审批 |
 | 已发布的版本有缺陷 | 发新的 patch 版本，对旧版本运行 `npm deprecate`；不覆盖已发布的版本 |
 
 ## 11. 没有采用的 blueprint 内容
