@@ -32,7 +32,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 
 ## 3. 命令分层
 
-所有验证逻辑都写成 `package.json` script。workflow 只调用这些 script，不写内联的验证逻辑。唯一的例外是 `hygiene` job 的 actionlint、zizmor 与 shellcheck：它们只在 CI 运行，用的是 CI 安装的锁定版本（§6），所以 workflow 直接调用它们，`verify` 也不包含它们。
+所有验证逻辑都写成 `package.json` script。workflow 只调用这些 script，不写内联的验证逻辑。例外有两个。一是 `hygiene` job 的 actionlint、zizmor 与 shellcheck：它们只在 CI 运行，用的是 CI 安装的锁定版本（§6），所以 workflow 直接调用它们，`verify` 也不包含它们。二是 release 里 `validate-and-pack` 之后的三个 job：它们不 checkout 仓库，只下载校验过的 tgz，所以对 tgz、draft 与 npm registry 的核对直接写在 workflow 里；其中核对 npm 的两个 step 由 `test/workflow-security.test.ts` 直接执行来测试。
 
 | 命令 | 内容 | 谁调用 |
 | --- | --- | --- |
