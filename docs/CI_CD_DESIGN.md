@@ -100,7 +100,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 
 ## 7. Release（`.github/workflows/release.yml`）
 
-流程与不变量保持不变：`validate-and-pack`（只读）→ `create-draft-release`（`contents: write` 加构建证明）→ `release` Environment 审批 → `publish-npm`（OIDC，仅当 `PUBLISH_TO_NPM=true`）→ `verify-registry-and-publish-release`。
+流程与不变量保持不变：`validate-and-pack`（只读）→ `create-draft-release`（`contents: write` 加构建证明）→ `release` Environment 审批 → `publish-npm`（OIDC，仅当 `PUBLISH_TO_NPM=true`）→ 再次审批 → `verify-registry-and-publish-release`。后两个 job 都绑定 `release` Environment，所以启用 npm 发布时要批准两次。
 
 改动：
 
@@ -108,6 +108,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 2. 不使用缓存（§6）。
 3. tag 输入使用严格的 semver 正则（§6）。
 4. 生成构建证明（§6）。
+5. 核对 registry 之前先等 npm 处理完这次发布：每 15 秒用 `npm view` 查一次，最多等 10 分钟（job 的超时是 15 分钟），查到以后用这一次的返回值核对 name、version 与 integrity。npm 是异步处理发布的，`npm publish` 返回时会提示包"may take a few minutes to become available"。2.5.0 的核对在发布返回 29 秒后执行，得到 E404，而 registry 记录的发布时间是返回后 55 秒，draft 因此没有公开。2.4.0 是在返回约 4 分钟后才记录的，当时第二次审批隔了几个小时，所以没有出问题。
 
 保持不变的约束：tag 必须是 annotated tag；tag 等于 `v` 加 package.json 的版本号；tag 指向的 commit 必须是 `origin/master` 的祖先；draft 只能有一个 tgz，且 SHA-256 一致；npm 上已存在的版本不覆盖；registry integrity 校验通过后才公开 GitHub Release；公开 draft 必须经过 `release` Environment 审批。
 
@@ -133,6 +134,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 | tag、版本或祖先校验失败 | 不重用已推送的 tag，发新的 patch 版本 |
 | draft 的 asset 数量或 SHA-256 不符 | 停下来调查，不覆盖也不公开 |
 | npm OIDC 失败 | 检查 Trusted Publisher、`release.yml`、Environment、`repository.url` 与 `id-token: write`；不用长期 token 绕过 |
+| npm 已发布但 draft 没有公开 | 核对 registry 的 integrity 与 draft asset 一致后，只重跑失败的 job（`gh run rerun <run-id> --failed`），步骤见 RELEASE_RUNBOOK。不要重新 dispatch：publish-npm 会拒绝 npm 上已有的版本，公开 GitHub Release 的 job 随之被跳过 |
 | 已发布的版本有缺陷 | 发新的 patch 版本，对旧版本运行 `npm deprecate`；不覆盖已发布的版本 |
 
 ## 11. 没有采用的 blueprint 内容
