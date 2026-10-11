@@ -108,7 +108,7 @@ OnTrack CLI 是用 Bun 1.3.14 构建、发布到 npm 的 TypeScript CLI。从 2.
 2. 不使用缓存（§6）。
 3. tag 输入使用严格的 semver 正则（§6）。
 4. 生成构建证明（§6）。
-5. 核对 registry 之前先等 npm 处理完这次发布：每 15 秒用 `npm view` 查一次，最多等 10 分钟（job 的超时是 15 分钟），查到以后用这一次的返回值核对 name、version 与 integrity。npm 是异步处理发布的，`npm publish` 返回时会提示包"may take a few minutes to become available"。2.5.0 的核对在发布返回 29 秒后执行，得到 E404，而 registry 记录的发布时间是返回后 55 秒，draft 因此没有公开。2.4.0 是在返回约 4 分钟后才记录的，当时第二次审批隔了几个小时，所以没有出问题。
+5. 核对 registry 之前先等 npm 处理完这次发布。等待按实际经过的时间计算上限，上限比 job 的超时短，给最后一次查询留出时间；等待期间打印 npm 给出的原因；查到以后用同一次返回值核对 name、version 与 integrity。原因：npm 是异步处理发布的，2.5.0 的核对在 `npm publish` 返回 29 秒后得到 E404，draft 因此没有公开。
 
 保持不变的约束：tag 必须是 annotated tag；tag 等于 `v` 加 package.json 的版本号；tag 指向的 commit 必须是 `origin/master` 的祖先；draft 只能有一个 tgz，且 SHA-256 一致；npm 上已存在的版本不覆盖；registry integrity 校验通过后才公开 GitHub Release；公开 draft 必须经过 `release` Environment 审批。
 

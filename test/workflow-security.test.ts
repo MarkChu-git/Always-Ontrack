@@ -100,28 +100,35 @@ test('release waits for npm to finish a publish before checking the registry', a
     const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
     const fakeBin = join(root, 'bin');
     await mkdir(fakeBin);
-    // Stands in for npm: `view` fails as it does while npm is still processing
-    // a publish for the first PENDING_READS calls, then prints the metadata.
-    await writeFile(
-      join(fakeBin, 'npm'),
-      `#!/bin/sh
-reads=$(($(cat "$STATE/reads" 2>/dev/null || echo 0) + 1))
-echo "$reads" > "$STATE/reads"
-if [ "$reads" -le "$PENDING_READS" ]; then
-  echo "npm error 404 No match found for version 9.9.9" >&2
+    // Stand-ins on a fake clock: each npm read takes 5 seconds, records its
+    // arguments and, for the first PENDING_READS reads, fails the way
+    // `npm view --json` does while npm is still processing a publish. sleep
+    // records each wait, and date reads the clock.
+    const fakes: Record<string, string> = {
+      npm: `#!/bin/sh
+echo "$*" >> "$STATE/npm"
+echo 5 >> "$STATE/clock"
+if [ "$(grep -c '' "$STATE/npm")" -le "$PENDING_READS" ]; then
+  echo '{"error":{"code":"E404","summary":"No match found for version 9.9.9"}}'
   exit 1
 fi
 printf '{"name":"ontrack-cli","version":"9.9.9","dist.integrity":"%s"}\\n' "$REGISTRY_INTEGRITY"
 `,
-    );
-    // Records each wait instead of waiting.
-    await writeFile(join(fakeBin, 'sleep'), '#!/bin/sh\necho "$1" >> "$STATE/sleeps"\n');
-    await chmod(join(fakeBin, 'npm'), 0o755);
-    await chmod(join(fakeBin, 'sleep'), 0o755);
+      sleep: '#!/bin/sh\necho "$1" >> "$STATE/sleeps"\necho "$1" >> "$STATE/clock"\n',
+      date: `#!/bin/sh
+[ "$1" = +%s ] || exit 64
+awk '{ elapsed += $1 } END { print 1000000 + elapsed }' "$STATE/clock"
+`,
+    };
+    for (const [name, source] of Object.entries(fakes)) {
+      await writeFile(join(fakeBin, name), source);
+      await chmod(join(fakeBin, name), 0o755);
+    }
 
     const verifyRegistry = async (pendingReads: number, registryIntegrity: string) => {
       const state = await mkdtemp(join(root, 'state-'));
-      const { exitCode } = await runStep(
+      for (const file of ['npm', 'sleeps', 'clock']) await writeFile(join(state, file), '');
+      const { exitCode, stdout } = await runStep(
         script,
         {
           PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
@@ -136,18 +143,32 @@ printf '{"name":"ontrack-cli","version":"9.9.9","dist.integrity":"%s"}\\n' "$REG
         },
         root,
       );
-      const sleeps = await readFile(join(state, 'sleeps'), 'utf8').catch(() => '');
-      return { exitCode, sleeps: sleeps.split('\n').filter(Boolean).map(Number) };
+      const lines = async (file: string): Promise<string[]> =>
+        (await readFile(join(state, file), 'utf8')).split('\n').filter(Boolean);
+      const elapsed = (await lines('clock')).reduce((total, seconds) => total + Number(seconds), 0);
+      return { exitCode, stdout, reads: await lines('npm'), sleeps: (await lines('sleeps')).map(Number), elapsed };
     };
 
+    const read = 'view ontrack-cli@9.9.9 name version dist.integrity --json';
     // The version appears on the fifth read, a minute after the first.
-    assert.deepEqual(await verifyRegistry(4, integrity), { exitCode: 0, sleeps: [15, 15, 15, 15] });
+    const late = await verifyRegistry(4, integrity);
+    assert.equal(late.exitCode, 0);
+    assert.deepEqual(late.reads, Array(5).fill(read));
+    assert.deepEqual(late.sleeps, [15, 15, 15, 15]);
+    assert.match(late.stdout, /not on the registry yet \(No match found for version 9\.9\.9\)/);
     // A version with other bytes fails at once instead of waiting.
-    assert.deepEqual(await verifyRegistry(0, 'sha512-other'), { exitCode: 1, sleeps: [] });
-    // A version that never appears fails after 10 minutes, inside the job's timeout.
+    const other = await verifyRegistry(0, 'sha512-other');
+    assert.deepEqual([other.exitCode, other.reads, other.sleeps], [1, [read], []]);
+    // A version that never appears fails at the first check after 10 minutes,
+    // counting the time npm takes. That leaves the job five minutes, npm's
+    // default fetch timeout, for the last read.
     const missing = await verifyRegistry(1000, integrity);
     assert.equal(missing.exitCode, 1);
-    assert.equal(missing.sleeps.reduce((total, seconds) => total + seconds, 0), 600);
+    assert.ok(missing.elapsed >= 600 && missing.elapsed < 600 + 20, `elapsed: ${missing.elapsed}`);
+    const timeout = /\n {4}timeout-minutes: (\d+)\n/.exec(
+      jobBlock(workflow, 'verify-registry-and-publish-release'),
+    )?.[1];
+    assert.ok(Number(timeout) * 60 >= 600 + 300, `timeout-minutes: ${timeout}`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

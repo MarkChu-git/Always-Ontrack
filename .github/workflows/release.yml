@@ -246,22 +246,21 @@ jobs:
             sha256sum --check "$MANIFEST"
           )
           if test "$PUBLISH_TO_NPM" = true; then
-            # npm finishes a publish asynchronously. The registry recorded 2.5.0
-            # 55 seconds after `npm publish` returned, and 2.4.0 about 4 minutes after.
-            waited=0
-            until REGISTRY="$(npm view "$PACKAGE_NAME@$VERSION" name version dist.integrity --json 2>/dev/null)"; do
-              if test "$waited" -ge 600; then
-                echo "$PACKAGE_NAME@$VERSION did not appear on the registry within 10 minutes" >&2
+            # npm finishes a publish asynchronously: 2.4.0 took about 4 minutes to appear.
+            deadline=$(($(date +%s) + 600))
+            until PUBLISHED="$(npm view "$PACKAGE_NAME@$VERSION" name version dist.integrity --json 2>/dev/null)"; do
+              REASON="$(jq -r '.error.summary' <<< "$PUBLISHED" 2>/dev/null || true)"
+              if test "$(date +%s)" -ge "$deadline"; then
+                echo "$PACKAGE_NAME@$VERSION is still not on the registry after 10 minutes (${REASON:-no error from npm})" >&2
                 exit 1
               fi
-              echo "$PACKAGE_NAME@$VERSION is not on the registry after $waited seconds"
+              echo "$PACKAGE_NAME@$VERSION is not on the registry yet (${REASON:-no error from npm})"
               sleep 15
-              waited=$((waited + 15))
             done
             EXPECTED_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "artifacts/$TARBALL" | openssl base64 -A)"
-            test "$(jq -r '.name' <<< "$REGISTRY")" = "$PACKAGE_NAME"
-            test "$(jq -r '.version' <<< "$REGISTRY")" = "$VERSION"
-            test "$(jq -r '."dist.integrity"' <<< "$REGISTRY")" = "$EXPECTED_INTEGRITY"
+            test "$(jq -r '.name' <<< "$PUBLISHED")" = "$PACKAGE_NAME"
+            test "$(jq -r '.version' <<< "$PUBLISHED")" = "$VERSION"
+            test "$(jq -r '."dist.integrity"' <<< "$PUBLISHED")" = "$EXPECTED_INTEGRITY"
           fi
 
       - name: Publish the approved draft GitHub Release
