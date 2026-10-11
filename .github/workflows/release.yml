@@ -246,10 +246,22 @@ jobs:
             sha256sum --check "$MANIFEST"
           )
           if test "$PUBLISH_TO_NPM" = true; then
-            test "$(npm view "$PACKAGE_NAME@$VERSION" name)" = "$PACKAGE_NAME"
-            test "$(npm view "$PACKAGE_NAME@$VERSION" version)" = "$VERSION"
+            # npm finishes a publish asynchronously. The registry recorded 2.5.0
+            # 55 seconds after `npm publish` returned, and 2.4.0 about 4 minutes after.
+            waited=0
+            until REGISTRY="$(npm view "$PACKAGE_NAME@$VERSION" name version dist.integrity --json 2>/dev/null)"; do
+              if test "$waited" -ge 600; then
+                echo "$PACKAGE_NAME@$VERSION did not appear on the registry within 10 minutes" >&2
+                exit 1
+              fi
+              echo "$PACKAGE_NAME@$VERSION is not on the registry after $waited seconds"
+              sleep 15
+              waited=$((waited + 15))
+            done
             EXPECTED_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "artifacts/$TARBALL" | openssl base64 -A)"
-            test "$(npm view "$PACKAGE_NAME@$VERSION" dist.integrity)" = "$EXPECTED_INTEGRITY"
+            test "$(jq -r '.name' <<< "$REGISTRY")" = "$PACKAGE_NAME"
+            test "$(jq -r '.version' <<< "$REGISTRY")" = "$VERSION"
+            test "$(jq -r '."dist.integrity"' <<< "$REGISTRY")" = "$EXPECTED_INTEGRITY"
           fi
 
       - name: Publish the approved draft GitHub Release

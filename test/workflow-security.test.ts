@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'bun:test';
@@ -27,8 +28,10 @@ function stepScript(workflow: string, stepName: string): string {
 async function runStep(
   script: string,
   env: Record<string, string>,
+  cwd?: string,
 ): Promise<{ exitCode: number; stdout: string }> {
   const child = Bun.spawn(['bash', '--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+    cwd,
     env: { PATH: process.env.PATH ?? '', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -79,6 +82,75 @@ test('release validates the exact single draft asset before reuse and publicatio
     workflow,
     /Publish the approved draft GitHub Release[\s\S]*sha256sum[\s\S]*gh release edit "\$TAG" --draft=false/,
   );
+});
+
+test('release waits for npm to finish a publish before checking the registry', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Verify artifact checksum and registry integrity');
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-release-registry-'));
+  try {
+    const tarball = 'ontrack-cli-9.9.9.tgz';
+    const bytes = 'verified tarball';
+    await mkdir(join(root, 'artifacts'));
+    await writeFile(join(root, 'artifacts', tarball), bytes);
+    await writeFile(
+      join(root, 'artifacts', `${tarball}.sha256`),
+      `${createHash('sha256').update(bytes).digest('hex')}  ${tarball}\n`,
+    );
+    const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+    const fakeBin = join(root, 'bin');
+    await mkdir(fakeBin);
+    // Stands in for npm: `view` fails as it does while npm is still processing
+    // a publish for the first PENDING_READS calls, then prints the metadata.
+    await writeFile(
+      join(fakeBin, 'npm'),
+      `#!/bin/sh
+reads=$(($(cat "$STATE/reads" 2>/dev/null || echo 0) + 1))
+echo "$reads" > "$STATE/reads"
+if [ "$reads" -le "$PENDING_READS" ]; then
+  echo "npm error 404 No match found for version 9.9.9" >&2
+  exit 1
+fi
+printf '{"name":"ontrack-cli","version":"9.9.9","dist.integrity":"%s"}\\n' "$REGISTRY_INTEGRITY"
+`,
+    );
+    // Records each wait instead of waiting.
+    await writeFile(join(fakeBin, 'sleep'), '#!/bin/sh\necho "$1" >> "$STATE/sleeps"\n');
+    await chmod(join(fakeBin, 'npm'), 0o755);
+    await chmod(join(fakeBin, 'sleep'), 0o755);
+
+    const verifyRegistry = async (pendingReads: number, registryIntegrity: string) => {
+      const state = await mkdtemp(join(root, 'state-'));
+      const { exitCode } = await runStep(
+        script,
+        {
+          PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+          STATE: state,
+          PENDING_READS: String(pendingReads),
+          REGISTRY_INTEGRITY: registryIntegrity,
+          PACKAGE_NAME: 'ontrack-cli',
+          VERSION: '9.9.9',
+          TARBALL: tarball,
+          MANIFEST: `${tarball}.sha256`,
+          PUBLISH_TO_NPM: 'true',
+        },
+        root,
+      );
+      const sleeps = await readFile(join(state, 'sleeps'), 'utf8').catch(() => '');
+      return { exitCode, sleeps: sleeps.split('\n').filter(Boolean).map(Number) };
+    };
+
+    // The version appears on the fifth read, a minute after the first.
+    assert.deepEqual(await verifyRegistry(4, integrity), { exitCode: 0, sleeps: [15, 15, 15, 15] });
+    // A version with other bytes fails at once instead of waiting.
+    assert.deepEqual(await verifyRegistry(0, 'sha512-other'), { exitCode: 1, sleeps: [] });
+    // A version that never appears fails after 10 minutes, inside the job's timeout.
+    const missing = await verifyRegistry(1000, integrity);
+    assert.equal(missing.exitCode, 1);
+    assert.equal(missing.sleeps.reduce((total, seconds) => total + seconds, 0), 600);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('verify runs every release gate in order', async () => {
