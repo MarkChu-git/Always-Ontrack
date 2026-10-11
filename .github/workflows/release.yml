@@ -191,7 +191,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Verify artifact checksum and unpublished version
+      - name: Verify artifact checksum and publish it unless npm has it
         env:
           PACKAGE_NAME: ontrack-cli
           VERSION: ${{ needs.validate-and-pack.outputs.version }}
@@ -202,7 +202,13 @@ jobs:
             cd artifacts
             sha256sum --check "$MANIFEST"
           )
-          if npm view "$PACKAGE_NAME@$VERSION" version >/dev/null 2>&1; then
+          if PUBLISHED_INTEGRITY="$(npm view "$PACKAGE_NAME@$VERSION" dist.integrity 2>/dev/null)"; then
+            # A retry after npm accepted this exact tarball has nothing left to publish.
+            EXPECTED_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "artifacts/$TARBALL" | openssl base64 -A)"
+            if test "$PUBLISHED_INTEGRITY" = "$EXPECTED_INTEGRITY"; then
+              echo "npm already has this tarball as $PACKAGE_NAME@$VERSION; not publishing it again"
+              exit 0
+            fi
             echo "refusing to overwrite immutable registry version $PACKAGE_NAME@$VERSION" >&2
             exit 1
           fi
@@ -246,10 +252,21 @@ jobs:
             sha256sum --check "$MANIFEST"
           )
           if test "$PUBLISH_TO_NPM" = true; then
-            test "$(npm view "$PACKAGE_NAME@$VERSION" name)" = "$PACKAGE_NAME"
-            test "$(npm view "$PACKAGE_NAME@$VERSION" version)" = "$VERSION"
+            # npm finishes a publish asynchronously: 2.4.0 took about 4 minutes to appear.
+            deadline=$(($(date +%s) + 600))
+            until PUBLISHED="$(npm view "$PACKAGE_NAME@$VERSION" name version dist.integrity --json 2>/dev/null)"; do
+              REASON="$(jq -r '.error.summary' <<< "$PUBLISHED" 2>/dev/null || true)"
+              if test "$(date +%s)" -ge "$deadline"; then
+                echo "$PACKAGE_NAME@$VERSION is still not on the registry after 10 minutes (${REASON:-no error from npm})" >&2
+                exit 1
+              fi
+              echo "$PACKAGE_NAME@$VERSION is not on the registry yet (${REASON:-no error from npm})"
+              sleep 15
+            done
             EXPECTED_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "artifacts/$TARBALL" | openssl base64 -A)"
-            test "$(npm view "$PACKAGE_NAME@$VERSION" dist.integrity)" = "$EXPECTED_INTEGRITY"
+            test "$(jq -r '.name' <<< "$PUBLISHED")" = "$PACKAGE_NAME"
+            test "$(jq -r '.version' <<< "$PUBLISHED")" = "$VERSION"
+            test "$(jq -r '."dist.integrity"' <<< "$PUBLISHED")" = "$EXPECTED_INTEGRITY"
           fi
 
       - name: Publish the approved draft GitHub Release

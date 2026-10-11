@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'bun:test';
@@ -23,12 +24,14 @@ function stepScript(workflow: string, stepName: string): string {
   return body.join('\n');
 }
 
-/** Run a step script the way GitHub's bash shell does. */
+/** Run a step script as GitHub runs a step that sets no `shell:`: `bash -e`, without pipefail. */
 async function runStep(
   script: string,
   env: Record<string, string>,
+  cwd?: string,
 ): Promise<{ exitCode: number; stdout: string }> {
-  const child = Bun.spawn(['bash', '--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+  const child = Bun.spawn(['bash', '-e', '-c', script], {
+    cwd,
     env: { PATH: process.env.PATH ?? '', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -52,6 +55,31 @@ function jobIds(workflow: string): string[] {
   return lines
     .slice(lines.indexOf('jobs:') + 1)
     .flatMap((line) => /^  ([a-z][a-z0-9-]*):$/.exec(line)?.[1] ?? []);
+}
+
+/** What a release job without a checkout has once it downloads the verified artifact. */
+async function writeReleaseArtifact(
+  root: string,
+): Promise<{ tarball: string; manifest: string; integrity: string }> {
+  const tarball = 'ontrack-cli-9.9.9.tgz';
+  const manifest = `${tarball}.sha256`;
+  const bytes = 'verified tarball';
+  await mkdir(join(root, 'artifacts'));
+  await writeFile(join(root, 'artifacts', tarball), bytes);
+  await writeFile(
+    join(root, 'artifacts', manifest),
+    `${createHash('sha256').update(bytes).digest('hex')}  ${tarball}\n`,
+  );
+  return { tarball, manifest, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` };
+}
+
+/** Write stand-ins for the named commands into a new directory, to put first on PATH. */
+async function writeFakeCommands(directory: string, commands: Record<string, string>): Promise<void> {
+  await mkdir(directory);
+  for (const [name, source] of Object.entries(commands)) {
+    await writeFile(join(directory, name), source);
+    await chmod(join(directory, name), 0o755);
+  }
 }
 
 test('CI never uploads an unverified package from a failed job', async () => {
@@ -79,6 +107,134 @@ test('release validates the exact single draft asset before reuse and publicatio
     workflow,
     /Publish the approved draft GitHub Release[\s\S]*sha256sum[\s\S]*gh release edit "\$TAG" --draft=false/,
   );
+});
+
+test('release waits for npm to finish a publish before checking the registry', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Verify artifact checksum and registry integrity');
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-release-registry-'));
+  try {
+    const artifact = await writeReleaseArtifact(root);
+    const fakeBin = join(root, 'bin');
+    // Stand-ins on a fake clock: each npm read takes 5 seconds, records its
+    // arguments and, for the first PENDING_READS reads, fails the way
+    // `npm view --json` does while npm is still processing a publish. sleep
+    // records each wait, and date reads the clock.
+    await writeFakeCommands(fakeBin, {
+      npm: `#!/bin/sh
+echo "$*" >> "$STATE/npm"
+echo 5 >> "$STATE/clock"
+if [ "$(grep -c '' "$STATE/npm")" -le "$PENDING_READS" ]; then
+  echo '{"error":{"code":"E404","summary":"No match found for version 9.9.9"}}'
+  exit 1
+fi
+printf '{"name":"ontrack-cli","version":"9.9.9","dist.integrity":"%s"}\\n' "$REGISTRY_INTEGRITY"
+`,
+      sleep: '#!/bin/sh\necho "$1" >> "$STATE/sleeps"\necho "$1" >> "$STATE/clock"\n',
+      date: `#!/bin/sh
+[ "$1" = +%s ] || exit 64
+awk '{ elapsed += $1 } END { print 1000000 + elapsed }' "$STATE/clock"
+`,
+    });
+
+    const verifyRegistry = async (pendingReads: number, registryIntegrity: string) => {
+      const state = await mkdtemp(join(root, 'state-'));
+      for (const file of ['npm', 'sleeps', 'clock']) await writeFile(join(state, file), '');
+      const { exitCode, stdout } = await runStep(
+        script,
+        {
+          PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+          STATE: state,
+          PENDING_READS: String(pendingReads),
+          REGISTRY_INTEGRITY: registryIntegrity,
+          PACKAGE_NAME: 'ontrack-cli',
+          VERSION: '9.9.9',
+          TARBALL: artifact.tarball,
+          MANIFEST: artifact.manifest,
+          PUBLISH_TO_NPM: 'true',
+        },
+        root,
+      );
+      const lines = async (file: string): Promise<string[]> =>
+        (await readFile(join(state, file), 'utf8')).split('\n').filter(Boolean);
+      const elapsed = (await lines('clock')).reduce((total, seconds) => total + Number(seconds), 0);
+      return { exitCode, stdout, reads: await lines('npm'), sleeps: (await lines('sleeps')).map(Number), elapsed };
+    };
+
+    const read = 'view ontrack-cli@9.9.9 name version dist.integrity --json';
+    // The version appears on the fifth read, a minute after the first.
+    const late = await verifyRegistry(4, artifact.integrity);
+    assert.equal(late.exitCode, 0);
+    assert.deepEqual(late.reads, Array(5).fill(read));
+    assert.deepEqual(late.sleeps, [15, 15, 15, 15]);
+    assert.match(late.stdout, /not on the registry yet \(No match found for version 9\.9\.9\)/);
+    // A version with other bytes fails at once instead of waiting.
+    const other = await verifyRegistry(0, 'sha512-other');
+    assert.deepEqual([other.exitCode, other.reads, other.sleeps], [1, [read], []]);
+    // A version that never appears fails at the first check after 10 minutes,
+    // counting the time npm takes. That leaves the job five minutes, npm's
+    // default fetch timeout, for the last read.
+    const missing = await verifyRegistry(1000, artifact.integrity);
+    assert.equal(missing.exitCode, 1);
+    assert.ok(missing.elapsed >= 600 && missing.elapsed < 600 + 20, `elapsed: ${missing.elapsed}`);
+    const timeout = /\n {4}timeout-minutes: (\d+)\n/.exec(
+      jobBlock(workflow, 'verify-registry-and-publish-release'),
+    )?.[1];
+    assert.ok(Number(timeout) * 60 >= 600 + 300, `timeout-minutes: ${timeout}`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('release publishes to npm unless npm already has the verified tarball', async () => {
+  const workflow = await readFile(new URL('release.yml', workflowRoot), 'utf8');
+  const script = stepScript(workflow, 'Verify artifact checksum and publish it unless npm has it');
+  const root = await mkdtemp(join(tmpdir(), 'ontrack-release-publish-'));
+  try {
+    const artifact = await writeReleaseArtifact(root);
+    const fakeBin = join(root, 'bin');
+    // Stands in for npm: records its arguments, and `view` prints
+    // REGISTRY_INTEGRITY or, when it is empty, fails like a version npm lacks.
+    await writeFakeCommands(fakeBin, {
+      npm: `#!/bin/sh
+echo "$*" >> "$STATE/npm"
+[ "$1" = view ] || exit 0
+[ -n "$REGISTRY_INTEGRITY" ] || { echo "npm error 404 No match found for version 9.9.9" >&2; exit 1; }
+echo "$REGISTRY_INTEGRITY"
+`,
+    });
+    const publish = async (registryIntegrity: string) => {
+      const state = await mkdtemp(join(root, 'state-'));
+      await writeFile(join(state, 'npm'), '');
+      const { exitCode } = await runStep(
+        script,
+        {
+          PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+          STATE: state,
+          REGISTRY_INTEGRITY: registryIntegrity,
+          PACKAGE_NAME: 'ontrack-cli',
+          VERSION: '9.9.9',
+          TARBALL: artifact.tarball,
+          MANIFEST: artifact.manifest,
+        },
+        root,
+      );
+      const calls = (await readFile(join(state, 'npm'), 'utf8')).split('\n').filter(Boolean);
+      return { exitCode, calls };
+    };
+
+    const view = 'view ontrack-cli@9.9.9 dist.integrity';
+    assert.deepEqual(await publish(''), {
+      exitCode: 0,
+      calls: [view, '--version', 'publish ./artifacts/ontrack-cli-9.9.9.tgz --provenance'],
+    });
+    // A retry after npm accepted this tarball has nothing left to publish.
+    assert.deepEqual(await publish(artifact.integrity), { exitCode: 0, calls: [view] });
+    // npm versions are immutable, so other bytes under this version stop the release.
+    assert.deepEqual(await publish('sha512-other'), { exitCode: 1, calls: [view] });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('verify runs every release gate in order', async () => {

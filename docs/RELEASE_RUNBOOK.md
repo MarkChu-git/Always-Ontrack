@@ -38,7 +38,7 @@ Do not enable automatic merge for Bun, TypeScript, Playwright, or GitHub Action 
 
 4. The Release workflow checks out the tag and proves it is annotated and an ancestor of `origin/master`. It then runs `bun run verify` (which packs the one tarball into `artifacts/`), `bun run verify:graph`, and `bun run audit:check`, and records a SHA256 manifest of that tarball. It never reads the Actions cache.
 5. It attests the build provenance of that verified tarball, then creates a draft GitHub Release with it. If a draft already exists, it must contain exactly that one tarball and no other asset; the workflow downloads it and refuses to continue unless its SHA256 matches the newly verified artifact. It never replaces or silently removes a release asset.
-6. Approve the `release` Environment. When `PUBLISH_TO_NPM` is disabled, approval publishes the GitHub Release only. When it is enabled, approval first publishes the exact verified tarball to npm through OIDC, validates npm name/version/SHA512 integrity, then publishes the GitHub Release.
+6. Approve the `release` Environment. When `PUBLISH_TO_NPM` is disabled, one approval publishes the GitHub Release. When it is enabled, the run asks twice: the first approval publishes the exact verified tarball to npm through OIDC, and the second waits up to 10 minutes for npm to finish processing the publish, validates npm name/version/SHA512 integrity, then publishes the GitHub Release.
 7. Verify the public GitHub Release has a single `ontrack-cli-X.Y.Z.tgz` asset, that `gh attestation verify ontrack-cli-X.Y.Z.tgz --repo MarkChu-git/Always-Ontrack` succeeds for the downloaded asset, and, when registry publishing is enabled, that `npm view ontrack-cli@X.Y.Z dist.integrity` is present.
 
 The workflows never run `smoke:real` or upload browser state, OnTrack sessions, cookies, tokens, downloaded work, `.env` files, or browser profiles.
@@ -48,11 +48,11 @@ The workflows never run `smoke:real` or upload browser state, OnTrack sessions, 
 | Situation | Response |
 | --- | --- |
 | CI or package verification fails | Fix through a PR; do not bypass a required check. |
-| A release run needs to be retried | Dispatch it from the tag itself: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. A run dispatched from a branch stops before it builds, because the build provenance names the run's ref. |
+| A release run needs to be retried | Re-run its failed jobs with `gh run rerun <run-id> --failed`; they reuse the run's verified artifact, which is kept for 30 days. After that, dispatch a new run from the tag itself: `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. A run dispatched from a branch stops before it builds, because the build provenance names the run's ref. |
 | Tag/version/ancestry check fails | Do not retag a pushed version. Make a new patch version from `master`. |
 | Draft has an extra/missing asset or its SHA256 differs | Stop. Investigate the source/tag; do not overwrite or publish the draft. |
 | npm OIDC fails | Check the Trusted Publisher owner, repository, `release.yml`, Environment, `repository.url`, and `id-token: write`; do not add a long-lived token as a workaround. |
-| npm publish succeeds but draft remains | Re-run the workflow against the same tag only after verifying registry metadata. The public GitHub Release remains gated by the Environment. |
+| npm publish succeeds but the draft remains | Retry the run as above. The npm job skips publishing when npm already has the verified tarball, and refuses any other bytes under that version. The GitHub Release job checks the registry integrity before it publishes. Both still ask for `release` approval. |
 | Released version is defective | Release a new patch. Deprecate the bad immutable registry version with a reason; never overwrite it. |
 
 ## Coverage ratchet maintenance
